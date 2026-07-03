@@ -1,0 +1,29 @@
+/specs/
+
+# Node / TypeScript
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Godot
+.godot/
+demo/.godot/
+*.import
+*.uid
+
+# .NET / C#
+bin/
+obj/
+*.user
+*.suo
+*.userprefs
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
+
+# Build artifacts
+*.log
