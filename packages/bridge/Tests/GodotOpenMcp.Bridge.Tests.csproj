@@ -53,12 +53,24 @@
   </ItemGroup>
 
   <!--
-    Compile the dispatcher source directly (Link path mirrors the source tree). The plugin and
-    BridgeSession are editor-boot / Godot-node-coupled and are verified via the headless Godot smoke
-    (P1.9), not here. Add new pure-managed sources to this list as the bridge grows.
+    Compile the bridge sources directly (Link paths mirror the source tree). The plugin and the
+    live Node lifecycle are editor-boot / Godot-node-coupled and are verified via the headless Godot
+    smoke (P1.9), not here. The P1.3 sources compiled here (BridgeBindAddress, BridgeJson,
+    BridgeHttpResponse, BridgeLog, BridgeSession, BridgeHttpServer) are pure-managed for the parts
+    the unit tests exercise: bind-address decisions, JSON shape, /ping readiness, and the HTTP
+    integration test that starts a real HttpListener on a free port. The Godot-API call paths
+    (BridgeSession.InitializeForEnable, GD.Print in the listener lifecycle) are never reached by
+    the unit tests — the integration test swaps BridgeLog's sinks to no-ops and the session tests
+    use the *ForTests seams — so the binary-less host never faults.
   -->
   <ItemGroup>
     <Compile Include="..\Runtime\MainThread\MainThreadDispatcher.cs" Link="Source\MainThreadDispatcher.cs" />
+    <Compile Include="..\Editor\Bridge\BridgeBindAddress.cs" Link="Source\BridgeBindAddress.cs" />
+    <Compile Include="..\Editor\Bridge\BridgeJson.cs" Link="Source\BridgeJson.cs" />
+    <Compile Include="..\Editor\Bridge\BridgeHttpResponse.cs" Link="Source\BridgeHttpResponse.cs" />
+    <Compile Include="..\Editor\Bridge\BridgeLog.cs" Link="Source\BridgeLog.cs" />
+    <Compile Include="..\Editor\Bridge\BridgeSession.cs" Link="Source\BridgeSession.cs" />
+    <Compile Include="..\Editor\Bridge\BridgeHttpServer.cs" Link="Source\BridgeHttpServer.cs" />
   </ItemGroup>
 
 </Project>

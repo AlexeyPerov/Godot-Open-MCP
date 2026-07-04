@@ -10,13 +10,12 @@ namespace GodotOpenMcp.Bridge.Editor
     /// <c>addons/godot_open_mcp/plugin.cfg</c> (the <c>script</c> field) and loaded
     /// by the Godot Editor when the plugin is enabled.
     ///
-    /// Owns bridge startup and shutdown so later phases can register the HTTP
-    /// server and <c>/ping</c> (P1.3) and the instance lock (P1.4) on a stable
-    /// lifecycle surface. The main-thread dispatcher (P1.2) is installed here and
+    /// Owns bridge startup and shutdown: P1.2 installs the main-thread dispatcher
+    /// and P1.3 starts the HTTP listener serving <c>GET /ping</c>; P1.4 will add
+    /// the instance lock on the same lifecycle surface. The main-thread dispatcher
     /// is the single thread-marshaling path every HTTP handler routes editor API
     /// calls through — no handler calls <c>EditorInterface</c> / scene-tree APIs
-    /// directly off the worker thread. No HTTP endpoints or tool dispatch live
-    /// here yet.
+    /// directly off the worker thread.
     ///
     /// Lifecycle mirrors the Unity bridge (<c>BridgeHttpServer</c> static init /
     /// <c>OnBeforeAssemblyReload</c> / <c>OnQuitting</c>) adapted to Godot's
@@ -75,6 +74,17 @@ namespace GodotOpenMcp.Bridge.Editor
                 _dispatcher = new MainThreadDispatcher { Name = "GodotOpenMcpMainThreadDispatcher" };
                 AddChild(_dispatcher);
 
+                // Cache the session's static state (project path, Godot version) BEFORE the
+                // HTTP listener starts so /ping has a deterministic payload from the first
+                // probe. Runs on the main thread (here) so it may freely touch engine APIs.
+                BridgeSession.InitializeForEnable();
+
+                // Start the HTTP listener serving /ping. Stays down (and connected:false)
+                // if the bind fails — the editor remains usable, /ping is just unreachable.
+                // The listener thread is the only off-thread path; it reads only cached
+                // session statics for /ping, never touching EditorInterface directly.
+                BridgeHttpServer.Start();
+
                 _enabled = true;
                 LogInfo($"plugin enabled (v{BridgeSession.BridgeVersion})");
             }
@@ -106,12 +116,16 @@ namespace GodotOpenMcp.Bridge.Editor
 
             try
             {
-                // P1.4 will release the instance lock here (graceful quit deletes it;
-                // domain reload keeps it on disk so the MCP server can detect a stale
-                // bridge — the Godot analog of Unity's releaseLock:false on
-                // beforeAssemblyReload). P1.3 will stop the HTTP listener. The dispatcher
-                // is freed last (among current subsystems) so any teardown work the later
-                // subsystems marshal still lands on a live pump.
+                // Stop the HTTP listener FIRST so no new /ping probes arrive mid-teardown
+                // (a probe during dispatcher teardown would see connected:false via the
+                // listener's own SetConnected(false), which is fine — but closing the
+                // listener cleanly before the rest is the deterministic order). P1.4 will
+                // release the instance lock here too (graceful quit deletes it; the
+                // dispatcher is freed last so any teardown work the later subsystems
+                // marshal still lands on a live pump).
+                BridgeHttpServer.Stop();
+                BridgeSession.ResetForDisable();
+
                 FreeDispatcher();
 
                 _enabled = false;
