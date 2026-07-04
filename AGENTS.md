@@ -16,15 +16,17 @@
   **Required workflow:**
   1. Open `specs/porting-map.md` for the current phase (gitignored — local only).
   2. Read the listed Unity Open MCP files and the package `AGENTS.md` for that area.
-  3. Consult Godot-MCP only for Godot-specific semantics (specs-only; never copy its transport stack).
+  3. Read the listed **Godot behavior reference** files when the porting-map row includes a Godot reference — use them as **read-only behavior examples** (Godot editor API usage, handler logic, `.tscn`/`.gd` edge cases). Never copy third-party SignalR/cloud transport stacks from those references. Those projects remain specs-only; do not name them in tracked user-visible docs.
   4. Implement with a fidelity tag per change area: **copy** | **adapt** | **greenfield** | **skip** (see [docs/porting-principles.md](docs/porting-principles.md)).
   5. Record evidence before finishing (see below).
 
   **Required evidence (every task / PR):**
   - **Unity files consulted** — paths in Unity Open MCP
+  - **Godot behavior reference files consulted** — paths when listed in porting-map (or `—` if none)
   - **Fidelity tags** — per change area
   - **Intentional deltas** — what differs from Unity and why
   - **Test parity note** — Unity test/pattern ported, equivalent Godot test added, or justified gap
+  - **Tool naming** — default `godot_open_mcp_*` (ADR-003); note only if deliberately aligning with external tool names
 
   Mirror key evidence in tracked artifacts (PR description using the checklist template). Full detail may also live in `specs/execution/P{n}/execution-plan.md` (gitignored).
 
@@ -32,7 +34,7 @@
 
 - **Migrations.** Do not implement data migrations, compatibility shims, or upgrade paths for persisted data unless explicitly requested. Prefer simplifying storage and codecs over backward compatibility.
 
-- **Naming rule exception.** Tracked docs (`README.md`, `docs/`, `AGENTS.md`, UI strings) **may** reference **Unity Open MCP** by name and link to [https://github.com/AlexeyPerov/Unity-Open-MCP](https://github.com/AlexeyPerov/Unity-Open-MCP). Other competitor/reference projects (Godot-MCP, IvanMurzak repos, etc.) remain **specs-only** — never in tracked user-visible surfaces.
+- **Naming rule exception.** Tracked docs (`README.md`, `docs/`, `AGENTS.md`, UI strings) **may** reference **Unity Open MCP** by name and link to [https://github.com/AlexeyPerov/Unity-Open-MCP](https://github.com/AlexeyPerov/Unity-Open-MCP). Other competitor/reference projects remain **specs-only** — never name them in tracked user-visible surfaces. See `specs/porting-map.md` for the allowed list.
 
 - **No internal references in user-visible surfaces.** User-visible docs and UI strings must never reference internal data such as `specs/` paths, phase IDs (e.g. P0.3, M3), execution-plan task numbers, or porting-map citations. Source-code comments may reference specs for developer context; shipped documentation must be clean.
 

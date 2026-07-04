@@ -23,10 +23,10 @@ If you cannot find a Unity equivalent, mark the work **greenfield** and document
 | Source | Role | Where to read |
 |---|---|---|
 | **Unity Open MCP** | Canonical — *how* to build | Local: `/Users/alexeyperov/Projects/Unity-AI-Hub` · Public: [github.com/AlexeyPerov/Unity-Open-MCP](https://github.com/AlexeyPerov/Unity-Open-MCP) |
-| **Godot-MCP** | Secondary — Godot API semantics only | Local checkout (specs-only; do not name in tracked docs) |
+| **Godot behavior reference** | Secondary — Godot editor API and handler examples (read-only) | Listed per task in `specs/porting-map.md` (gitignored) |
 | **specs/porting-map.md** | Per-phase file crosswalk | Gitignored local planning |
 
-Use Unity Open MCP for transport, envelopes, gate workflow, tool routing, instance discovery, and CLI patterns. Use Godot-MCP only to validate Godot editor behavior and tool naming — never copy its SignalR/cloud stack.
+Use Unity Open MCP for transport, envelopes, gate workflow, tool routing, instance discovery, and CLI patterns. Use Godot behavior reference files listed in the porting map per task for Godot editor API usage, handler logic, and scene/resource edge cases — never copy third-party SignalR/cloud transport stacks from those references. MCP tool names default to `godot_open_mcp_*` (ADR-003); matching external tool names is optional.
 
 ---
 
@@ -51,7 +51,7 @@ A task is ready to implement when:
 - [ ] `specs/porting-map.md` rows for that phase are read.
 - [ ] Unity Open MCP reference files for the task are listed.
 - [ ] Fidelity tags are assigned before coding starts.
-- [ ] Godot-MCP files are noted if needed for semantics only.
+- [ ] Godot behavior reference files are listed when the porting-map row has a Godot reference column entry (or explicitly marked `—`).
 
 ---
 
@@ -76,9 +76,11 @@ Copy this block into PR descriptions or agent handoffs:
 ### Unity-first evidence
 
 - **Unity files consulted:** (paths)
+- **Godot behavior reference files consulted:** (paths, or — if none for this task)
 - **Fidelity tags:** (area → copy|adapt|greenfield|skip)
 - **Intentional deltas:** (bullets)
 - **Test parity:** (ported from / equivalent added / gap + reason)
+- **Tool naming:** godot_open_mcp_* (default) | aligned with external tool names (optional — note which)
 ```
 
 Full detail may also live in `specs/execution/P{n}/execution-plan.md` (gitignored).

@@ -29,6 +29,10 @@ Non-trivial = architecture, bridge, MCP tools, gate/verify, CLI, routing, or con
 
 <!-- Unity test/pattern ported, equivalent Godot test added, or gap + reason -->
 
+### Tool naming
+
+<!-- Default: godot_open_mcp_* (ADR-003). Note only if deliberately aligning with external tool names. -->
+
 ---
 
 ## Docs
