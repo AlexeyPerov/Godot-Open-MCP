@@ -62,6 +62,7 @@ Godot has no headless editor batch mode — there is no `batch` route.
 - `mcp-server/src/instance-discovery.ts`
 - `packages/bridge/plugin.cfg` — addon metadata; installed as `addons/godot_open_mcp/plugin.cfg`.
 - `packages/bridge/Editor/GodotOpenMcpPlugin.cs` — editor entry point; owns bridge enable/disable lifecycle.
+- `packages/bridge/Runtime/MainThread/MainThreadDispatcher.cs` — pumps off-thread work onto the editor main thread via a long-lived `Node._Process` tick; the single dispatch path all editor API calls route through.
 - `packages/bridge/Editor/Bridge/BridgeHttpServer.cs`
 - `packages/bridge/Editor/Bridge/BridgeInstanceLock.cs`
 

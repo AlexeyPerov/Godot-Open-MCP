@@ -1,6 +1,7 @@
 #if TOOLS
 #nullable enable
 using Godot;
+using GodotOpenMcp.Bridge.Runtime.MainThread;
 
 namespace GodotOpenMcp.Bridge.Editor
 {
@@ -9,11 +10,13 @@ namespace GodotOpenMcp.Bridge.Editor
     /// <c>addons/godot_open_mcp/plugin.cfg</c> (the <c>script</c> field) and loaded
     /// by the Godot Editor when the plugin is enabled.
     ///
-    /// This is the P1.1 scaffold: plugin metadata + editor bootstrap wiring only.
-    /// It owns bridge startup and shutdown so later phases can register the
-    /// main-thread dispatcher (P1.2), the HTTP server and <c>/ping</c> (P1.3),
-    /// and the instance lock (P1.4) on a stable lifecycle surface. No HTTP
-    /// endpoints or tool dispatch live here yet.
+    /// Owns bridge startup and shutdown so later phases can register the HTTP
+    /// server and <c>/ping</c> (P1.3) and the instance lock (P1.4) on a stable
+    /// lifecycle surface. The main-thread dispatcher (P1.2) is installed here and
+    /// is the single thread-marshaling path every HTTP handler routes editor API
+    /// calls through — no handler calls <c>EditorInterface</c> / scene-tree APIs
+    /// directly off the worker thread. No HTTP endpoints or tool dispatch live
+    /// here yet.
     ///
     /// Lifecycle mirrors the Unity bridge (<c>BridgeHttpServer</c> static init /
     /// <c>OnBeforeAssemblyReload</c> / <c>OnQuitting</c>) adapted to Godot's
@@ -30,9 +33,16 @@ namespace GodotOpenMcp.Bridge.Editor
         // Reflects whether the plugin's resources have been armed. Distinct from
         // the Godot-managed in-tree state: this is our own bookkeeping so the
         // disable path knows whether there is anything to tear down. Later phases
-        // (dispatcher, HTTP listener, instance lock) will gate their teardown on
-        // this same flag.
+        // (HTTP listener, instance lock) will gate their teardown on this same
+        // flag; the dispatcher is owned directly below.
         bool _enabled;
+
+        // Pump for off-thread → main-thread work (P1.2). Added as a child of this
+        // EditorPlugin Node so it lives in the editor SceneTree and gets _Process
+        // ticks for the lifetime of the plugin. Null when the plugin is disabled
+        // or the dispatcher failed to install; the disable path frees it under the
+        // main-thread guard.
+        MainThreadDispatcher? _dispatcher;
 
         /// <summary>
         /// Enable / init. Runs when the user toggles the plugin on, and on editor
@@ -54,12 +64,16 @@ namespace GodotOpenMcp.Bridge.Editor
 
             try
             {
-                // P1.2 will install the main-thread dispatcher here (added as a child
-                // Node so it receives _Process ticks for the lifetime of the plugin).
-                // P1.3 will start the HTTP listener; P1.4 will acquire the instance
-                // lock. Each subsystem owns its own try/catch so a failure in one does
-                // not abort the others — but for the scaffold there is nothing yet to
-                // start, so the armed flag is the only state.
+                // Install the main-thread dispatcher FIRST so every subsequent subsystem
+                // (P1.3 HTTP listener, P1.4 instance lock, P2.x tool dispatch) has a
+                // ready marshaling path. It is added as a child Node so it ticks for the
+                // whole plugin lifetime; AddChild runs synchronously on this (main)
+                // thread, so on return any buffered early-boot work is already drained
+                // (the dispatcher's _EnterTree flushes the static queue). A failure here
+                // is non-fatal to the editor but fatal to the bridge — surface it and
+                // leave _enabled false so the disable path is a clean no-op.
+                _dispatcher = new MainThreadDispatcher { Name = "GodotOpenMcpMainThreadDispatcher" };
+                AddChild(_dispatcher);
 
                 _enabled = true;
                 LogInfo($"plugin enabled (v{BridgeSession.BridgeVersion})");
@@ -95,8 +109,10 @@ namespace GodotOpenMcp.Bridge.Editor
                 // P1.4 will release the instance lock here (graceful quit deletes it;
                 // domain reload keeps it on disk so the MCP server can detect a stale
                 // bridge — the Godot analog of Unity's releaseLock:false on
-                // beforeAssemblyReload). P1.3 will stop the HTTP listener; P1.2 will
-                // free the dispatcher Node.
+                // beforeAssemblyReload). P1.3 will stop the HTTP listener. The dispatcher
+                // is freed last (among current subsystems) so any teardown work the later
+                // subsystems marshal still lands on a live pump.
+                FreeDispatcher();
 
                 _enabled = false;
                 LogInfo("plugin disabled");
@@ -115,6 +131,37 @@ namespace GodotOpenMcp.Bridge.Editor
         /// there for the sync contract.
         /// </summary>
         public static string BridgeVersion => BridgeSession.BridgeVersion;
+
+        /// <summary>
+        /// Free the dispatcher Node and null the reference. Idempotent — a null or
+        /// already-freed instance just clears the reference. The dispatcher's own
+        /// <c>_ExitTree</c> runs a bounded drain of any pending queued work before the
+        /// Node is freed, so in-flight awaiters are completed rather than dropped and
+        /// a re-enqueueing body cannot hang teardown. Must run on the editor main
+        /// thread (<see cref="Node.Free"/> is main-thread-only); <c>_ExitTree</c> is a
+        /// main-thread callback so that holds.
+        /// </summary>
+        void FreeDispatcher()
+        {
+            if (_dispatcher == null)
+                return;
+            try
+            {
+                // Skip when Godot has already disposed the dispatcher — nothing left for
+                // us to free (defensive against a partial teardown / faulted init).
+                if (GodotObject.IsInstanceValid(_dispatcher))
+                    _dispatcher.Free();
+            }
+            catch (System.ObjectDisposedException)
+            {
+                // Already disposed by Godot — benign.
+            }
+            catch (System.Exception e)
+            {
+                LogError($"error freeing dispatcher: {e.Message}");
+            }
+            _dispatcher = null;
+        }
 
         static void LogInfo(string message) => GD.Print($"[{LogPrefix}] {message}");
         static void LogError(string message) => GD.PushError($"[{LogPrefix}] {message}");
