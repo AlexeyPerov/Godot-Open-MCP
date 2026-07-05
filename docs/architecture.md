@@ -64,9 +64,12 @@ Each running bridge owns a lock file at `~/.godot-open-mcp/instances/<sha256(pro
 ## Core source files (planned)
 
 - `mcp-server/src/index.ts` — stdio MCP bootstrap; wires the SDK `Server` to a `StdioServerTransport`, registers `ListTools` / `CallTool` against the tool registry, exits cleanly on transport close.
-- `mcp-server/src/tools/index.ts` — tool registry; the ping tool and live-bridge routing arrive with instance discovery.
-- `mcp-server/src/tool-router.ts` — live/offline/local route selection (planned).
+- `mcp-server/src/tools/index.ts` — tool registry; `godot_open_mcp_ping` is the first entry (P1.7). Subsequent phases append editor / gate / capability tools.
+- `mcp-server/src/tools/ping.ts` — `godot_open_mcp_ping` tool definition (catalog metadata only; the call path lives in `live-client.ts`).
+- `mcp-server/src/live-client.ts` — live bridge client; routes registered tool calls into bridge HTTP. P1.7 wires the ping round-trip (`GET /ping`); mutating tool dispatch arrives in later phases.
+- `mcp-server/src/results.ts` — shared `CallToolResult` error factory (`{ error: { code, message } }` envelope); reused by every error path so the wire shape stays consistent.
 - `mcp-server/src/instance-discovery.ts` — per-project bridge port + auth token resolution from instance locks; mirrors `InstancePortResolver.cs` byte-for-byte.
+- `mcp-server/src/tool-router.ts` — live/offline/local route selection (planned).
 - `packages/bridge/plugin.cfg` — addon metadata; installed as `addons/godot_open_mcp/plugin.cfg`.
 - `packages/bridge/Editor/GodotOpenMcpPlugin.cs` — editor entry point; owns bridge enable/disable lifecycle (installs the dispatcher, caches session state, starts/stops the HTTP listener).
 - `packages/bridge/Runtime/MainThread/MainThreadDispatcher.cs` — pumps off-thread work onto the editor main thread via a long-lived `Node._Process` tick; the single dispatch path all editor API calls route through.

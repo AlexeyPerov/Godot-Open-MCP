@@ -13,7 +13,7 @@ This file is the index for external interfaces and protocol contracts exposed by
 ## Contract boundaries
 
 - Bridge HTTP contract source: `packages/bridge/Editor/Bridge/BridgeHttpServer.cs`
-- MCP server routing/registry source: `mcp-server/src/index.ts`, `mcp-server/src/tool-router.ts`
+- MCP server routing/registry source: `mcp-server/src/index.ts`, `mcp-server/src/live-client.ts`, `mcp-server/src/tool-router.ts` (planned)
 - MCP tool definitions source: `mcp-server/src/tools/`
 - MCP resources source: `mcp-server/src/resources/` (when shipped)
 

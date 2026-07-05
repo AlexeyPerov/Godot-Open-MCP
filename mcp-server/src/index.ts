@@ -1,21 +1,20 @@
 #!/usr/bin/env node
 
-// stdio MCP server bootstrap (P1.5).
+// stdio MCP server bootstrap.
 //
 // Wires the SDK `Server` to a `StdioServerTransport`, registers the
 // `ListTools` / `CallTool` handlers against the tool registry, and exits
 // cleanly when the transport closes (AI client disconnect / stdin EOF).
 //
-// Scope (per execution-plan-5 + execution-plan-6):
-//   - stdio startup + package structure,
-//   - clean process lifecycle on connect/disconnect,
+// Scope (per execution-plan-5 + execution-plan-6 + execution-plan-7):
+//   - stdio startup + package structure (P1.5),
+//   - clean process lifecycle on connect/disconnect (P1.5),
 //   - instance discovery — bridge port resolved from GODOT_PROJECT_PATH +
 //     GODOT_OPEN_MCP_BRIDGE_PORT at startup (P1.6),
-//   - no live-bridge routing, no CLI dispatch yet.
-// The ping tool + live client (P1.7) land next, at which point `createServer`
-// will gain the port/auth arguments and the `CallTool` handler will delegate
-// to a `ToolRouter`. The shape here is the minimal foundation those phases
-// extend.
+//   - `godot_open_mcp_ping` round-trip: tool registry (P1.7) → live bridge
+//     client (P1.7) → bridge `GET /ping`. Mutating tool dispatch arrives in
+//     later phases (P2.x onwards); until then route() surfaces a structured
+//     "tool_not_routed" error for any non-ping tool name.
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -30,6 +29,7 @@ import {
   resolvePort,
   resolveAuthToken,
 } from "./instance-discovery.js";
+import { LiveClient } from "./live-client.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 // Read the version from package.json at runtime so `npm version` and the
@@ -48,23 +48,47 @@ export async function handleListTools(): Promise<{ tools: typeof ALL_TOOLS }> {
 }
 
 /**
- * CallTool handler. Defensive: with an empty registry, well-behaved clients
- * never call this. Returns a structured error rather than throwing so a
- * malformed client cannot kill the server process. Exported for unit testing.
+ * CallTool handler. Defensive: returns a structured `isError` response for
+ * unknown tools instead of throwing so a malformed client cannot kill the
+ * server process. Routed tools (currently `godot_open_mcp_ping`) dispatch
+ * through the supplied LiveClient.
+ *
+ * `liveClient` is optional so the unit test for the unknown-tool path does
+ * not need to spin up a client. The stdio `main()` always supplies one.
  */
 export async function handleCallTool(params: {
   name: string;
   arguments?: unknown;
-}): Promise<CallToolResult> {
-  return {
-    isError: true,
-    content: [
-      {
-        type: "text",
-        text: `Unknown tool: ${params.name}. No tools are registered in this scaffold yet.`,
-      },
-    ],
-  };
+}, liveClient?: LiveClient): Promise<CallToolResult> {
+  const toolName = params.name;
+  const isRegistered = ALL_TOOLS.some((t) => t.name === toolName);
+  if (!isRegistered) {
+    return {
+      isError: true,
+      content: [
+        {
+          type: "text",
+          text: `Unknown tool: ${toolName}. Registered tools: ${ALL_TOOLS.map((t) => t.name).join(", ") || "(none)"}.`,
+        },
+      ],
+    };
+  }
+  if (!liveClient) {
+    return {
+      isError: true,
+      content: [
+        {
+          type: "text",
+          text: `Tool ${toolName} is registered but no live client is wired (test harness omission).`,
+        },
+      ],
+    };
+  }
+  const args =
+    params.arguments && typeof params.arguments === "object"
+      ? (params.arguments as Record<string, unknown>)
+      : {};
+  return liveClient.route(toolName, args);
 }
 
 /**
@@ -72,14 +96,19 @@ export async function handleCallTool(params: {
  * hosting) can construct a server without touching process state.
  *
  * @param serverName — base name reported in the MCP `initialize` response.
+ * @param liveClient — routes registered tool calls to the bridge. Optional so
+ *                     tests that only exercise handleListTools don't need one.
  */
-export function createServer(serverName = "godot-open-mcp"): Server {
+export function createServer(
+  serverName = "godot-open-mcp",
+  liveClient?: LiveClient,
+): Server {
   const server = new Server(
     { name: serverName, version: PACKAGE_VERSION },
     {
       // `listChanged: true` is declared now so P8.4 (manage_tools list-changed
       // notifications) can flip the visible tool set without a capability
-      // renegotiation. With an empty registry no notification is sent yet.
+      // renegotiation.
       capabilities: { tools: { listChanged: true } },
     },
   );
@@ -87,7 +116,7 @@ export function createServer(serverName = "godot-open-mcp"): Server {
   server.setRequestHandler(ListToolsRequestSchema, () => handleListTools());
 
   server.setRequestHandler(CallToolRequestSchema, (request) =>
-    handleCallTool(request.params),
+    handleCallTool(request.params, liveClient),
   );
 
   return server;
@@ -101,7 +130,7 @@ export function createServer(serverName = "godot-open-mcp"): Server {
  * routing, offline reads) keys off it. `GODOT_OPEN_MCP_BRIDGE_PORT` overrides
  * the deterministic port (parsed here so a malformed value falls back to the
  * hash rather than faulting startup). The resolved `bridgePort` /
- * `bridgeAuthToken` feed the live client (P1.7).
+ * `bridgeAuthToken` feed the live client.
  */
 function getEnv(): {
   projectPath: string;
@@ -147,12 +176,13 @@ function parseEnvPort(raw: string | undefined): number | undefined {
 }
 
 async function main(): Promise<void> {
-  // Resolved up-front so instance-discovery runs at startup and the live
-  // client (P1.7) can attach to the right bridge without a re-read. The
-  // values are intentionally not yet threaded into createServer/CallTool —
-  // that wiring lands with the ping tool + live client in P1.7.
   const env = getEnv();
-  const server = createServer();
+  const liveClient = new LiveClient(
+    env.bridgePort,
+    env.bridgeAuthToken,
+    env.projectPath,
+  );
+  const server = createServer("godot-open-mcp", liveClient);
   const transport = new StdioServerTransport();
 
   // Clean shutdown on disconnect. The SDK closes the transport when stdin
