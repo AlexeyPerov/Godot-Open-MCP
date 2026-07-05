@@ -1,6 +1,8 @@
-# Bootstrap CI — repo structure + version sync until mcp-server ships (Phase 1).
+# CI for Godot Open MCP.
 #
-# Phase 1 will add mcp-server typecheck/test jobs here or in a dedicated workflow.
+# - bootstrap: required repo paths present.
+# - version-sync: generated version targets match version.json.
+# - mcp-server: typecheck + unit tests for the stdio MCP server package.
 
 name: ci
 
@@ -57,3 +59,29 @@ jobs:
 
       - name: Verify trio targets match version.json
         run: node scripts/sync-version.mjs --check
+
+  mcp-server:
+    name: mcp-server typecheck + test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: mcp-server/package-lock.json
+
+      - name: Install
+        working-directory: mcp-server
+        run: npm ci
+
+      - name: Typecheck
+        working-directory: mcp-server
+        run: npm run typecheck
+
+      - name: Test
+        working-directory: mcp-server
+        run: npm test

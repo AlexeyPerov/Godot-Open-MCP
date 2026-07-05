@@ -1,0 +1,54 @@
+{
+  "name": "godot-open-mcp",
+  "version": "0.0.1",
+  "description": "MCP server (stdio) routing tool calls to the live Godot Open MCP Bridge.",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "godot-open-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "build:test": "tsc -p tsconfig.test.json",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run build:test && node --test 'dist-test/**/*.test.js'",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "godot",
+    "godot4",
+    "ai",
+    "agent",
+    "claude",
+    "cursor",
+    "opencode",
+    "stdio"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "typescript": "~5.6.2"
+  },
+  "license": "MIT",
+  "author": "Godot Open MCP",
+  "homepage": "https://github.com/AlexeyPerov/Godot-Open-MCP",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AlexeyPerov/Godot-Open-MCP.git"
+  },
+  "bugs": {
+    "url": "https://github.com/AlexeyPerov/Godot-Open-MCP/issues"
+  }
+}
