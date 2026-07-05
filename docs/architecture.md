@@ -55,6 +55,73 @@ Godot has no headless editor batch mode — there is no `batch` route.
 - All `EditorInterface` / `Node` API calls run on the main thread via a dispatcher.
 - v1 requires **Godot 4.3+ mono (C#/.NET 8)**.
 
+## Runtime / Editor boundary
+
+Godot compiles the entire bridge addon into **one** C# assembly — there is no per-folder
+assembly boundary the way Unity's asmdefs provide. What keeps editor-only code out of a
+shipped game build is the `TOOLS` compilation symbol, which Godot defines **only** for the
+editor (`Debug`) configuration and leaves undefined for `ExportDebug` / `ExportRelease`.
+Code wrapped in `#if TOOLS … #endif` is compiled into the editor and stripped from an
+exported game.
+
+The bridge mirrors that split at the folder level so the boundary is visible at a glance:
+
+- `packages/bridge/Runtime/` — ships into a game build. Must not reference any editor-only
+  Godot API in real code.
+- `packages/bridge/Editor/` — editor-only (`EditorPlugin`, the HTTP bridge, tool handlers).
+  Always wrapped in `#if TOOLS`.
+
+The load-bearing invariant is one-directional: **Editor code may reference Runtime code;
+Runtime code may NEVER reference Editor code.** A `Runtime/` file that referenced an
+editor-only type (`EditorInterface`, `EditorPlugin`, `EditorFileSystem`, `EditorScript`)
+in shipping code would either fail the `ExportRelease` compile or drag editor behaviour
+into a context where no editor exists.
+
+### CI boundary guard
+
+`scripts/check-runtime-boundary.py` enforces the rule on every PR (wired into
+`.github/workflows/ci.yml` as the fast `Runtime/Editor boundary guard` job, which runs
+before any .NET build). It scans `packages/bridge/Runtime/**/*.cs` and **exits non-zero**
+if any file references an editor-only API in real code that is:
+
+- **not** inside a `#if TOOLS … #endif` guard, and
+- **not** inside a comment or string literal, and
+- **not** explicitly suppressed.
+
+The check is comment- and string-aware on purpose: runtime files mention editor type names
+heavily in doc-comments and `[Description("…")]` strings to *explain* the boundary, and
+those are not violations — only un-guarded code is. This mirrors exactly what the
+`ExportRelease` (TOOLS-undefined) compile strips, but runs in milliseconds with no build.
+
+A `#if TOOLS` block in `Runtime/` is allowed only as a narrow, documented editor-coupling
+shim (the guarded body is stripped from the game build, so it cannot leak). Such shims are
+reported as a warning under `--verbose`, not a failure.
+
+Run it locally any time:
+
+```bash
+python scripts/check-runtime-boundary.py            # 0 = boundary holds, 1 = violation
+python scripts/check-runtime-boundary.py --verbose  # also lists #if TOOLS shims + suppressions
+```
+
+This guard is a fast pre-filter; the authoritative proof that the boundary holds is that
+the `ExportRelease` (TOOLS-undefined) configuration **compiles** and the resulting assembly
+contains the runtime types and none of the editor types.
+
+### Suppressions (justified exceptions)
+
+The default policy is "no editor APIs in `Runtime/` real code outside `#if TOOLS`." For the
+rare case where a `Runtime/` file must reference an editor type in shipping code, append a
+trailing `// boundary:allow <audit-note>` line comment on the **same line** as the token:
+
+```csharp
+var name = nameof(EditorInterface); // boundary:allow ADR-XYZ forwarded type name
+```
+
+The audit note (anything non-empty after `boundary:allow`) is mandatory so the exception is
+visible in code review and under `--verbose` in CI output. This is the **only** suppression
+path — do not silence the guard by other means.
+
 ## Multi-instance port + discovery
 
 Multiple Godot projects can run bridges simultaneously without port collisions. The bridge port is **deterministic per project**: `20000 + (sha256(normalizedProjectPath) % 10000)`, where the hash uses the first 8 bytes of SHA256 as a big-endian `UInt64` so the C# bridge and the TypeScript MCP server agree byte-for-byte. The `GODOT_OPEN_MCP_BRIDGE_PORT` env var overrides the deterministic default.

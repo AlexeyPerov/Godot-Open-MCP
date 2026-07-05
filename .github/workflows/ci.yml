@@ -2,6 +2,7 @@
 #
 # - bootstrap: required repo paths present.
 # - version-sync: generated version targets match version.json.
+# - runtime-boundary: fast static guard — no editor-only Godot API leaks into Runtime/.
 # - mcp-server: typecheck + unit tests for the stdio MCP server package.
 
 name: ci
@@ -59,6 +60,25 @@ jobs:
 
       - name: Verify trio targets match version.json
         run: node scripts/sync-version.mjs --check
+
+  runtime-boundary:
+    name: Runtime/Editor boundary guard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify no editor-only API leaks into packages/bridge/Runtime/
+        # Fast static guard (milliseconds, no .NET build). Fails the PR if any
+        # Runtime/**/*.cs references EditorInterface / EditorPlugin /
+        # EditorFileSystem / EditorScript in real code outside a #if TOOLS guard.
+        # See scripts/check-runtime-boundary.py for the rule set and suppression path.
+        run: python scripts/check-runtime-boundary.py --verbose
 
   mcp-server:
     name: mcp-server typecheck + test
