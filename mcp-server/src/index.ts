@@ -6,14 +6,16 @@
 // `ListTools` / `CallTool` handlers against the tool registry, and exits
 // cleanly when the transport closes (AI client disconnect / stdin EOF).
 //
-// Scope of this scaffold (per execution-plan-5):
+// Scope (per execution-plan-5 + execution-plan-6):
 //   - stdio startup + package structure,
 //   - clean process lifecycle on connect/disconnect,
-//   - no instance discovery, no live-bridge routing, no CLI dispatch.
-// Instance discovery (P1.6) and the ping tool + live client (P1.7) land next,
-// at which point `createServer` will gain the port/auth arguments and the
-// `CallTool` handler will delegate to a `ToolRouter`. The shape here is the
-// minimal foundation those phases extend.
+//   - instance discovery — bridge port resolved from GODOT_PROJECT_PATH +
+//     GODOT_OPEN_MCP_BRIDGE_PORT at startup (P1.6),
+//   - no live-bridge routing, no CLI dispatch yet.
+// The ping tool + live client (P1.7) land next, at which point `createServer`
+// will gain the port/auth arguments and the `CallTool` handler will delegate
+// to a `ToolRouter`. The shape here is the minimal foundation those phases
+// extend.
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -23,6 +25,11 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { ALL_TOOLS } from "./tools/index.js";
 import { readPackageVersion } from "./package-version.js";
+import {
+  PORT_OVERRIDE_ENV_VAR,
+  resolvePort,
+  resolveAuthToken,
+} from "./instance-discovery.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 // Read the version from package.json at runtime so `npm version` and the
@@ -91,10 +98,16 @@ export function createServer(serverName = "godot-open-mcp"): Server {
  *
  * `GODOT_PROJECT_PATH` is the project root the bridge runs against. It is
  * mandatory: every later phase (instance-discovery port resolution, live
- * routing, offline reads) keys off it. For this scaffold we only validate and
- * log it — port resolution arrives in P1.6.
+ * routing, offline reads) keys off it. `GODOT_OPEN_MCP_BRIDGE_PORT` overrides
+ * the deterministic port (parsed here so a malformed value falls back to the
+ * hash rather than faulting startup). The resolved `bridgePort` /
+ * `bridgeAuthToken` feed the live client (P1.7).
  */
-function getEnv(): { projectPath: string } {
+function getEnv(): {
+  projectPath: string;
+  bridgePort: number;
+  bridgeAuthToken: string | undefined;
+} {
   const projectPath = process.env.GODOT_PROJECT_PATH;
   if (!projectPath) {
     console.error(
@@ -102,14 +115,43 @@ function getEnv(): { projectPath: string } {
     );
     process.exit(1);
   }
+  const rawPort = process.env[PORT_OVERRIDE_ENV_VAR];
+  const envPort = parseEnvPort(rawPort);
+  const bridgePort = resolvePort(projectPath, envPort);
+  const bridgeAuthToken = resolveAuthToken(projectPath, envPort);
   console.error(
-    `[godot-open-mcp] project path: ${projectPath} (bridge routing lands in P1.6/P1.7)`,
+    `[godot-open-mcp] project path: ${projectPath} -> bridge port ${bridgePort}` +
+      (rawPort !== undefined && rawPort !== ""
+        ? ` (${PORT_OVERRIDE_ENV_VAR}=${rawPort})`
+        : " (deterministic / lock)"),
   );
-  return { projectPath };
+  return { projectPath, bridgePort, bridgeAuthToken };
+}
+
+/**
+ * Parse the `GODOT_OPEN_MCP_BRIDGE_PORT` override. Returns undefined for
+ * empty / non-integer / out-of-TCP-range values so `resolvePort` falls back
+ * to the deterministic hash + lock lookup. Mirrors the bridge-side validation
+ * (InstancePortResolver.IsValidPort).
+ */
+function parseEnvPort(raw: string | undefined): number | undefined {
+  if (raw === undefined || raw === "") return undefined;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65535) {
+    console.error(
+      `[godot-open-mcp] ignoring invalid ${PORT_OVERRIDE_ENV_VAR}=${raw} (must be an integer in [1, 65535])`,
+    );
+    return undefined;
+  }
+  return parsed;
 }
 
 async function main(): Promise<void> {
-  getEnv();
+  // Resolved up-front so instance-discovery runs at startup and the live
+  // client (P1.7) can attach to the right bridge without a re-read. The
+  // values are intentionally not yet threaded into createServer/CallTool —
+  // that wiring lands with the ping tool + live client in P1.7.
+  const env = getEnv();
   const server = createServer();
   const transport = new StdioServerTransport();
 
