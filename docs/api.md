@@ -16,6 +16,7 @@ This file is the index for external interfaces and protocol contracts exposed by
 - MCP server routing/registry source: `mcp-server/src/index.ts`, `mcp-server/src/live-client.ts`, `mcp-server/src/tool-router.ts` (planned)
 - MCP tool definitions source: `mcp-server/src/tools/`
 - MCP resources source: `mcp-server/src/resources/` (when shipped)
+- Phase 1 parity smoke: `mcp-server/src/integration.test.ts` (in-process, runs on every `npm test`) and `mcp-server/scripts/p1-parity-smoke.mjs` (`npm run smoke:p1`, real stdio child). Pinned end-to-end route: MCP client → `godot_open_mcp_ping` → bridge `GET /ping`.
 
 ## Contract documentation guidance
 

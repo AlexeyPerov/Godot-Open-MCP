@@ -128,6 +128,41 @@ Multiple Godot projects can run bridges simultaneously without port collisions. 
 
 Each running bridge owns a lock file at `~/.godot-open-mcp/instances/<sha256(projectPath)>.json` carrying the PID, port, project path/hash, and editor state (idle/compiling/playing/...). The MCP server reads these to discover the right port per project without an HTTP round-trip. Stale locks (from a crashed editor) are swept on the next `Acquire` by PID-liveness; the MCP server is read-only on the lock.
 
+## Phase 1 parity smoke
+
+The bridge spine (Phase 1) has one canonical end-to-end gate that must pass before Phase 2 work begins: **MCP client → stdio MCP server → `godot_open_mcp_ping` → bridge `GET /ping`**. The smoke catches port-formula drift, envelope regressions, and tool-registry breakage early — on every PR via the in-process integration test, and on demand via the scripted smoke against the built `dist/index.js`.
+
+**Two complementary gates:**
+
+1. **In-process integration test** — `mcp-server/src/integration.test.ts`. Wires an MCP SDK `Client` to `createServer` over `InMemoryTransport` with a `LiveClient` aimed at a loopback HTTP stub. Runs on every `npm test`. Covers the healthy round-trip plus the actionable-failure paths (`bridge_offline`, `bridge_http_error`, 503 bridge-loading).
+2. **Scripted stdio smoke** — `mcp-server/scripts/p1-parity-smoke.mjs` (`npm run smoke:p1`). Spawns the real `dist/index.js` over stdio, drives it with an SDK `StdioClientTransport`, and asserts the same route against a real OS-level child process. Run it before tagging a Phase 1 release or after any change to the boot path.
+
+```bash
+# from mcp-server/, after `npm run build`
+npm run smoke:p1
+```
+
+**Pass criteria:** exit 0, with both the healthy ping body and the structured `bridge_offline` failure observed.
+
+### Failure signatures
+
+Every smoke failure surfaces a structured error whose first field names the **owner area**. The table maps each signature to its cause and the contract that drifted.
+
+| Signature | Meaning | Owner area | Likely cause |
+|---|---|---|---|
+| `{"error":{"code":"bridge_offline", ...}}` with a `~/.godot-open-mcp/instances/<hash>.json` hint | No listener at the resolved port. | instance discovery + lock | Port formula mismatch (TS ↔ C# drift), Godot not running, wrong project path, stale lock with a live PID. |
+| `{"error":{"code":"bridge_timeout", ...}}` "did not respond within Nms" | Listener is up but too slow to answer. | bridge HTTP / main thread | Editor stalled on a long main-thread op; bridge worker thread starved. |
+| `{"error":{"code":"bridge_http_error", ...}}` "unexpected HTTP NNN" | Listener returned an unexpected status (not 200 / 503). | bridge HTTP routing | Route handler change, missing `BridgeSession` init, auth gate (later phase) rejecting the probe. |
+| `isError:false` + `connected:false, compiling:true` (HTTP 503 fallback body) | Bridge listener up, session not ready yet. | bridge session lifecycle | Normal editor reload in flight — treat as reachable, not failed. |
+| `tools/list` does NOT include `godot_open_mcp_ping` | Tool registry drift. | MCP tool catalog | `tools/index.ts` no longer exports `ping`; `ALL_TOOLS` mutated incorrectly. |
+| `Unknown tool: godot_open_mcp_ping` from `tools/call` | Registry / dispatcher mismatch. | MCP tool catalog | Tool name spelling drifted, or `handleCallTool` registry check broken. |
+
+The **actionable hint** in every `bridge_offline` payload names this project's exact lock file path and (when the lock is readable) its port/pid/state — so an agent or human debugging a failure knows exactly where to look without re-deriving the hash.
+
+### Phase exit gate
+
+Phase 2 must not start until the parity smoke is green on a clean checkout. The roadmap ([Phase 1 exit gate](../specs/roadmap.md)) ties Phase 2 entry to this gate; reference the smoke result explicitly in the Phase 1 completion record.
+
 ## Core source files (planned)
 
 - `mcp-server/src/index.ts` — stdio MCP bootstrap; wires the SDK `Server` to a `StdioServerTransport`, registers `ListTools` / `CallTool` against the tool registry, exits cleanly on transport close.
@@ -136,6 +171,8 @@ Each running bridge owns a lock file at `~/.godot-open-mcp/instances/<sha256(pro
 - `mcp-server/src/live-client.ts` — live bridge client; routes registered tool calls into bridge HTTP. P1.7 wires the ping round-trip (`GET /ping`); mutating tool dispatch arrives in later phases.
 - `mcp-server/src/results.ts` — shared `CallToolResult` error factory (`{ error: { code, message } }` envelope); reused by every error path so the wire shape stays consistent.
 - `mcp-server/src/instance-discovery.ts` — per-project bridge port + auth token resolution from instance locks; mirrors `InstancePortResolver.cs` byte-for-byte.
+- `mcp-server/src/integration.test.ts` — P1.9 phase-gate parity smoke (in-process): MCP SDK `Client` + `InMemoryTransport` + `LiveClient` + loopback bridge stub drives the full `godot_open_mcp_ping` → bridge `/ping` route on every `npm test`.
+- `mcp-server/scripts/p1-parity-smoke.mjs` — P1.9 scripted stdio smoke: spawns the built `dist/index.js` as a child process and verifies the parity route over a real stdio pipe (`npm run smoke:p1`).
 - `mcp-server/src/tool-router.ts` — live/offline/local route selection (planned).
 - `packages/bridge/plugin.cfg` — addon metadata; installed as `addons/godot_open_mcp/plugin.cfg`.
 - `packages/bridge/Editor/GodotOpenMcpPlugin.cs` — editor entry point; owns bridge enable/disable lifecycle (installs the dispatcher, caches session state, starts/stops the HTTP listener).
