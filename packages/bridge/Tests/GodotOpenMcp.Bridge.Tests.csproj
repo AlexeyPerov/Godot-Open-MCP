@@ -71,6 +71,12 @@
     <Compile Include="..\Editor\Bridge\BridgeLog.cs" Link="Source\BridgeLog.cs" />
     <Compile Include="..\Editor\Bridge\BridgeSession.cs" Link="Source\BridgeSession.cs" />
     <Compile Include="..\Editor\Bridge\BridgeHttpServer.cs" Link="Source\BridgeHttpServer.cs" />
+    <!-- P1.4 — instance lock + deterministic port resolver. Pure-managed (file I/O + SHA256 only,
+         no Godot APIs) so they compile into the binary-less test host alongside the bridge sources.
+         BridgeInstanceLock routes its diagnostics through BridgeLog (the same no-op-sink swap the
+         HTTP integration test uses) so the warning paths never P/Invoke into native Godot. -->
+    <Compile Include="..\Editor\Bridge\InstancePortResolver.cs" Link="Source\InstancePortResolver.cs" />
+    <Compile Include="..\Editor\Bridge\BridgeInstanceLock.cs" Link="Source\BridgeInstanceLock.cs" />
   </ItemGroup>
 
 </Project>
