@@ -166,8 +166,9 @@ Phase 2 must not start until the parity smoke is green on a clean checkout. The 
 ## Core source files (planned)
 
 - `mcp-server/src/index.ts` — stdio MCP bootstrap; wires the SDK `Server` to a `StdioServerTransport`, registers `ListTools` / `CallTool` against the tool registry, exits cleanly on transport close.
-- `mcp-server/src/tools/index.ts` — tool registry; `godot_open_mcp_ping` is the first entry (P1.7). Subsequent phases append editor / gate / capability tools.
+- `mcp-server/src/tools/index.ts` — tool registry; `godot_open_mcp_ping` (P1.7) and `godot_open_mcp_node_find` (P2.2) are the first entries. Subsequent phases append editor / gate / capability tools.
 - `mcp-server/src/tools/ping.ts` — `godot_open_mcp_ping` tool definition (catalog metadata only; the call path lives in `live-client.ts`).
+- `mcp-server/src/tools/node-find.ts` — `godot_open_mcp_node_find` tool definition (P2.2); the first read-only editor tool. Godot-adapted schema: `node_path` / `name` (targeted resolvers), `type` / `name_contains` (list filters), `hierarchy_depth`, `max_results`.
 - `mcp-server/src/live-client.ts` — live bridge client; routes registered tool calls into bridge HTTP. `godot_open_mcp_ping` round-trips via `GET /ping` (P1.7); every other tool dispatches via `POST /tools/{name}` and unwraps the canonical `{ ok, result, error }` envelope (P2.1).
 - `mcp-server/src/results.ts` — shared `CallToolResult` error factory (`{ error: { code, message } }` envelope); reused by every error path so the wire shape stays consistent.
 - `mcp-server/src/instance-discovery.ts` — per-project bridge port + auth token resolution from instance locks; mirrors `InstancePortResolver.cs` byte-for-byte.
@@ -183,6 +184,10 @@ Phase 2 must not start until the parity smoke is green on a clean checkout. The 
 - `packages/bridge/Editor/Bridge/BridgeRequestBody.cs` — request-body reader + `timeout_ms` extraction/clamping for tool dispatch (P2.1).
 - `packages/bridge/Editor/Tools/BridgeToolRegistry.cs` — name→handler tool registry + the `godot_open_mcp_echo` smoke stub (P2.1).
 - `packages/bridge/Editor/Tools/ToolDispatchResult.cs` — tool dispatch result model (success output / failure code+message) (P2.1).
+- `packages/bridge/Editor/Tools/NodeTools.cs` — `godot_open_mcp_node_find` handler (P2.2): targeted lookup by `node_path` / `name`, list mode with `type` / `name_contains` filters, and the shared `ResolveNode` / `ToNodeData` helpers later node tools (create/modify/...) build on. Editor-only (`#if TOOLS`).
+- `packages/bridge/Editor/Tools/NodeData.cs` — pure-managed Node snapshot DTO with self-serialization via `BridgeJson` (P2.2); the Godot analog of Unity's per-GameObject summary.
+- `packages/bridge/Editor/Tools/NodeFindBody.cs` — pure-managed request-body parser for `node_find` (P2.2); hand-rolled scalar extraction matching `BridgeRequestBody`'s no-JSON-DOM style.
+- `packages/bridge/Editor/Tools/NodePathNormalizer.cs` — pure-string scene-tree path normalization (P2.2); strips `/root/` / leading-slash / edited-root-name prefixes so `GetNodeOrNull` resolves against the edited scene root.
 - `packages/bridge/Editor/Bridge/BridgeBindAddress.cs` — loopback-only bind decision (P1.3); widens to remote+auth in P5.2.
 - `packages/bridge/Editor/Bridge/InstancePortResolver.cs` — per-project deterministic port (`20000 + sha256(path) % 10000`) and `~/.godot-open-mcp/instances/<hash>.json` lock path (P1.4). Mirrors `mcp-server/src/instance-discovery.ts` byte-for-byte.
 - `packages/bridge/Editor/Bridge/BridgeInstanceLock.cs` — instance lock + heartbeat file lifecycle (Acquire/UpdateState/Release, stale-lock sweep by PID liveness) for multi-instance port discovery (P1.4).

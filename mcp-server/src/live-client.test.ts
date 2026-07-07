@@ -673,3 +673,129 @@ test("ping: omits Authorization header when no token was provided", async () => 
     await bridge.close();
   }
 });
+
+// ----- P2.2: godot_open_mcp_node_find result-shape round-trip -----
+//
+// The postTool envelope tests above use generic payloads. These tests pin the
+// ACTUAL node_find result shapes the bridge handler emits — the { nodes, count,
+// truncated } list shape, the { nodes, count, truncated, notFound } targeted-
+// miss shape, and the no_edited_scene failure code — so a C# ↔ TS contract
+// drift on the node_find-specific fields is caught at the MCP layer. The bridge
+// handler itself (EditorInterface-coupled) is verified via the headless Godot
+// smoke / live call path, not here.
+
+test("node_find: targeted hit round-trips the NodeData list shape", async () => {
+  // The bridge returns one resolved node. The client must surface the result
+  // verbatim so the agent can read nodes[0].instanceId / .path / .type.
+  const nodeData = {
+    instanceId: 12345,
+    name: "Player",
+    path: "/root/Main/Player",
+    type: "Node3D",
+    scriptResourcePath: "res://player.gd",
+    childCount: 2,
+    children: null,
+  };
+  const bridge = await startBridgeStub(
+    successEnvelopeHandler("godot_open_mcp_node_find", {
+      nodes: [nodeData],
+      count: 1,
+      truncated: 0,
+    }),
+  );
+  try {
+    const client = new LiveClient(bridge.port);
+    const result = await client.route("godot_open_mcp_node_find", {
+      node_path: "Main/Player",
+    });
+    assert.equal(result.isError, false, "targeted hit is a success");
+    const body = JSON.parse(textOf(result));
+    assert.equal(body.count, 1);
+    assert.equal(body.truncated, 0);
+    assert.equal(body.nodes[0].name, "Player");
+    assert.equal(body.nodes[0].path, "/root/Main/Player");
+    assert.equal(body.nodes[0].type, "Node3D");
+    // notFound must NOT be present on a hit — its absence is the signal.
+    assert.equal(body.notFound, undefined);
+  } finally {
+    await bridge.close();
+  }
+});
+
+test("node_find: targeted miss round-trips notFound:true (NOT an error)", async () => {
+  // Mirrors Unity: a targeted lookup that misses is an empty list with
+  // notFound:true, NOT ok:false. The client must surface it as isError:false
+  // so an agent checking "does this node exist?" branches on the flag.
+  const bridge = await startBridgeStub(
+    successEnvelopeHandler("godot_open_mcp_node_find", {
+      nodes: [],
+      count: 0,
+      truncated: 0,
+      notFound: true,
+    }),
+  );
+  try {
+    const client = new LiveClient(bridge.port);
+    const result = await client.route("godot_open_mcp_node_find", {
+      node_path: "Main/Missing",
+    });
+    assert.equal(result.isError, false, "notFound is not an error");
+    const body = JSON.parse(textOf(result));
+    assert.equal(body.notFound, true);
+    assert.equal(body.count, 0);
+    assert.deepEqual(body.nodes, []);
+  } finally {
+    await bridge.close();
+  }
+});
+
+test("node_find: list mode round-trips count + truncated", async () => {
+  // A list scan that exceeds max_results reports the remainder in truncated.
+  const bridge = await startBridgeStub(
+    successEnvelopeHandler("godot_open_mcp_node_find", {
+      nodes: [
+        { instanceId: 1, name: "A", path: "/root/Main/A", type: "Node", childCount: 0, children: null },
+        { instanceId: 2, name: "B", path: "/root/Main/B", type: "Node", childCount: 0, children: null },
+      ],
+      count: 2,
+      truncated: 3,
+    }),
+  );
+  try {
+    const client = new LiveClient(bridge.port);
+    const result = await client.route("godot_open_mcp_node_find", {
+      type: "Node",
+      max_results: 2,
+    });
+    assert.equal(result.isError, false);
+    const body = JSON.parse(textOf(result));
+    assert.equal(body.count, 2);
+    assert.equal(body.truncated, 3);
+    assert.equal(body.nodes.length, 2);
+  } finally {
+    await bridge.close();
+  }
+});
+
+test("node_find: no_edited_scene failure code passes through", async () => {
+  // When no scene is open, the bridge returns ok:false + no_edited_scene. The
+  // client must surface the code verbatim so the agent can prompt to open a
+  // .tscn rather than retrying blindly.
+  const bridge = await startBridgeStub(
+    failureEnvelopeHandler(
+      "godot_open_mcp_node_find",
+      "no_edited_scene",
+      "No scene is currently being edited; open a .tscn before calling node_find.",
+    ),
+  );
+  try {
+    const client = new LiveClient(bridge.port);
+    const result = await client.route("godot_open_mcp_node_find", {});
+    assert.equal(result.isError, true);
+    const body = JSON.parse(textOf(result));
+    assert.equal(body.error.code, "no_edited_scene");
+    assert.match(body.error.message, /\.tscn/);
+  } finally {
+    await bridge.close();
+  }
+});

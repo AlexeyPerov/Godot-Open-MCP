@@ -84,6 +84,10 @@ namespace GodotOpenMcp.Bridge.Editor
                 // (P2.2+) register themselves the same way; the registry is idempotent so a
                 // re-enable after a domain reload refreshes entries without duplicate-key noise.
                 BridgeToolRegistry.RegisterEchoStub();
+                // P2.2 — first real read-only tool: godot_open_mcp_node_find. Registers alongside
+                // the echo stub on the same enable surface; idempotent re-register refreshes the
+                // handler reference after a domain reload.
+                NodeTools.RegisterNodeTools();
 
                 // Start the HTTP listener serving /ping and POST /tools/{name}. Stays down
                 // (and connected:false) if the bind fails — the editor remains usable, the

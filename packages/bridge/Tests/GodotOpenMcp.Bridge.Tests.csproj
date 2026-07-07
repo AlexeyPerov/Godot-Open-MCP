@@ -87,6 +87,15 @@
     <Compile Include="..\Editor\Bridge\BridgeEnvelope.cs" Link="Source\BridgeEnvelope.cs" />
     <Compile Include="..\Editor\Tools\ToolDispatchResult.cs" Link="Source\ToolDispatchResult.cs" />
     <Compile Include="..\Editor\Tools\BridgeToolRegistry.cs" Link="Source\BridgeToolRegistry.cs" />
+    <!-- P2.2 — godot_open_mcp_node_find. The pure-managed pieces (NodeData DTO, NodeFindBody
+         parser, NodePathNormalizer) are compiled into the binary-less host for off-editor unit
+         testing; the editor-only handler (NodeTools.Find / ResolveNode / ToNodeData) is #if TOOLS
+         and Godot-API-coupled, so it is verified via the headless Godot smoke / live call path,
+         not here. NodeData/NodeFindBody have no #if TOOLS guard so they compile directly; both
+         route string escaping through BridgeJson. -->
+    <Compile Include="..\Editor\Tools\NodeData.cs" Link="Source\NodeData.cs" />
+    <Compile Include="..\Editor\Tools\NodeFindBody.cs" Link="Source\NodeFindBody.cs" />
+    <Compile Include="..\Editor\Tools\NodePathNormalizer.cs" Link="Source\NodePathNormalizer.cs" />
   </ItemGroup>
 
 </Project>
