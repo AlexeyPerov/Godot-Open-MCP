@@ -77,6 +77,16 @@
          HTTP integration test uses) so the warning paths never P/Invoke into native Godot. -->
     <Compile Include="..\Editor\Bridge\InstancePortResolver.cs" Link="Source\InstancePortResolver.cs" />
     <Compile Include="..\Editor\Bridge\BridgeInstanceLock.cs" Link="Source\BridgeInstanceLock.cs" />
+    <!-- P2.1 — tool dispatch spine. BridgeRequestBody + BridgeEnvelope + ToolDispatchResult +
+         BridgeToolRegistry are pure-managed (no Godot APIs) so they compile into the binary-less
+         test host. BridgeHttpServer gains the POST /tools/{name} routing; the dispatch handler
+         marshals to the main thread via MainThreadDispatcher, whose IsMainThread fast path lets
+         the integration test drive the dispatcher directly (the test runs on the main thread, so
+         no queue hop is needed and no live dispatcher Node is required). -->
+    <Compile Include="..\Editor\Bridge\BridgeRequestBody.cs" Link="Source\BridgeRequestBody.cs" />
+    <Compile Include="..\Editor\Bridge\BridgeEnvelope.cs" Link="Source\BridgeEnvelope.cs" />
+    <Compile Include="..\Editor\Tools\ToolDispatchResult.cs" Link="Source\ToolDispatchResult.cs" />
+    <Compile Include="..\Editor\Tools\BridgeToolRegistry.cs" Link="Source\BridgeToolRegistry.cs" />
   </ItemGroup>
 
 </Project>

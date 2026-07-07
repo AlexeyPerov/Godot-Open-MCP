@@ -1,12 +1,15 @@
-// Live bridge client (P1.7).
+// Live bridge client (P1.7 / P2.1).
 //
 // The MCP-server-side counterpart to the bridge's HTTP listener. Holds the
 // resolved bridge endpoint (loopback host + port + optional bearer token) and
 // routes tool calls into HTTP requests.
 //
-// Scope (per execution-plan-7):
+// Scope:
 //   - `godot_open_mcp_ping` → bridge `GET /ping`, returning the live health
-//     payload on success and a structured error on failure.
+//     payload on success and a structured error on failure (P1.7).
+//   - Every other registered tool → bridge `POST /tools/{name}` with the tool
+//     args as the JSON body, unwrapping the canonical `{ ok, result, error }`
+//     envelope into a CallToolResult (P2.1).
 //   - Failure responses distinguish `bridge_offline` (ECONNREFUSED — bridge
 //     not running / wrong port) from `bridge_timeout` (AbortError — bridge
 //     too slow to respond within the client timeout).
@@ -14,19 +17,21 @@
 //     `Authorization: Bearer <token>` on every request when present; when
 //     absent no header is sent and the bridge must be in authMode "none".
 //
-// What is deliberately NOT here yet (later phases): mutating tool dispatch
-// (`POST /tools/{name}`), the gate envelope, compile-wait / 503 retry,
-// dead-bridge fail-fast via the instance lock, endpoint refresh from the lock,
-// agent identity header, SSE event stream, resource reads. The structure of
-// `route()` is shaped so those land cleanly: ping is the special-case
-// direct-to-`/ping` path, every other tool name will fall through to the
-// (future) tool-dispatch branch.
+// What is deliberately NOT here yet (later phases): the gate envelope
+// (P3.5 — P2.1 mutators dispatch directly with no gate wrapping), compile-wait
+// / 503 retry, dead-bridge fail-fast via the instance lock, endpoint refresh
+// from the lock, agent identity header, SSE event stream, resource reads. The
+// structure of `route()` is shaped so those land cleanly: ping is the
+// special-case direct-to-`/ping` path, every other tool name falls through to
+// `postTool`.
 //
 // Adapted from Unity Open MCP's mcp-server/src/live-client.ts (copy fidelity
-// for the ping path): same fetch-with-timeout helper, same PingResponse shape,
-// same offline-hint construction. The retry / classification / dialog-dismiss
-// machinery from the Unity original is intentionally deferred — see the
-// execution-plan-7 acceptance criteria.
+// for the ping path + the postTool fetch shape): same fetch-with-timeout
+// helper, same PingResponse shape, same offline-hint construction. The retry /
+// classification / dialog-dismiss machinery from the Unity original is
+// intentionally deferred — see the execution-plan acceptance criteria. P2.1
+// ships the simpler canonical `{ ok, result, error }` envelope (Unity uses a
+// richer gate-aware mutation envelope); the gate flow arrives in P3.5.
 
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { makeErrorResult } from "./results.js";
@@ -37,6 +42,17 @@ import {
 
 /** Default fetch timeout for /ping. Matches Unity's PING_TIMEOUT_MS. */
 const PING_TIMEOUT_MS = 5_000;
+
+/**
+ * The bridge's default per-tool dispatch timeout (ms) when the caller omits
+ * `timeout_ms`. Mirrors `BridgeRequestBody.DefaultTimeoutMs` in the bridge
+ * (packages/bridge/Editor/Bridge/BridgeRequestBody.cs) so the client floors its
+ * fetch timeout above the bridge's own wait — if the client aborted first it
+ * would re-POST while the bridge is still processing (a duplicate-mutation
+ * hazard for non-idempotent tools). Adapted from Unity's
+ * `BRIDGE_DEFAULT_TIMEOUT_MS`.
+ */
+const BRIDGE_DEFAULT_TIMEOUT_MS = 30_000;
 
 /** Tool name → route key for the ping probe (the only tool wired in P1.7). */
 export const PING_TOOL_NAME = "godot_open_mcp_ping";
@@ -56,6 +72,39 @@ export interface PingResponse {
   mode: string;
   compiling: boolean;
   isPlaying: boolean;
+}
+
+/**
+ * Bridge canonical success envelope (P2.1). Every successful tool dispatch
+ * returns `{ "ok": true, "result": ... }` where `result` is the handler's JSON
+ * output verbatim. Mirrors `BridgeEnvelope.BuildSuccess` in the bridge
+ * (packages/bridge/Editor/Bridge/BridgeEnvelope.cs).
+ */
+interface BridgeSuccessEnvelope {
+  ok: true;
+  result: unknown;
+}
+
+/**
+ * Bridge canonical failure envelope (P2.1). Every failed tool dispatch returns
+ * `{ "ok": false, "error": { "code", "message" } }`. Mirrors
+ * `BridgeEnvelope.BuildFailure` in the bridge. The `code` is a stable
+ * machine-readable string (e.g. `invalid_request`, `main_thread_blocked`,
+ * `timeout`, `execution_error`); `message` is human-readable.
+ */
+interface BridgeFailureEnvelope {
+  ok: false;
+  error: { code: string; message: string };
+}
+
+/**
+ * The HTTP-level error body the bridge writes for routing/transport faults
+ * (404 tool_not_found, 405 method_not_allowed, 400 invalid_request, 500
+ * bridge_internal_error). Same `{ error: { code, message } }` shape as the
+ * dispatch failure envelope, but delivered with a non-200 HTTP status.
+ */
+interface HttpErrorBody {
+  error?: { code?: string; message?: string };
 }
 
 /**
@@ -123,24 +172,19 @@ export class LiveClient {
   }
 
   /**
-   * Route a tool call to the bridge. P1.7 wires only the ping path; every
-   * other tool name surfaces a structured "not yet implemented" error so the
-   * CallTool dispatcher never throws. Later phases replace the fallback with
-   * `POST /tools/{name}` dispatch through the gate flow.
+   * Route a tool call to the bridge. Ping is the special-case direct-to-`/ping`
+   * path (P1.7); every other registered tool name dispatches through
+   * `POST /tools/{name}` via `postTool` (P2.1). The CallTool dispatcher never
+   * throws — every failure path returns a structured `isError` result.
    */
   async route(
     toolName: string,
-    _args: Record<string, unknown>,
+    args: Record<string, unknown>,
   ): Promise<CallToolResult> {
     if (toolName === PING_TOOL_NAME) {
       return this.handlePing();
     }
-    return makeErrorResult({
-      code: "tool_not_routed",
-      message:
-        `Tool '${toolName}' is not routed to the bridge in this build. ` +
-        "Only godot_open_mcp_ping is wired in P1.7; mutating tool dispatch arrives in later phases.",
-    });
+    return this.postTool(toolName, args);
   }
 
   /**
@@ -199,6 +243,160 @@ export class LiveClient {
     } catch (err) {
       return this.classifyPingFailure(err);
     }
+  }
+
+  /**
+   * `POST /tools/{name}` dispatch (P2.1). Sends the tool args as the JSON body
+   * and unwraps the bridge's canonical `{ ok, result, error }` envelope into a
+   * CallToolResult:
+   *   - HTTP 200 + `ok:true`  → success; `result` returned verbatim as JSON text.
+   *   - HTTP 200 + `ok:false` → the request reached the dispatcher and was
+   *     processed but the tool failed (invalid_request, main_thread_blocked,
+   *     timeout, execution_error, ...). Surfaced as `isError:true` with the
+   *     bridge's `error.code` / `error.message`.
+   *   - HTTP 4xx/5xx          → routing/transport fault (tool_not_found,
+   *     method_not_allowed, invalid_request body, bridge_internal_error).
+   *     Surfaced as `bridge_http_error` with the status + the body's error
+   *     code/message when available.
+   *   - ECONNREFUSED / socket failure (TypeError) → `bridge_offline`.
+   *   - AbortController timeout (AbortError) → `bridge_timeout`.
+   *
+   * The client fetch timeout is floored at `BRIDGE_DEFAULT_TIMEOUT_MS` + slack
+   * so the client never aborts before the bridge has had a chance to return its
+   * own timeout envelope — without this floor, a small/absent `timeout_ms`
+   * would make the client re-POST while the bridge is still processing
+   * (duplicate-mutation hazard). Adapted from Unity's `postTool` (copy
+   * fidelity for the fetch shape + timeout floor), simplified to the P2.1
+   * canonical envelope (no mutation/gate envelope, no compile-wait 503 retry).
+   */
+  private async postTool(
+    toolName: string,
+    args: Record<string, unknown>,
+  ): Promise<CallToolResult> {
+    try {
+      // Floor the client fetch timeout above the bridge's own default wait so
+      // the client never preempts the bridge's timeout envelope. An explicit
+      // large timeout_ms still wins via the Math.max.
+      const timeoutMs =
+        typeof args.timeout_ms === "number" ? args.timeout_ms : 60_000;
+      const fetchTimeout = Math.max(
+        timeoutMs + 10_000,
+        BRIDGE_DEFAULT_TIMEOUT_MS + 10_000,
+      );
+
+      const res = await this.fetchWithTimeout(
+        `/tools/${toolName}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json; charset=utf-8" },
+          body: JSON.stringify(args),
+        },
+        fetchTimeout,
+      );
+
+      if (!res.ok) {
+        // HTTP-level routing/transport fault (404/405/400/500). The body may
+        // carry a structured { error: { code, message } }; fall back to a
+        // generic bridge_http_error when it doesn't.
+        const body = (await res
+          .json()
+          .catch(() => null)) as HttpErrorBody | null;
+        const code = body?.error?.code ?? "bridge_http_error";
+        const message =
+          body?.error?.message ??
+          `Bridge /tools/${toolName} returned HTTP ${res.status}`;
+        return makeErrorResult({ code, message });
+      }
+
+      // HTTP 200 — unwrap the canonical { ok, result, error } envelope.
+      const rawText = await res.text();
+      let parsed: unknown = null;
+      try {
+        parsed = JSON.parse(rawText);
+      } catch {
+        // 200 OK with a non-JSON body is a bridge contract violation (the
+        // bridge always emits valid JSON envelopes). Surface it as a structured
+        // error rather than manufacturing a fake success.
+        return makeErrorResult({
+          code: "bridge_response_unparsable",
+          message:
+            `Bridge returned HTTP 200 for '${toolName}' but the body was not ` +
+            `valid JSON. This is a bridge contract violation — the bridge ` +
+            "should always emit a { ok, result, error } envelope. Raw body: " +
+            (rawText.length > 200 ? rawText.slice(0, 200) + "…" : rawText),
+        });
+      }
+
+      return this.unwrapEnvelope(toolName, parsed);
+    } catch (err) {
+      // Reuse the ping failure classifier: the same fetch-with-timeout +
+      // bearer-token plumbing backs both paths, so a connection failure or
+      // timeout classifies identically (bridge_offline vs bridge_timeout).
+      return this.classifyPingFailure(err);
+    }
+  }
+
+  /**
+   * Unwrap the bridge's canonical `{ ok, result, error }` envelope into a
+   * CallToolResult. Split out from `postTool` so the envelope-parsing contract
+   * is unit-testable without spinning up an HTTP stub.
+   *
+   *   - `ok:true`  → success; `result` serialized verbatim as the text block.
+   *                  A missing `result` field is treated as `null` (a handler
+   *                  that returns no payload still produces a valid success).
+   *   - `ok:false` → failure; the bridge's `error.code` / `error.message`
+   *                  become the structured error. A missing `error` object is
+   *                  surfaced as `execution_error` (defensive — the bridge
+   *                  always emits `error` on `ok:false`).
+   *   - neither    → a body that is not the canonical envelope. Surface as
+   *                  `bridge_response_unparsable` so the contract drift is
+   *                  visible rather than silently misframed.
+   */
+  private unwrapEnvelope(toolName: string, parsed: unknown): CallToolResult {
+    if (typeof parsed !== "object" || parsed === null) {
+      return makeErrorResult({
+        code: "bridge_response_unparsable",
+        message:
+          `Bridge returned a non-object body for '${toolName}'. Expected ` +
+          "{ ok, result, error }; got a " +
+          (parsed === null ? "null" : typeof parsed) +
+          ".",
+      });
+    }
+
+    const env = parsed as Partial<BridgeSuccessEnvelope> &
+      Partial<BridgeFailureEnvelope>;
+    if (env.ok === true) {
+      // Success. `result` may be any JSON value (object, array, scalar, null);
+      // serialize it verbatim so the agent sees exactly what the handler
+      // produced. A missing `result` is treated as null.
+      const result = "result" in env ? env.result : null;
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        isError: false,
+      };
+    }
+
+    if (env.ok === false) {
+      // Failure. The bridge always emits { code, message } under `error`; fall
+      // back defensively if a malformed envelope omits it.
+      const err = env.error ?? { code: "execution_error", message: undefined };
+      return makeErrorResult({
+        code: err.code ?? "execution_error",
+        message:
+          err.message ??
+          `Tool '${toolName}' failed with ok:false but no error message.`,
+      });
+    }
+
+    // `ok` is missing or not a boolean — contract drift.
+    return makeErrorResult({
+      code: "bridge_response_unparsable",
+      message:
+        `Bridge returned a body for '${toolName}' that is not the canonical ` +
+        "{ ok, result, error } envelope (the `ok` field is missing or not a " +
+        "boolean). This is a bridge contract violation.",
+    });
   }
 
   /**

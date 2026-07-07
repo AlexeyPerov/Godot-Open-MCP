@@ -6,7 +6,7 @@ This file is the index for external interfaces and protocol contracts exposed by
 
 | Document | Covers | Status |
 |---|---|---|
-| `api/bridge-http.md` | Godot bridge HTTP endpoints (`/ping`, `/tools/*`), envelopes, and errors. | TBD |
+| `api/bridge-http.md` | Godot bridge HTTP endpoints (`/ping`, `/tools/*`), envelopes, and errors. | Shipped (P2.1) |
 | `api/mcp-tools.md` | MCP tool catalog, tool families, route policy (live/offline/local). | TBD |
 | `api/resources.md` | MCP resource URIs, payload shapes, and resource router behavior. | TBD |
 

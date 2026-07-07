@@ -4,6 +4,7 @@ using System;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading;
+using GodotOpenMcp.Bridge.Runtime.MainThread;
 
 namespace GodotOpenMcp.Bridge.Editor
 {
@@ -213,10 +214,10 @@ namespace GodotOpenMcp.Bridge.Editor
         }
 
         /// <summary>
-        /// Route one request. P1.3 handles <c>/ping</c> and a 404 fallback; later phases add
-        /// <c>/tools</c>, <c>/tools/{name}</c>, <c>/instance</c>, <c>/events</c>, and the auth gate
-        /// that runs before routing. Every branch writes its own response and the finally closes
-        /// the response stream.
+        /// Route one request. P1.3 handled <c>/ping</c> and a 404 fallback; P2.1 adds
+        /// <c>POST /tools/{name}</c> dispatch. Later phases add <c>/tools</c>,
+        /// <c>/instance</c>, <c>/events</c>, and the auth gate that runs before routing. Every
+        /// branch writes its own response and the finally closes the response stream.
         /// </summary>
         static void HandleRequest(HttpListenerContext context)
         {
@@ -225,21 +226,50 @@ namespace GodotOpenMcp.Bridge.Editor
                 // Trim trailing slash so /ping and /ping/ route identically (mirrors Unity).
                 var path = context.Request.Url?.AbsolutePath.TrimEnd('/') ?? "/";
 
-                switch (path)
+                // /ping is GET-only (mirrors Unity). A POST to /ping is a 405, not a 404, so a
+                // client that mistypes the method gets an actionable error.
+                if (path == "/ping")
                 {
-                    case "/ping":
+                    if (context.Request.HttpMethod == "GET")
+                    {
                         HandlePing(context);
-                        break;
-                    default:
-                        BridgeHttpResponse.SendNotFound(context, path);
-                        break;
+                    }
+                    else
+                    {
+                        BridgeHttpResponse.SendMethodNotAllowed(context, "GET required for /ping");
+                    }
+                    return;
                 }
+
+                // POST /tools/{name} — tool dispatch (P2.1). The name segment is everything after
+                // "/tools/"; an empty name falls through to the 404 below (there is no index
+                // handler for /tools/ yet — the GET /tools capability endpoint arrives in a later
+                // phase).
+                if (path.StartsWith("/tools/", StringComparison.Ordinal))
+                {
+                    var toolName = path.Substring("/tools/".Length);
+                    if (string.IsNullOrEmpty(toolName))
+                    {
+                        BridgeHttpResponse.SendNotFound(context, path);
+                        return;
+                    }
+                    if (context.Request.HttpMethod != "POST")
+                    {
+                        BridgeHttpResponse.SendMethodNotAllowed(context, "POST required for tool endpoints");
+                        return;
+                    }
+                    HandleToolDispatch(context, toolName);
+                    return;
+                }
+
+                BridgeHttpResponse.SendNotFound(context, path);
             }
             catch
             {
                 // Last-resort envelope so a handler throw still produces JSON instead of a half-
-                // written response. The 404 path above cannot throw; future tool-dispatch handlers
-                // will surface structured execution_error envelopes here.
+                // written response. The 404 path above cannot throw; tool-dispatch handler throws
+                // are caught inside HandleToolDispatch and surfaced as execution_error envelopes,
+                // so reaching here means something in the router itself faulted.
                 try
                 {
                     BridgeHttpResponse.SendJson(context, 500,
@@ -272,6 +302,175 @@ namespace GodotOpenMcp.Bridge.Editor
             }
             BridgeHttpResponse.SendJson(context, 200, BridgeJson.BuildPingJson());
         }
+
+        // --- POST /tools/{name} dispatch (P2.1) -------------------------------------------
+        //
+        // The dispatch path enforces the bridge AGENTS.md §Transport contract: every tool handler
+        // runs on the editor main thread via MainThreadDispatcher. The HTTP worker thread reads
+        // the request body and resolves the timeout, then marshals the handler call to the main
+        // thread and awaits it. The handler returns a ToolDispatchResult; this method wraps it
+        // into the canonical {ok,result,error} envelope (BridgeEnvelope) and writes the HTTP 200
+        // response.
+        //
+        // Failure classification (all surface as HTTP 200 with ok:false — the request reached the
+        // dispatcher and was processed; HTTP-level 4xx/5xx is reserved for routing/transport
+        // faults):
+        //   - tool_not_found      → 404 (the name is not registered)
+        //   - invalid_request     → 400 (body could not be read)
+        //   - main_thread_blocked → ok:false, code main_thread_blocked (timeout, never drained)
+        //   - timeout             → ok:false, code timeout (handler ran past timeout)
+        //   - execution_error     → ok:false, code execution_error (handler threw)
+        //
+        // Gate wrapping is intentionally deferred to P3.5 (per execution-plan P2.1 §Intentional
+        // deltas): P2.1 mutators dispatch directly. The BridgeToolEntry.IsMutating flag is catalog
+        // metadata only in this phase.
+
+        /// <summary>
+        /// Dispatch one <c>POST /tools/{name}</c> request. Reads the body, resolves the tool,
+        /// marshals the handler to the main thread, and writes the canonical envelope. The method
+        /// never throws — every failure path writes a structured response. Adapted from Unity's
+        /// <c>HandleToolDispatch</c>, with the gate / toggle / paths_hint machinery stripped
+        /// (deferred to P3.5).
+        /// </summary>
+        static void HandleToolDispatch(HttpListenerContext context, string toolName)
+        {
+            // Unknown tool → 404 tool_not_found before reading the body (cheap reject).
+            if (!BridgeToolRegistry.Contains(toolName))
+            {
+                BridgeHttpResponse.SendToolNotFound(context, toolName);
+                return;
+            }
+
+            string body;
+            try
+            {
+                body = BridgeRequestBody.ReadRequestBody(context.Request);
+            }
+            catch (Exception e)
+            {
+                BridgeHttpResponse.SendInvalidRequest(context,
+                    $"Failed to read request body: {e.Message}");
+                return;
+            }
+
+            var timeoutMs = BridgeRequestBody.ExtractTimeoutMs(body);
+
+            ToolDispatchResult result;
+            try
+            {
+                result = DispatchOnMainThread(toolName, body, timeoutMs);
+            }
+            catch (MainThreadBlockedException)
+            {
+                // The main thread never drained the work within the timeout — almost certainly a
+                // Godot modal blocking the editor. Surface a structured error so an agent can
+                // branch (dismiss the dialog, scene_save, restart) rather than retry blindly.
+                result = ToolDispatchResult.Fail(
+                    "main_thread_blocked",
+                    $"Tool '{toolName}' could not run — the Godot main thread is blocked by a modal " +
+                    "dialog (unsaved changes, export, a third-party editor window) or a long editor " +
+                    "operation. Do NOT raise timeout_ms. Check editor state, dismiss any open dialog, " +
+                    $"or restart the editor. (waited {timeoutMs}ms)");
+            }
+            catch (TimeoutException)
+            {
+                // The handler started but ran past the timeout. Distinguished from
+                // main_thread_blocked so an agent can tell "the work is slow" from "the work never
+                // started".
+                result = ToolDispatchResult.Fail(
+                    "timeout",
+                    $"Tool '{toolName}' started but did not finish within {timeoutMs}ms. " +
+                    "The tool itself is slow — raise timeout_ms or simplify the request.");
+            }
+            catch (Exception e)
+            {
+                // Handler threw an unhandled exception. The handler contract says handlers must not
+                // throw (they return ToolDispatchResult.Fail), so reaching here is a handler bug —
+                // surface it as execution_error rather than crashing the worker.
+                result = ToolDispatchResult.Fail("execution_error", e.Message);
+            }
+
+            // Wrap into the canonical envelope and write. Every dispatch outcome (success or
+            // failure) is HTTP 200 — the request reached the dispatcher and was processed. The
+            // ok:false flag + error.code carry the failure classification for the client.
+            var envelope = result.Success
+                ? BridgeEnvelope.BuildSuccess(result.Output)
+                : BridgeEnvelope.BuildFailure(result);
+            BridgeHttpResponse.SendJson(context, 200, envelope);
+        }
+
+        /// <summary>
+        /// Marshal a tool handler to the editor main thread and await its result. When the caller
+        /// is already on the main thread (e.g. a test driving the dispatcher directly), the handler
+        /// runs inline — no queue hop. Otherwise the call goes through
+        /// <see cref="MainThreadDispatcher.EnqueueAsync{T}"/> with the per-call timeout, which
+        /// distinguishes <c>main_thread_blocked</c> (never drained) from <c>timeout</c> (ran long).
+        /// </summary>
+        static ToolDispatchResult DispatchOnMainThread(string toolName, string body, int timeoutMs)
+        {
+            // Test seam: when the integration test installs an inline dispatcher, run the handler
+            // on the calling thread directly. The binary-less test host has no live dispatcher
+            // Node to drain the queue, so the real EnqueueAsync path would time out. The seam
+            // lets the HTTP integration test exercise the routing + envelope contract without a
+            // Godot Node; the main-thread-marshaling behavior itself is covered by the
+            // MainThreadDispatcher unit tests. Never set in production.
+            var inlineDispatcher = _dispatchForTests;
+            if (inlineDispatcher != null)
+                return inlineDispatcher(toolName, body, timeoutMs);
+
+            // Fast path: already on the main thread. Tests that drive the dispatcher directly
+            // (and a handler that somehow runs on the main thread already) skip the queue hop.
+            // Production HTTP workers are NEVER on the main thread, so this branch is test-only in
+            // practice — but it keeps the dispatcher unit-testable without a live dispatcher Node.
+            if (MainThreadDispatcher.IsMainThread)
+            {
+                return DispatchTool(toolName, body);
+            }
+
+            // Marshal to the main thread and await. EnqueueAsync faults the task with
+            // MainThreadBlockedException (never drained) or TimeoutException (ran long) on timeout.
+            return MainThreadDispatcher.EnqueueAsync(() => DispatchTool(toolName, body), timeoutMs)
+                .GetAwaiter().GetResult();
+        }
+
+        /// <summary>
+        /// Test-only seam: when non-null, <see cref="DispatchOnMainThread"/> invokes this delegate
+        /// instead of marshaling through <see cref="MainThreadDispatcher"/>. The binary-less test
+        /// host cannot construct the dispatcher Node, so the real queue-and-drain path has nothing
+        /// to drain it; this seam lets the HTTP integration test run handlers inline and exercise
+        /// the routing + envelope contract. Mirrors the <see cref="BridgeLog.SetLoggersForTests"/>
+        /// pattern. Never set in production; cleared by <see cref="ResetForTests"/>.
+        /// </summary>
+        static Func<string, string, int, ToolDispatchResult>? _dispatchForTests;
+
+        /// <summary>Test-only: install an inline dispatcher (or null to restore the real path).</summary>
+        internal static void SetDispatchForTests(Func<string, string, int, ToolDispatchResult>? dispatcher) =>
+            _dispatchForTests = dispatcher;
+
+        /// <summary>Test-only: clear the inline dispatcher seam.</summary>
+        internal static void ResetForTests() => _dispatchForTests = null;
+
+        /// <summary>
+        /// Invoke the registered handler for <paramref name="toolName"/> with <paramref name="body"/>.
+        /// Returns the handler's <see cref="ToolDispatchResult"/>; a missing handler surfaces a
+        /// <c>tool_not_found</c> failure (defensive — the routing layer already rejected unknown
+        /// names, but a race between Contains and TryDispatch could still miss). Mirrors Unity's
+        /// <c>DispatchTool</c>.
+        /// </summary>
+        static ToolDispatchResult DispatchTool(string toolName, string body)
+        {
+            return BridgeToolRegistry.TryDispatch(toolName, body)
+                ?? ToolDispatchResult.Fail("tool_not_found", $"Unknown tool: {toolName}");
+        }
+
+        /// <summary>
+        /// Test-only pass-through to <see cref="DispatchTool"/>. Exposed so the inline dispatcher
+        /// seam (<see cref="SetDispatchForTests"/>) can invoke the real per-tool dispatch path
+        /// (registry lookup + handler) without re-implementing it in the test. Never referenced by
+        /// production code.
+        /// </summary>
+        internal static ToolDispatchResult DispatchToolForTests(string toolName, string body) =>
+            DispatchTool(toolName, body);
 
         // --- Cleanup helpers --------------------------------------------------------------
 

@@ -52,6 +52,46 @@ namespace GodotOpenMcp.Bridge.Editor
                 + BridgeJson.EscapeStringContent(path) + "\"}}";
             SendJson(context, 404, json);
         }
+
+        /// <summary>
+        /// 404 envelope for an unknown tool name on <c>POST /tools/{name}</c> (P2.1). The body
+        /// shape (<c>{"error":{"code":"tool_not_found",...}}</c>) matches Unity's so an MCP
+        /// client reading the error sees a consistent contract across tools the bridge does not
+        /// serve. Adapted from Unity's <c>SendToolNotFound</c>.
+        /// </summary>
+        internal static void SendToolNotFound(HttpListenerContext context, string toolName)
+        {
+            var json = "{\"error\":{\"code\":\"tool_not_found\",\"message\":\"Unknown tool: "
+                + BridgeJson.EscapeStringContent(toolName) + "\"}}";
+            SendJson(context, 404, json);
+        }
+
+        /// <summary>
+        /// 405 envelope for a wrong HTTP method on a known route (P2.1). Used when a client GETs
+        /// <c>/tools/{name}</c> (POST required) or POSTs <c>/ping</c> (GET required). The body
+        /// shape (<c>{"error":{"code":"method_not_allowed",...}}</c>) matches Unity's. Adapted
+        /// from Unity's <c>SendJsonError(context, 405, "method_not_allowed", ...)</c>.
+        /// </summary>
+        internal static void SendMethodNotAllowed(HttpListenerContext context, string message)
+        {
+            var json = "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\""
+                + BridgeJson.EscapeStringContent(message) + "\"}}";
+            SendJson(context, 405, json);
+        }
+
+        /// <summary>
+        /// 400 envelope for a malformed request body on <c>POST /tools/{name}</c> (P2.1). Used
+        /// when the request body cannot be read or is structurally invalid (e.g. not a JSON
+        /// object). Distinct from <c>tool_not_found</c> (the tool exists, the body is bad) and
+        /// from a handler-level <c>invalid_request</c> (the body parsed but a field was wrong).
+        /// Adapted from Unity's <c>SendJsonError(context, 400, "invalid_request", ...)</c>.
+        /// </summary>
+        internal static void SendInvalidRequest(HttpListenerContext context, string message)
+        {
+            var json = "{\"error\":{\"code\":\"invalid_request\",\"message\":\""
+                + BridgeJson.EscapeStringContent(message) + "\"}}";
+            SendJson(context, 400, json);
+        }
     }
 }
 #endif

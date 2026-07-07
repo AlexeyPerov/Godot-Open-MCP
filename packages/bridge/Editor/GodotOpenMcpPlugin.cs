@@ -79,10 +79,17 @@ namespace GodotOpenMcp.Bridge.Editor
                 // probe. Runs on the main thread (here) so it may freely touch engine APIs.
                 BridgeSession.InitializeForEnable();
 
-                // Start the HTTP listener serving /ping. Stays down (and connected:false)
-                // if the bind fails — the editor remains usable, /ping is just unreachable.
-                // The listener thread is the only off-thread path; it reads only cached
-                // session statics for /ping, never touching EditorInterface directly.
+                // Register the P2.1 smoke stub tool so POST /tools/godot_open_mcp_echo
+                // round-trips end-to-end before any real tool family lands. Real tool families
+                // (P2.2+) register themselves the same way; the registry is idempotent so a
+                // re-enable after a domain reload refreshes entries without duplicate-key noise.
+                BridgeToolRegistry.RegisterEchoStub();
+
+                // Start the HTTP listener serving /ping and POST /tools/{name}. Stays down
+                // (and connected:false) if the bind fails — the editor remains usable, the
+                // bridge is just unreachable. The listener thread is the only off-thread path;
+                // it reads only cached session statics for /ping and marshals tool handlers to
+                // the main thread via the dispatcher, never touching EditorInterface directly.
                 BridgeHttpServer.Start();
 
                 _enabled = true;
