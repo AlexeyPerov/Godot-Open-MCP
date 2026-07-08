@@ -16,9 +16,11 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { ping } from "./ping.js";
 import { nodeFind } from "./node-find.js";
+import { nodeCreate } from "./node-create.js";
 
 /** Ordered list of every tool exposed over stdio MCP. */
 export const ALL_TOOLS: Tool[] = [
   ping,
   nodeFind,
+  nodeCreate,
 ];

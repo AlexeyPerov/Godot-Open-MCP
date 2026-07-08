@@ -96,6 +96,12 @@
     <Compile Include="..\Editor\Tools\NodeData.cs" Link="Source\NodeData.cs" />
     <Compile Include="..\Editor\Tools\NodeFindBody.cs" Link="Source\NodeFindBody.cs" />
     <Compile Include="..\Editor\Tools\NodePathNormalizer.cs" Link="Source\NodePathNormalizer.cs" />
+    <!-- P2.3 — godot_open_mcp_node_create. The pure-managed NodeCreateBody parser compiles into
+         the binary-less host (same hand-rolled scalar-extraction style as NodeFindBody); the
+         editor-only handler (NodeTools.Create / SetOwnerRecursive / ApplyTransform) is #if TOOLS
+         and ClassDB/EditorInterface-coupled, so it is verified via the headless Godot smoke / live
+         call path, not here. -->
+    <Compile Include="..\Editor\Tools\NodeCreateBody.cs" Link="Source\NodeCreateBody.cs" />
   </ItemGroup>
 
 </Project>
