@@ -118,6 +118,13 @@
     <Compile Include="..\Editor\Tools\SceneSummary.cs" Link="Source\SceneSummary.cs" />
     <Compile Include="..\Editor\Tools\SceneOpenBody.cs" Link="Source\SceneOpenBody.cs" />
     <Compile Include="..\Editor\Tools\SceneSaveBody.cs" Link="Source\SceneSaveBody.cs" />
+    <!-- P2.7 — scene data + create tools (scene_get_data / scene_create). The pure-managed
+         SceneGetDataBody + SceneCreateBody parsers compile into the binary-less host (same
+         hand-rolled scalar-extraction style as the scene lifecycle *Body parsers); the editor-only
+         handler (SceneTools.GetData / Create) is #if TOOLS and EditorInterface/ClassDB/ResourceSaver-
+         coupled, so it is verified via the headless Godot smoke / live call path, not here. -->
+    <Compile Include="..\Editor\Tools\SceneGetDataBody.cs" Link="Source\SceneGetDataBody.cs" />
+    <Compile Include="..\Editor\Tools\SceneCreateBody.cs" Link="Source\SceneCreateBody.cs" />
   </ItemGroup>
 
 </Project>

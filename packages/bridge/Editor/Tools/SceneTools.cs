@@ -10,7 +10,9 @@ namespace GodotOpenMcp.Bridge.Editor
     /// Scene tool family — the Godot analog of Unity Open MCP's
     /// <c>TypedTools/ScenesTools.cs</c>. P2.6 implements the three scene lifecycle tools:
     /// <c>godot_open_mcp_scene_open</c>, <c>godot_open_mcp_scene_save</c>, and the read-only
-    /// <c>godot_open_mcp_scene_list_opened</c>.
+    /// <c>godot_open_mcp_scene_list_opened</c>. P2.7 adds the live hierarchy read
+    /// <c>godot_open_mcp_scene_get_data</c> and the scene-file creator
+    /// <c>godot_open_mcp_scene_create</c>.
     ///
     /// <para>
     /// Godot ↔ Unity mapping: a Godot scene is a <see cref="PackedScene"/> on disk
@@ -25,8 +27,8 @@ namespace GodotOpenMcp.Bridge.Editor
     /// <para>
     /// Editor-only (<c>#if TOOLS</c>): the handlers touch <see cref="EditorInterface"/> and live
     /// <see cref="Node"/> objects. The pure-managed pieces (<see cref="SceneSummary"/>,
-    /// <see cref="SceneOpenBody"/>, <see cref="SceneSaveBody"/>) live outside this guard and are
-    /// unit-tested.
+    /// <see cref="SceneOpenBody"/>, <see cref="SceneSaveBody"/>, <see cref="SceneGetDataBody"/>,
+    /// <see cref="SceneCreateBody"/>) live outside this guard and are unit-tested.
     /// </para>
     /// </summary>
     internal static class SceneTools
@@ -39,6 +41,12 @@ namespace GodotOpenMcp.Bridge.Editor
 
         /// <summary>The MCP tool name for the opened-scene lister (P2.6).</summary>
         internal const string SceneListOpenedToolName = "godot_open_mcp_scene_list_opened";
+
+        /// <summary>The MCP tool name for the scene hierarchy read (P2.7).</summary>
+        internal const string SceneGetDataToolName = "godot_open_mcp_scene_get_data";
+
+        /// <summary>The MCP tool name for the scene file creator (P2.7).</summary>
+        internal const string SceneCreateToolName = "godot_open_mcp_scene_create";
 
         // --- bridge-tracked dirty state ---------------------------------------------
         //
@@ -105,7 +113,9 @@ namespace GodotOpenMcp.Bridge.Editor
         /// Register the scene tool family. P2.6 adds three tools — the mutating
         /// <c>godot_open_mcp_scene_open</c> and <c>godot_open_mcp_scene_save</c> (group
         /// <c>scene</c>, default gate <c>off</c> — the gate flow lands in P3.5 and is a no-op until
-        /// then), and the read-only <c>godot_open_mcp_scene_list_opened</c>. Registered once at
+        /// then), and the read-only <c>godot_open_mcp_scene_list_opened</c>. P2.7 adds two more —
+        /// the read-only <c>godot_open_mcp_scene_get_data</c> (live hierarchy snapshot) and the
+        /// mutating <c>godot_open_mcp_scene_create</c> (new <c>.tscn</c> file). Registered once at
         /// plugin enable; safe to call again on re-enable (the registry is idempotent).
         /// </summary>
         internal static void RegisterSceneTools()
@@ -128,6 +138,18 @@ namespace GodotOpenMcp.Bridge.Editor
                 defaultGate: "off",
                 group: "scene",
                 handler: ListOpened));
+            BridgeToolRegistry.Register(new BridgeToolEntry(
+                name: SceneGetDataToolName,
+                isMutating: false,
+                defaultGate: "off",
+                group: "scene",
+                handler: GetData));
+            BridgeToolRegistry.Register(new BridgeToolEntry(
+                name: SceneCreateToolName,
+                isMutating: true,
+                defaultGate: "off",
+                group: "scene",
+                handler: Create));
         }
 
         // --- godot_open_mcp_scene_open ----------------------------------------------
@@ -492,6 +514,310 @@ namespace GodotOpenMcp.Bridge.Editor
                 string.IsNullOrEmpty(activePath) ? null : activePath));
             sb.Append('}');
             return ToolDispatchResult.Ok(sb.ToString());
+        }
+
+        // --- godot_open_mcp_scene_get_data (P2.7) -----------------------------------
+
+        /// <summary>
+        /// Handler for <c>godot_open_mcp_scene_get_data</c>. Read-only. Returns a live snapshot of the
+        /// edited scene's hierarchy as a <see cref="NodeData"/> tree (the same DTO
+        /// <c>node_find</c> returns), driven by a <c>hierarchy_depth</c> bound. Adapted from Unity
+        /// Open MCP's <c>ScenesTools.GetData</c> (adapt fidelity — Unity walks GameObject roots;
+        /// Godot walks the single edited scene root) and Godot-MCP's <c>Tool_Scene.GetData</c>
+        /// (behavior reference — the <c>hierarchyDepth</c>-to-<c>int.MaxValue</c> sentinel trick for
+        /// "whole tree" is lifted from there).
+        ///
+        /// <para>
+        /// P2.7 scope is live-only: get-data reads the editor's edited scene. Offline read of an
+        /// arbitrary <c>.tscn</c> on disk (without opening it) lands in P7.2. When <c>path</c> is
+        /// provided and does NOT match the edited scene, the handler returns
+        /// <c>scene_not_edited</c> and points the agent at <c>scene_open</c> — switching the active
+        /// scene is a mutating op that belongs to <c>scene_open</c>, not this read.
+        /// </para>
+        ///
+        /// <para>
+        /// <c>hierarchy_depth</c> semantics: 0 = root node only (no children); 1 (default) = root +
+        /// direct children; N = N layers; <c>-1</c> = the whole tree (positive values capped at 5 to
+        /// bound the token budget). The result carries the scene's path/name/isDirty plus a
+        /// <c>root</c> NodeData with its children populated per the depth.
+        /// </para>
+        ///
+        /// Structured failures: <c>no_edited_scene</c>, <c>scene_not_edited</c>. Must not throw —
+        /// exceptions are caught by the dispatcher and surfaced as <c>execution_error</c>.
+        /// </summary>
+        internal static ToolDispatchResult GetData(string body)
+        {
+            var request = SceneGetDataBody.Parse(body);
+
+            var root = EditorInterface.Singleton.GetEditedSceneRoot();
+            if (root == null)
+            {
+                return ToolDispatchResult.Fail(
+                    "no_edited_scene",
+                    "No scene is currently being edited; open a .tscn before calling scene_get_data.");
+            }
+
+            // P2.7 reads the edited scene only. A path that does not match is a soft mismatch — the
+            // agent likely wants a different scene, which requires scene_open (a mutating op). Pointing
+            // them there keeps get-data read-only and avoids silently switching the active scene.
+            if (request.Path != null)
+            {
+                var editedPath = root.GetSceneFilePath();
+                if (request.Path != editedPath)
+                {
+                    return ToolDispatchResult.Fail(
+                        "scene_not_edited",
+                        $"scene_get_data is a live read of the edited scene only (P2.7). " +
+                        $"Requested '{request.Path}' but the edited scene is '{editedPath ?? "<unsaved>"}'. " +
+                        "Call scene_open first to switch scenes; offline read of an arbitrary .tscn lands in P7.2.");
+                }
+            }
+
+            // Reuse the node tool family's tree serializer. It is depth-counted and walks non-internal
+            // children, matching Godot-MCP's Tool_Scene.GetData behavior. EffectiveDepth translates -1
+            // (unlimited) into int.MaxValue so ToNodeData's depth decrement visits the whole tree.
+            var rootData = NodeTools.ToNodeData(root, request.EffectiveDepth);
+
+            var path = root.GetSceneFilePath();
+            var summary = ToSceneSummary(root, isActive: true);
+
+            var sb = new StringBuilder(256);
+            sb.Append("{\"path\":").Append(BridgeJson.EscapeString(summary.Path));
+            sb.Append(",\"name\":").Append(BridgeJson.EscapeString(summary.Name));
+            sb.Append(",\"isDirty\":").Append(IsEditedSceneDirty() ? "true" : "false");
+            sb.Append(",\"rootType\":").Append(BridgeJson.EscapeString(summary.RootType));
+            sb.Append(",\"hierarchyDepth\":").Append(request.HierarchyDepth.ToString(
+                System.Globalization.CultureInfo.InvariantCulture));
+            sb.Append(",\"root\":");
+            rootData.AppendJsonTo(sb);
+            sb.Append('}');
+            return ToolDispatchResult.Ok(sb.ToString());
+        }
+
+        // --- godot_open_mcp_scene_create (P2.7) ------------------------------------
+
+        /// <summary>
+        /// Handler for <c>godot_open_mcp_scene_create</c>. Creates a new <c>.tscn</c> scene asset at a
+        /// <c>res://</c> path and (by default) opens it as the active scene. Adapted from Unity Open
+        /// MCP's <c>ScenesTools.Create</c> (adapt fidelity — Unity uses
+        /// <c>EditorSceneManager.NewScene</c>; Godot builds a <see cref="PackedScene"/> from a root
+        /// Node and saves via <see cref="ResourceSaver"/>) and Godot-MCP's <c>Tool_Scene.Create</c>
+        /// (behavior reference — the Pack → Save → UpdateFile → OpenSceneFromPath sequence is lifted
+        /// from there).
+        ///
+        /// <para>
+        /// Root node creation mirrors <c>node_create</c>'s typed path: <c>ClassDB.ClassExists</c> +
+        /// <c>CanInstantiate</c> validation, then <c>ClassDB.Instantiate</c>. The created node is
+        /// packed into a <see cref="PackedScene"/>, saved to disk, the editor's resource filesystem
+        /// refreshed, and (unless <c>open: false</c>) opened as the active scene. The root's name
+        /// defaults to a PascalCased derivation of the filename stem when not supplied.
+        /// </para>
+        ///
+        /// <para>
+        /// <b>No gate yet.</b> Same forward-compat <c>gate</c>/<c>paths_hint</c> no-op as the other P2
+        /// mutators; no editor Undo yet.
+        /// </para>
+        ///
+        /// Structured failures: <c>missing_parameter</c>, <c>invalid_path</c>, <c>path_exists</c>,
+        /// <c>invalid_root_type</c>, <c>create_failed</c>. Must not throw.
+        /// </summary>
+        internal static ToolDispatchResult Create(string body)
+        {
+            var request = SceneCreateBody.Parse(body);
+
+            if (string.IsNullOrEmpty(request.Path))
+            {
+                return ToolDispatchResult.Fail(
+                    "missing_parameter",
+                    "scene_create requires 'path' (a res:// path ending in .tscn or .scn).");
+            }
+
+            var path = request.Path!;
+            if (!IsResPath(path))
+            {
+                return ToolDispatchResult.Fail(
+                    "invalid_path",
+                    $"path must be a 'res://' path; got '{path}'.");
+            }
+            if (!EndsWithSceneExt(path))
+            {
+                return ToolDispatchResult.Fail(
+                    "invalid_path",
+                    $"path must end with '.tscn' or '.scn'; got '{path}'.");
+            }
+            if (!request.Overwrite && ResourceLoader.Exists(path))
+            {
+                return ToolDispatchResult.Fail(
+                    "path_exists",
+                    $"A resource already exists at '{path}'. Pass overwrite=true to replace it.");
+            }
+
+            var className = request.EffectiveRootType;
+            if (!ClassDB.ClassExists(className))
+            {
+                return ToolDispatchResult.Fail(
+                    "invalid_root_type",
+                    $"Unknown Godot class '{className}'.");
+            }
+            if (!ClassDB.CanInstantiate(className))
+            {
+                return ToolDispatchResult.Fail(
+                    "invalid_root_type",
+                    $"Class '{className}' exists but cannot be instantiated (abstract or singleton).");
+            }
+
+            Node? root;
+            try
+            {
+                var variant = ClassDB.Instantiate(className);
+                root = variant.As<Node>();
+            }
+            catch (System.Exception e)
+            {
+                return ToolDispatchResult.Fail("create_failed",
+                    $"Failed to instantiate root class '{className}': {e.Message}");
+            }
+            if (root == null)
+            {
+                return ToolDispatchResult.Fail("create_failed",
+                    $"Instantiated '{className}' but the result was not a Node.");
+            }
+
+            // Name: explicit > filename-stem derivation. The editor's new-scene naming is PascalCased
+            // from the file stem, so an agent creating res://levels/level_2.tscn gets a root named
+            // Level2 without having to pass root_name.
+            if (!string.IsNullOrEmpty(request.RootName))
+            {
+                root.Name = request.RootName!;
+            }
+            else
+            {
+                var derived = DeriveRootName(path);
+                if (!string.IsNullOrEmpty(derived))
+                    root.Name = derived;
+            }
+
+            // Pack the root into a PackedScene, then save. ResourceSaver.Save does NOT create missing
+            // parent directories — make them first so a nested target (res://levels/x.tscn) saves
+            // instead of failing with CantOpen. Mirrors Godot-MCP's Tool_Scene.Create and Unity's
+            // MaterialTools.EnsureFolderRecursive.
+            Error saveErr;
+            try
+            {
+                var packed = new PackedScene();
+                var packErr = packed.Pack(root);
+                if (packErr != Error.Ok)
+                {
+                    root.Free();
+                    return ToolDispatchResult.Fail("create_failed",
+                        $"Failed to pack root node into PackedScene: {packErr}.");
+                }
+
+                EnsureParentDir(path);
+                saveErr = ResourceSaver.Save(packed, path);
+            }
+            catch (System.Exception e)
+            {
+                root.Free();
+                return ToolDispatchResult.Fail("create_failed",
+                    $"Failed to save scene to '{path}': {e.Message}");
+            }
+            finally
+            {
+                // The in-memory root was only needed to pack the PackedScene; free it so it does not
+                // leak. The editor re-instances its own root when the saved scene is opened below.
+                if (Godot.GodotObject.IsInstanceValid(root))
+                    root.Free();
+            }
+
+            if (saveErr != Error.Ok)
+            {
+                return ToolDispatchResult.Fail("create_failed",
+                    $"ResourceSaver.Save returned {saveErr} for '{path}'.");
+            }
+
+            // Make the new asset visible to the editor's resource filesystem.
+            EditorInterface.Singleton.GetResourceFilesystem().UpdateFile(path);
+
+            if (request.Open)
+            {
+                // OpenSceneFromPath re-points the edited root. The freshly-saved scene is clean from the
+                // bridge's perspective (just loaded from disk) — clear any stale dirty flag for the path.
+                EditorInterface.Singleton.OpenSceneFromPath(path);
+                var editedRoot = EditorInterface.Singleton.GetEditedSceneRoot();
+                if (editedRoot == null)
+                {
+                    return ToolDispatchResult.Fail("create_failed",
+                        $"Created '{path}' but the editor has no edited scene root after opening it.");
+                }
+                ClearDirty(DirtyKeyFor(editedRoot));
+
+                var summary = ToSceneSummary(editedRoot, isActive: true);
+                var sb = new StringBuilder(160);
+                sb.Append("{\"created\":true,\"opened\":true,\"path\":").Append(BridgeJson.EscapeString(summary.Path));
+                sb.Append(",\"name\":").Append(BridgeJson.EscapeString(summary.Name));
+                sb.Append(",\"rootType\":").Append(BridgeJson.EscapeString(summary.RootType));
+                sb.Append(",\"root\":");
+                NodeTools.ToNodeData(editedRoot).AppendJsonTo(sb);
+                sb.Append('}');
+                return ToolDispatchResult.Ok(sb.ToString());
+            }
+
+            // Created without opening — return a path-only summary (no edited root to snapshot).
+            var sb2 = new StringBuilder(96);
+            sb2.Append("{\"created\":true,\"opened\":false,\"path\":").Append(BridgeJson.EscapeString(path));
+            sb2.Append(",\"name\":").Append(BridgeJson.EscapeString(SceneFileStem(path)));
+            sb2.Append(",\"rootType\":").Append(BridgeJson.EscapeString(className));
+            sb2.Append('}');
+            return ToolDispatchResult.Ok(sb2.ToString());
+        }
+
+        /// <summary>
+        /// Create the parent directory for a <c>res://</c> path so <c>ResourceSaver.Save</c> does not
+        /// fail with <c>CantOpen</c> on a nested target. Uses <c>DirAccess.MakeDirRecursiveAbsolute</c>
+        /// on the <c>res://</c>-relative parent. Main-thread only. Adapted from Godot-MCP's
+        /// <c>Tool_Scene.Create</c> / Unity's <c>MaterialTools.EnsureFolderRecursive</c>.
+        /// </summary>
+        static void EnsureParentDir(string resPath)
+        {
+            var lastSlash = resPath.LastIndexOf('/');
+            if (lastSlash <= "res://".Length - 1) return; // no parent dir beyond res:// itself
+            var parentDir = resPath.Substring(0, lastSlash);
+            var da = DirAccess.Open("res://");
+            if (da == null) return;
+            try
+            {
+                // MakeDirRecursiveAbsolute takes a path relative to the opened dir (res://).
+                var rel = parentDir.Substring("res://".Length);
+                if (!string.IsNullOrEmpty(rel))
+                    da.MakeDirRecursiveAbsolute(rel);
+            }
+            catch { /* best-effort; a failure surfaces as a save error downstream */ }
+            finally { da.Dispose(); }
+        }
+
+        /// <summary>
+        /// Derive a PascalCased root node name from a <c>res://</c> scene path's filename stem.
+        /// <c>res://levels/level_2.tscn</c> → <c>Level2</c>; <c>res://main.tscn</c> → <c>Main</c>.
+        /// Matches the Godot editor's own new-scene naming convention so a created scene looks native.
+        /// </summary>
+        static string DeriveRootName(string resPath)
+        {
+            var stem = SceneFileStem(resPath);
+            if (string.IsNullOrEmpty(stem)) return string.Empty;
+            var sb = new System.Text.StringBuilder(stem.Length);
+            bool capitalizeNext = true;
+            foreach (var c in stem)
+            {
+                if (c == '_' || c == '-' || c == ' ' || c == '.')
+                {
+                    capitalizeNext = true;
+                    continue;
+                }
+                sb.Append(capitalizeNext ? char.ToUpperInvariant(c) : c);
+                capitalizeNext = false;
+            }
+            return sb.ToString();
         }
 
         // --- shared helpers ---------------------------------------------------------

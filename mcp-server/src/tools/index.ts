@@ -24,6 +24,8 @@ import { nodeDelete } from "./node-delete.js";
 import { sceneOpen } from "./scene-open.js";
 import { sceneSave } from "./scene-save.js";
 import { sceneListOpened } from "./scene-list-opened.js";
+import { sceneGetData } from "./scene-get-data.js";
+import { sceneCreate } from "./scene-create.js";
 
 /** Ordered list of every tool exposed over stdio MCP. */
 export const ALL_TOOLS: Tool[] = [
@@ -37,4 +39,6 @@ export const ALL_TOOLS: Tool[] = [
   sceneOpen,
   sceneSave,
   sceneListOpened,
+  sceneGetData,
+  sceneCreate,
 ];
