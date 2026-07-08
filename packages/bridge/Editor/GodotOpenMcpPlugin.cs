@@ -88,6 +88,11 @@ namespace GodotOpenMcp.Bridge.Editor
                 // the echo stub on the same enable surface; idempotent re-register refreshes the
                 // handler reference after a domain reload.
                 NodeTools.RegisterNodeTools();
+                // P2.6 — scene lifecycle tools: godot_open_mcp_scene_open / scene_save /
+                // scene_list_opened. Registered alongside the node family on the same enable
+                // surface; idempotent re-register refreshes the handler references after a domain
+                // reload.
+                SceneTools.RegisterSceneTools();
 
                 // Start the HTTP listener serving /ping and POST /tools/{name}. Stays down
                 // (and connected:false) if the bind fails — the editor remains usable, the

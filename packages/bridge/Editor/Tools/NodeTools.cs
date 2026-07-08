@@ -477,6 +477,7 @@ namespace GodotOpenMcp.Bridge.Editor
             ApplyTransform(node, request);
 
             EditorInterface.Singleton.MarkSceneAsUnsaved();
+            SceneTools.MarkEditedSceneDirty();
             EditorInterface.Singleton.EditNode(node);
 
             return ToolDispatchResult.Ok(ToNodeData(node).ToJsonString());
@@ -838,7 +839,10 @@ namespace GodotOpenMcp.Bridge.Editor
             }
 
             if (changed)
+            {
                 EditorInterface.Singleton.MarkSceneAsUnsaved();
+                SceneTools.MarkEditedSceneDirty();
+            }
         }
 
         /// <summary>
@@ -965,6 +969,7 @@ namespace GodotOpenMcp.Bridge.Editor
             SetOwnerRecursive(node, root);
 
             EditorInterface.Singleton.MarkSceneAsUnsaved();
+            SceneTools.MarkEditedSceneDirty();
             return ToolDispatchResult.Ok(ToNodeData(node).ToJsonString());
         }
 
@@ -1098,6 +1103,7 @@ namespace GodotOpenMcp.Bridge.Editor
             SetOwnerRecursive(duplicate, root);
 
             EditorInterface.Singleton.MarkSceneAsUnsaved();
+            SceneTools.MarkEditedSceneDirty();
             EditorInterface.Singleton.EditNode(duplicate);
             return ToolDispatchResult.Ok(ToNodeData(duplicate).ToJsonString());
         }
@@ -1185,7 +1191,10 @@ namespace GodotOpenMcp.Bridge.Editor
             }
 
             if (deleted.Count > 0)
+            {
                 EditorInterface.Singleton.MarkSceneAsUnsaved();
+                SceneTools.MarkEditedSceneDirty();
+            }
 
             var sb = new StringBuilder(128);
             sb.Append("{\"deleted\":[");

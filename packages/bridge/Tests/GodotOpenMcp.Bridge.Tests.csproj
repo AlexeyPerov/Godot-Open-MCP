@@ -109,6 +109,15 @@
          path, not here. The P2.5 handlers (SetParent / Duplicate / Delete) reuse this body type's
          node_path parser and the same ResolvePath helper at the editor boundary. -->
     <Compile Include="..\Editor\Tools\NodeModifyBody.cs" Link="Source\NodeModifyBody.cs" />
+    <!-- P2.6 — scene lifecycle tools (scene_open / scene_save / scene_list_opened). The pure-managed
+         pieces (SceneSummary DTO, SceneOpenBody + SceneSaveBody parsers) compile into the binary-less
+         host (same hand-rolled scalar-extraction style as the node *Body parsers); the editor-only
+         handler (SceneTools.Open / Save / ListOpened) is #if TOOLS and EditorInterface-coupled, so it
+         is verified via the headless Godot smoke / live call path, not here. SceneTools also owns the
+         bridge-tracked dirty flag (MarkEditedSceneDirty) consumed by the NodeTools mutators. -->
+    <Compile Include="..\Editor\Tools\SceneSummary.cs" Link="Source\SceneSummary.cs" />
+    <Compile Include="..\Editor\Tools\SceneOpenBody.cs" Link="Source\SceneOpenBody.cs" />
+    <Compile Include="..\Editor\Tools\SceneSaveBody.cs" Link="Source\SceneSaveBody.cs" />
   </ItemGroup>
 
 </Project>

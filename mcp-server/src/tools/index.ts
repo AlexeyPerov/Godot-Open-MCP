@@ -21,6 +21,9 @@ import { nodeModify } from "./node-modify.js";
 import { nodeSetParent } from "./node-set-parent.js";
 import { nodeDuplicate } from "./node-duplicate.js";
 import { nodeDelete } from "./node-delete.js";
+import { sceneOpen } from "./scene-open.js";
+import { sceneSave } from "./scene-save.js";
+import { sceneListOpened } from "./scene-list-opened.js";
 
 /** Ordered list of every tool exposed over stdio MCP. */
 export const ALL_TOOLS: Tool[] = [
@@ -31,4 +34,7 @@ export const ALL_TOOLS: Tool[] = [
   nodeSetParent,
   nodeDuplicate,
   nodeDelete,
+  sceneOpen,
+  sceneSave,
+  sceneListOpened,
 ];
