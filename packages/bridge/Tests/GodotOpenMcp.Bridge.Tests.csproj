@@ -102,6 +102,13 @@
          and ClassDB/EditorInterface-coupled, so it is verified via the headless Godot smoke / live
          call path, not here. -->
     <Compile Include="..\Editor\Tools\NodeCreateBody.cs" Link="Source\NodeCreateBody.cs" />
+    <!-- P2.4 — godot_open_mcp_node_modify. The pure-managed NodeModifyBody parser compiles into the
+         binary-less host (hand-rolled scalar + string-array + string-map extraction); the
+         editor-only handler (NodeTools.Modify / ApplyProperties / TryParseColor) is #if TOOLS and
+         EditorInterface/Node-coupled, so it is verified via the headless Godot smoke / live call
+         path, not here. The P2.5 handlers (SetParent / Duplicate / Delete) reuse this body type's
+         node_path parser and the same ResolvePath helper at the editor boundary. -->
+    <Compile Include="..\Editor\Tools\NodeModifyBody.cs" Link="Source\NodeModifyBody.cs" />
   </ItemGroup>
 
 </Project>
