@@ -82,6 +82,15 @@
     <Compile Include="..\Editor\Rules\BrokenReferences\LiveResourceResolver.cs" Link="Source\Rules\BrokenReferences\LiveResourceResolver.cs" />
     <Compile Include="..\Editor\Rules\BrokenReferences\SceneRefParser.cs" Link="Source\Rules\BrokenReferences\SceneRefParser.cs" />
     <Compile Include="..\Editor\Rules\BrokenReferences\BrokenReferencesRule.cs" Link="Source\Rules\BrokenReferences\BrokenReferencesRule.cs" />
+    <!-- P3.3 missing-scripts rule. The rule + node/script scanner + issue-code constants are pure-managed
+         (no Godot API), so they compile into this binary-less host directly. The rule reuses the P3.2
+         IResourceResolver + SceneRefParser + LiveResourceResolver (linked above) — it does not define its
+         own resolver. TOOLS is defined above so LiveResourceResolver compiles, but its ResourceLoader/
+         ResourceUID calls are never reached in tests (the fixture injects a fake IResourceResolver through
+         the rule's internal constructor). -->
+    <Compile Include="..\Editor\Rules\MissingScripts\IssueCodes.cs" Link="Source\Rules\MissingScripts\IssueCodes.cs" />
+    <Compile Include="..\Editor\Rules\MissingScripts\NodeScriptScanner.cs" Link="Source\Rules\MissingScripts\NodeScriptScanner.cs" />
+    <Compile Include="..\Editor\Rules\MissingScripts\MissingScriptsRule.cs" Link="Source\Rules\MissingScripts\MissingScriptsRule.cs" />
   </ItemGroup>
 
 </Project>
