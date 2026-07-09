@@ -1,6 +1,7 @@
 #nullable enable
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using GodotOpenMcp.Verify.Core;
 using GodotOpenMcp.Verify.Editor;
 using Xunit;
@@ -71,7 +72,10 @@ namespace GodotOpenMcp.Verify.Tests.Core
             var result = VerifyRunner.RunScoped(scope, null, VerifyRunMode.Checkpoint);
 
             Assert.False(result.HasUnknownRules);
-            Assert.Equal(2, result.CategoriesRun.Length);
+            // Both stubs must have run. Assert.Contains (not exact count) so this runner-mechanics test
+            // stays stable as RegisterDefaults() gains real rules (broken_references in P3.2, ...).
+            Assert.Contains("rule_a", result.CategoriesRun);
+            Assert.Contains("rule_b", result.CategoriesRun);
         }
 
         [Fact]
@@ -83,7 +87,9 @@ namespace GodotOpenMcp.Verify.Tests.Core
             var result = VerifyRunner.RunScoped(scope, new string[0], VerifyRunMode.Checkpoint);
 
             Assert.False(result.HasUnknownRules);
-            Assert.Equal(new[] { "rule_a" }, result.CategoriesRun);
+            // The stub must have run. Assert.Contains (not exact array) so this runner-mechanics test
+            // stays stable as RegisterDefaults() gains real rules (broken_references in P3.2, ...).
+            Assert.Contains("rule_a", result.CategoriesRun);
         }
 
         [Fact]
@@ -120,9 +126,14 @@ namespace GodotOpenMcp.Verify.Tests.Core
             var scope = new VerifyScope(new[] { "res://Test.tscn" });
             var result = VerifyRunner.RunScoped(scope, null, VerifyRunMode.Checkpoint);
 
-            Assert.Equal(2, result.CategoriesRun.Length);
-            Assert.Single(result.Issues);
-            Assert.Equal("stable", result.Issues[0].RuleId);
+            // Both stub rules must have been dispatched. Assert.Contains (not exact count) so this
+            // runner-mechanics test stays stable as RegisterDefaults() gains real rules.
+            Assert.Contains("crashy", result.CategoriesRun);
+            Assert.Contains("stable", result.CategoriesRun);
+            // The throwing rule produced no issues; the stable one produced exactly its stub issue.
+            // (Default rules like broken_references may also contribute, so filter to the stable rule.)
+            var stableIssues = result.Issues.Where(i => i.RuleId == "stable").ToList();
+            Assert.Single(stableIssues);
         }
 
         [Fact]
@@ -163,7 +174,8 @@ namespace GodotOpenMcp.Verify.Tests.Core
 
             Assert.NotNull(cp.CheckpointId);
             Assert.StartsWith("cp_", cp.CheckpointId);
-            Assert.Equal(2, cp.Fingerprints.Count);
+            // Both stub rules must have produced a fingerprint. Assert.ContainsKey (not exact count)
+            // so this runner-mechanics test stays stable as RegisterDefaults() gains real rules.
             Assert.True(cp.Fingerprints.ContainsKey("rule_a"));
             Assert.True(cp.Fingerprints.ContainsKey("rule_b"));
         }

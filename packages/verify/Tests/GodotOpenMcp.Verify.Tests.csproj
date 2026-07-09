@@ -72,6 +72,16 @@
     <Compile Include="..\Editor\Core\VerifyRunner.cs" Link="Source\VerifyRunner.cs" />
     <Compile Include="..\Editor\VerifyLog.cs" Link="Source\VerifyLog.cs" />
     <Compile Include="..\Editor\Fixes\FixProviderRegistry.cs" Link="Source\FixProviderRegistry.cs" />
+    <!-- P3.2 broken-references rule. The rule + parser + resolver-contract are pure-managed (no Godot
+         API), so they compile into this binary-less host directly. LiveResourceResolver is #if TOOLS and
+         GodotSharp-coupled; TOOLS is defined above so it compiles, but its ResourceLoader/ResourceUID
+         calls are never reached in tests — the fixture always injects a fake IResourceResolver through
+         the rule's internal constructor. -->
+    <Compile Include="..\Editor\Rules\BrokenReferences\IssueCodes.cs" Link="Source\Rules\BrokenReferences\IssueCodes.cs" />
+    <Compile Include="..\Editor\Rules\BrokenReferences\IResourceResolver.cs" Link="Source\Rules\BrokenReferences\IResourceResolver.cs" />
+    <Compile Include="..\Editor\Rules\BrokenReferences\LiveResourceResolver.cs" Link="Source\Rules\BrokenReferences\LiveResourceResolver.cs" />
+    <Compile Include="..\Editor\Rules\BrokenReferences\SceneRefParser.cs" Link="Source\Rules\BrokenReferences\SceneRefParser.cs" />
+    <Compile Include="..\Editor\Rules\BrokenReferences\BrokenReferencesRule.cs" Link="Source\Rules\BrokenReferences\BrokenReferencesRule.cs" />
   </ItemGroup>
 
 </Project>

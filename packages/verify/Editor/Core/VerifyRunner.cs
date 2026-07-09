@@ -57,7 +57,7 @@ namespace GodotOpenMcp.Verify.Editor
         {
             if (_defaultsRegistered) return;
             _defaultsRegistered = true;
-            // P3.2+: RegisteredRules.Add(new Rules.BrokenReferencesRule());
+            RegisteredRules.Add(new Rules.BrokenReferences.BrokenReferencesRule());
             // P3.3+: RegisteredRules.Add(new Rules.MissingScriptsRule());
             // P3.4+: RegisteredRules.Add(new Rules.ImportHealthRule());
         }
