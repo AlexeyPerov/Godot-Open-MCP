@@ -91,6 +91,16 @@
     <Compile Include="..\Editor\Rules\MissingScripts\IssueCodes.cs" Link="Source\Rules\MissingScripts\IssueCodes.cs" />
     <Compile Include="..\Editor\Rules\MissingScripts\NodeScriptScanner.cs" Link="Source\Rules\MissingScripts\NodeScriptScanner.cs" />
     <Compile Include="..\Editor\Rules\MissingScripts\MissingScriptsRule.cs" Link="Source\Rules\MissingScripts\MissingScriptsRule.cs" />
+    <!-- P3.4 import-health rule. The rule + sidecar parser + resolver-contract + issue-code constants
+         are pure-managed (no Godot API), so they compile into this binary-less host directly.
+         LiveImportHealthResolver is #if TOOLS and GodotSharp-coupled; TOOLS is defined above so it
+         compiles, but its FileAccess/ResourceUid/DirAccess calls are never reached in tests — the
+         fixture always injects a fake IImportHealthResolver through the rule's internal constructor. -->
+    <Compile Include="..\Editor\Rules\ImportHealth\IssueCodes.cs" Link="Source\Rules\ImportHealth\IssueCodes.cs" />
+    <Compile Include="..\Editor\Rules\ImportHealth\ImportFileParser.cs" Link="Source\Rules\ImportHealth\ImportFileParser.cs" />
+    <Compile Include="..\Editor\Rules\ImportHealth\IImportHealthResolver.cs" Link="Source\Rules\ImportHealth\IImportHealthResolver.cs" />
+    <Compile Include="..\Editor\Rules\ImportHealth\LiveImportHealthResolver.cs" Link="Source\Rules\ImportHealth\LiveImportHealthResolver.cs" />
+    <Compile Include="..\Editor\Rules\ImportHealth\ImportHealthRule.cs" Link="Source\Rules\ImportHealth\ImportHealthRule.cs" />
   </ItemGroup>
 
 </Project>

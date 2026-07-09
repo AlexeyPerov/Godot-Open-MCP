@@ -14,7 +14,7 @@ Rules for `packages/verify/` — the scoped health-check addon for Godot Open MC
 
 - Every rule implements `IVerifyRule` (`Editor/Core/IVerifyRule.cs`) and lives in its own folder under `Editor/Rules/{RuleName}/`.
 - **Every rule must declare a stable `Id`** — surfaced in MCP tool responses, the capability catalog, and the gate delta.
-- **Every `VerifyIssue` must carry an `IssueCode`**. v1 issue codes include: `broken_scene_reference`, `missing_script`, import/uid-related codes. Issue codes link rules to fixes.
+- **Every `VerifyIssue` must carry an `IssueCode`**. v1 issue codes: `broken_scene_reference` (P3.2), `missing_script` (P3.3), `orphan_import` + `duplicate_uid` (P3.4). Issue codes link rules to fixes.
 - Severity (`Error` / `Warning`) is set per-issue, not per-rule. The gate delta treats Errors as failures; Warnings are informational.
 
 ## Fixes

@@ -49,9 +49,9 @@ namespace GodotOpenMcp.Verify.Editor
         public static IReadOnlyList<IVerifyRule> Rules => RegisteredRules;
 
         /// <summary>
-        /// Register the built-in rules. Idempotent. P3.1 ships no concrete rules; P3.2–P3.4 populate
-        /// this with the broken-references / missing-scripts / import-health rules. Safe to call
-        /// repeatedly and from the verify EditorPlugin enable path.
+        /// Register the built-in rules. Idempotent. P3.1 defined the contract; P3.2–P3.4 populate this
+        /// with the broken-references / missing-scripts / import-health rules. Safe to call repeatedly
+        /// and from the verify EditorPlugin enable path.
         /// </summary>
         public static void RegisterDefaults()
         {
@@ -59,7 +59,7 @@ namespace GodotOpenMcp.Verify.Editor
             _defaultsRegistered = true;
             RegisteredRules.Add(new Rules.BrokenReferences.BrokenReferencesRule());
             RegisteredRules.Add(new Rules.MissingScripts.MissingScriptsRule());
-            // P3.4+: RegisteredRules.Add(new Rules.ImportHealthRule());
+            RegisteredRules.Add(new Rules.ImportHealth.ImportHealthRule());
         }
 
         /// <summary>
