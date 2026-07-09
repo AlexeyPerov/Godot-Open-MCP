@@ -125,6 +125,46 @@
          coupled, so it is verified via the headless Godot smoke / live call path, not here. -->
     <Compile Include="..\Editor\Tools\SceneGetDataBody.cs" Link="Source\SceneGetDataBody.cs" />
     <Compile Include="..\Editor\Tools\SceneCreateBody.cs" Link="Source\SceneCreateBody.cs" />
+    <!-- P3.5 — gate on mutators. The gate types (GateMode/GateOutcome/DeltaData/GateDispatchResult/
+         GatePolicy/GateDefaultPolicy) and the VerifyGateAdapter are pure-managed for the parts the unit
+         tests exercise (decision matrix, next-step hints, delta math, gate-mode parsing). GatePolicy
+         routes defensive errors through BridgeLog (already linked above); VerifyGateAdapter calls
+         VerifyRunner + the verify Core/ types, so the verify source tree is linked below to make the
+         adapter compile. The dispatch integration test installs GatePolicy.SetExecuteForTests so the
+         checkpoint→validate→delta cycle is stubbed — no live verify rules run, so the binary-less host
+         never touches ResourceLoader/EditorInterface. -->
+    <Compile Include="..\Editor\Gate\GateDefaultPolicy.cs" Link="Source\Gate\GateDefaultPolicy.cs" />
+    <Compile Include="..\Editor\Gate\GatePolicy.cs" Link="Source\Gate\GatePolicy.cs" />
+    <Compile Include="..\Editor\Gate\VerifyGateAdapter.cs" Link="Source\Gate\VerifyGateAdapter.cs" />
+    <!-- Verify package sources (the bridge depends on verify — packages/verify/AGENTS.md). Linked here
+         so VerifyGateAdapter + GatePolicy compile against the real contract types. TOOLS is defined
+         above so the #if TOOLS guard on VerifyRunner/VerifyLog/LiveResourceResolver/LiveImportHealthResolver
+         compiles; none of their Godot-API call paths execute in tests (the dispatch test stubs the gate,
+         and the VerifyGateAdapter/ComputeDelta test only exercises pure types). -->
+    <Compile Include="..\..\verify\Editor\Core\VerifyRunMode.cs" Link="Source\Verify\Core\VerifyRunMode.cs" />
+    <Compile Include="..\..\verify\Editor\Core\VerifySeverity.cs" Link="Source\Verify\Core\VerifySeverity.cs" />
+    <Compile Include="..\..\verify\Editor\Core\VerifyScope.cs" Link="Source\Verify\Core\VerifyScope.cs" />
+    <Compile Include="..\..\verify\Editor\Core\VerifyIssue.cs" Link="Source\Verify\Core\VerifyIssue.cs" />
+    <Compile Include="..\..\verify\Editor\Core\IssueKey.cs" Link="Source\Verify\Core\IssueKey.cs" />
+    <Compile Include="..\..\verify\Editor\Core\IVerifyRule.cs" Link="Source\Verify\Core\IVerifyRule.cs" />
+    <Compile Include="..\..\verify\Editor\Core\VerifyResult.cs" Link="Source\Verify\Core\VerifyResult.cs" />
+    <Compile Include="..\..\verify\Editor\Core\CheckpointFingerprint.cs" Link="Source\Verify\Core\CheckpointFingerprint.cs" />
+    <Compile Include="..\..\verify\Editor\Core\VerifyRunner.cs" Link="Source\Verify\Core\VerifyRunner.cs" />
+    <Compile Include="..\..\verify\Editor\VerifyLog.cs" Link="Source\Verify\VerifyLog.cs" />
+    <Compile Include="..\..\verify\Editor\Fixes\FixProviderRegistry.cs" Link="Source\Verify\Fixes\FixProviderRegistry.cs" />
+    <Compile Include="..\..\verify\Editor\Rules\BrokenReferences\IssueCodes.cs" Link="Source\Verify\Rules\BrokenReferences\IssueCodes.cs" />
+    <Compile Include="..\..\verify\Editor\Rules\BrokenReferences\IResourceResolver.cs" Link="Source\Verify\Rules\BrokenReferences\IResourceResolver.cs" />
+    <Compile Include="..\..\verify\Editor\Rules\BrokenReferences\LiveResourceResolver.cs" Link="Source\Verify\Rules\BrokenReferences\LiveResourceResolver.cs" />
+    <Compile Include="..\..\verify\Editor\Rules\BrokenReferences\SceneRefParser.cs" Link="Source\Verify\Rules\BrokenReferences\SceneRefParser.cs" />
+    <Compile Include="..\..\verify\Editor\Rules\BrokenReferences\BrokenReferencesRule.cs" Link="Source\Verify\Rules\BrokenReferences\BrokenReferencesRule.cs" />
+    <Compile Include="..\..\verify\Editor\Rules\MissingScripts\IssueCodes.cs" Link="Source\Verify\Rules\MissingScripts\IssueCodes.cs" />
+    <Compile Include="..\..\verify\Editor\Rules\MissingScripts\NodeScriptScanner.cs" Link="Source\Verify\Rules\MissingScripts\NodeScriptScanner.cs" />
+    <Compile Include="..\..\verify\Editor\Rules\MissingScripts\MissingScriptsRule.cs" Link="Source\Verify\Rules\MissingScripts\MissingScriptsRule.cs" />
+    <Compile Include="..\..\verify\Editor\Rules\ImportHealth\IssueCodes.cs" Link="Source\Verify\Rules\ImportHealth\IssueCodes.cs" />
+    <Compile Include="..\..\verify\Editor\Rules\ImportHealth\ImportFileParser.cs" Link="Source\Verify\Rules\ImportHealth\ImportFileParser.cs" />
+    <Compile Include="..\..\verify\Editor\Rules\ImportHealth\IImportHealthResolver.cs" Link="Source\Verify\Rules\ImportHealth\IImportHealthResolver.cs" />
+    <Compile Include="..\..\verify\Editor\Rules\ImportHealth\LiveImportHealthResolver.cs" Link="Source\Verify\Rules\ImportHealth\LiveImportHealthResolver.cs" />
+    <Compile Include="..\..\verify\Editor\Rules\ImportHealth\ImportHealthRule.cs" Link="Source\Verify\Rules\ImportHealth\ImportHealthRule.cs" />
   </ItemGroup>
 
 </Project>

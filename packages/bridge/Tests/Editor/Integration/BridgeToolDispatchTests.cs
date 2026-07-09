@@ -63,11 +63,14 @@ namespace GodotOpenMcp.Bridge.Tests
                 // Register the echo stub the same way the plugin does on enable.
                 BridgeToolRegistry.RegisterEchoStub();
 
-                // Install the inline dispatcher seam so the HTTP worker thread runs handlers
-                // directly instead of queueing onto a (non-existent, in the binary-less host)
-                // dispatcher Node. The real main-thread marshal is unit-tested separately.
-                BridgeHttpServer.SetDispatchForTests((name, body, _timeoutMs) =>
-                    BridgeHttpServer.DispatchToolForTests(name, body));
+                // Install the inline dispatcher seam so the HTTP worker thread runs the gate-wrapped
+                // dispatch directly instead of queueing onto a (non-existent, in the binary-less host)
+                // dispatcher Node. The real main-thread marshal is unit-tested separately. The seam now
+                // carries the gate context (isMutating + gateMode); the echo stub is read-only, so this
+                // test exercises the non-gate branch of DispatchWithGate (GateDispatchResult.Direct).
+                // The gate-aware dispatch path (mutators) is covered by GateDispatchIntegrationTests.
+                BridgeHttpServer.SetDispatchForTests((name, body, isMutating, gateMode, _timeoutMs) =>
+                    BridgeHttpServer.DispatchWithGateForTests(name, body, isMutating, gateMode));
 
                 _port = BridgeHttpServer.StartOnFreePortForTests();
             });

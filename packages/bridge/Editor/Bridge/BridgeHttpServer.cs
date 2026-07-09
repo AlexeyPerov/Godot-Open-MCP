@@ -303,176 +303,236 @@ namespace GodotOpenMcp.Bridge.Editor
             BridgeHttpResponse.SendJson(context, 200, BridgeJson.BuildPingJson());
         }
 
-        // --- POST /tools/{name} dispatch (P2.1) -------------------------------------------
-        //
-        // The dispatch path enforces the bridge AGENTS.md §Transport contract: every tool handler
-        // runs on the editor main thread via MainThreadDispatcher. The HTTP worker thread reads
-        // the request body and resolves the timeout, then marshals the handler call to the main
-        // thread and awaits it. The handler returns a ToolDispatchResult; this method wraps it
-        // into the canonical {ok,result,error} envelope (BridgeEnvelope) and writes the HTTP 200
-        // response.
-        //
-        // Failure classification (all surface as HTTP 200 with ok:false — the request reached the
-        // dispatcher and was processed; HTTP-level 4xx/5xx is reserved for routing/transport
-        // faults):
-        //   - tool_not_found      → 404 (the name is not registered)
-        //   - invalid_request     → 400 (body could not be read)
-        //   - main_thread_blocked → ok:false, code main_thread_blocked (timeout, never drained)
-        //   - timeout             → ok:false, code timeout (handler ran past timeout)
-        //   - execution_error     → ok:false, code execution_error (handler threw)
-        //
-        // Gate wrapping is intentionally deferred to P3.5 (per execution-plan P2.1 §Intentional
-        // deltas): P2.1 mutators dispatch directly. The BridgeToolEntry.IsMutating flag is catalog
-        // metadata only in this phase.
+    // --- POST /tools/{name} dispatch (P2.1 + P3.5) -----------------------------------
+    //
+    // The dispatch path enforces two bridge AGENTS.md contracts:
+    //   - §Transport: every tool handler runs on the editor main thread via MainThreadDispatcher.
+    //   - §Gate policy: every mutating tool routes through GatePolicy.Execute (checkpoint → mutate
+    //     → validate → delta). Read-only tools bypass the gate.
+    //
+    // The HTTP worker thread reads the body, resolves the timeout, resolves the gate context
+    // (gate mode + paths_hint), and — for mutators with an active gate and no paths_hint — rejects
+    // with paths_hint_required BEFORE the main-thread hop (cheap reject, no whole-project fallback).
+    // It then marshals the gate-wrapped dispatch to the main thread. The gate returns a
+    // GateDispatchResult; this method wraps it into the canonical {ok,result,error} envelope
+    // (BridgeEnvelope), prepending a `gate` block into the result when the gate ran.
+    //
+    // Failure classification (all surface as HTTP 200 with ok:false — the request reached the
+    // dispatcher and was processed; HTTP-level 4xx/5xx is reserved for routing/transport
+    // faults):
+    //   - tool_not_found       → 404 (the name is not registered)
+    //   - invalid_request      → 400 (body could not be read)
+    //   - paths_hint_required  → ok:false (mutator + active gate + empty paths_hint)
+    //   - main_thread_blocked  → ok:false, code main_thread_blocked (timeout, never drained)
+    //   - timeout              → ok:false, code timeout (handler ran past timeout)
+    //   - execution_error      → ok:false, code execution_error (handler threw)
 
-        /// <summary>
-        /// Dispatch one <c>POST /tools/{name}</c> request. Reads the body, resolves the tool,
-        /// marshals the handler to the main thread, and writes the canonical envelope. The method
-        /// never throws — every failure path writes a structured response. Adapted from Unity's
-        /// <c>HandleToolDispatch</c>, with the gate / toggle / paths_hint machinery stripped
-        /// (deferred to P3.5).
-        /// </summary>
-        static void HandleToolDispatch(HttpListenerContext context, string toolName)
+    /// <summary>
+    /// Dispatch one <c>POST /tools/{name}</c> request. Reads the body, resolves the tool and its gate
+    /// context, marshals the gate-wrapped handler to the main thread, and writes the canonical
+    /// envelope. The method never throws — every failure path writes a structured response. Adapted
+    /// from Unity's <c>HandleToolDispatch</c> / <c>DispatchWithGate</c>, with the queue / audit /
+    /// toggle / scene-dirty / lifecycle machinery stripped (later phases).
+    /// </summary>
+    static void HandleToolDispatch(HttpListenerContext context, string toolName)
+    {
+        // Unknown tool → 404 tool_not_found before reading the body (cheap reject).
+        if (!BridgeToolRegistry.TryGet(toolName, out var entry))
         {
-            // Unknown tool → 404 tool_not_found before reading the body (cheap reject).
-            if (!BridgeToolRegistry.Contains(toolName))
+            BridgeHttpResponse.SendToolNotFound(context, toolName);
+            return;
+        }
+
+        string body;
+        try
+        {
+            body = BridgeRequestBody.ReadRequestBody(context.Request);
+        }
+        catch (Exception e)
+        {
+            BridgeHttpResponse.SendInvalidRequest(context,
+                $"Failed to read request body: {e.Message}");
+            return;
+        }
+
+        var timeoutMs = BridgeRequestBody.ExtractTimeoutMs(body);
+
+        // Resolve the gate context for this dispatch. Precedence (§Gate policy):
+        //   request `gate` → project default → tool default. The tool default is every tool's
+        // registered DefaultGate; in P2.x every mutator ships with defaultGate "off", so the gate
+        // cycle only runs when an agent opts in via the request `gate`. paths_hint is required only
+        // when the effective gate is enforce/warn — there is no whole-project fallback.
+        var gateMode = BridgeRequestBody.ExtractGateMode(body, entry.DefaultGate);
+        var isMutating = entry.IsMutating;
+
+        if (isMutating && gateMode != GateDefaultPolicy.Off)
+        {
+            var pathsHint = BridgeRequestBody.ExtractPathsHint(body);
+            if (pathsHint == null || pathsHint.Length == 0)
             {
-                BridgeHttpResponse.SendToolNotFound(context, toolName);
+                // Cheap reject on the worker thread — do not marshal to the main thread just to fail.
+                // The structured code lets an agent re-issue with paths_hint set without guessing.
+                BridgeHttpResponse.SendJson(context, 200,
+                    BridgeEnvelope.BuildPathsHintRequired(toolName, gateMode));
                 return;
             }
-
-            string body;
-            try
-            {
-                body = BridgeRequestBody.ReadRequestBody(context.Request);
-            }
-            catch (Exception e)
-            {
-                BridgeHttpResponse.SendInvalidRequest(context,
-                    $"Failed to read request body: {e.Message}");
-                return;
-            }
-
-            var timeoutMs = BridgeRequestBody.ExtractTimeoutMs(body);
-
-            ToolDispatchResult result;
-            try
-            {
-                result = DispatchOnMainThread(toolName, body, timeoutMs);
-            }
-            catch (MainThreadBlockedException)
-            {
-                // The main thread never drained the work within the timeout — almost certainly a
-                // Godot modal blocking the editor. Surface a structured error so an agent can
-                // branch (dismiss the dialog, scene_save, restart) rather than retry blindly.
-                result = ToolDispatchResult.Fail(
-                    "main_thread_blocked",
-                    $"Tool '{toolName}' could not run — the Godot main thread is blocked by a modal " +
-                    "dialog (unsaved changes, export, a third-party editor window) or a long editor " +
-                    "operation. Do NOT raise timeout_ms. Check editor state, dismiss any open dialog, " +
-                    $"or restart the editor. (waited {timeoutMs}ms)");
-            }
-            catch (TimeoutException)
-            {
-                // The handler started but ran past the timeout. Distinguished from
-                // main_thread_blocked so an agent can tell "the work is slow" from "the work never
-                // started".
-                result = ToolDispatchResult.Fail(
-                    "timeout",
-                    $"Tool '{toolName}' started but did not finish within {timeoutMs}ms. " +
-                    "The tool itself is slow — raise timeout_ms or simplify the request.");
-            }
-            catch (Exception e)
-            {
-                // Handler threw an unhandled exception. The handler contract says handlers must not
-                // throw (they return ToolDispatchResult.Fail), so reaching here is a handler bug —
-                // surface it as execution_error rather than crashing the worker.
-                result = ToolDispatchResult.Fail("execution_error", e.Message);
-            }
-
-            // Wrap into the canonical envelope and write. Every dispatch outcome (success or
-            // failure) is HTTP 200 — the request reached the dispatcher and was processed. The
-            // ok:false flag + error.code carry the failure classification for the client.
-            var envelope = result.Success
-                ? BridgeEnvelope.BuildSuccess(result.Output)
-                : BridgeEnvelope.BuildFailure(result);
-            BridgeHttpResponse.SendJson(context, 200, envelope);
         }
 
-        /// <summary>
-        /// Marshal a tool handler to the editor main thread and await its result. When the caller
-        /// is already on the main thread (e.g. a test driving the dispatcher directly), the handler
-        /// runs inline — no queue hop. Otherwise the call goes through
-        /// <see cref="MainThreadDispatcher.EnqueueAsync{T}"/> with the per-call timeout, which
-        /// distinguishes <c>main_thread_blocked</c> (never drained) from <c>timeout</c> (ran long).
-        /// </summary>
-        static ToolDispatchResult DispatchOnMainThread(string toolName, string body, int timeoutMs)
+        GateDispatchResult gateResult;
+        try
         {
-            // Test seam: when the integration test installs an inline dispatcher, run the handler
-            // on the calling thread directly. The binary-less test host has no live dispatcher
-            // Node to drain the queue, so the real EnqueueAsync path would time out. The seam
-            // lets the HTTP integration test exercise the routing + envelope contract without a
-            // Godot Node; the main-thread-marshaling behavior itself is covered by the
-            // MainThreadDispatcher unit tests. Never set in production.
-            var inlineDispatcher = _dispatchForTests;
-            if (inlineDispatcher != null)
-                return inlineDispatcher(toolName, body, timeoutMs);
-
-            // Fast path: already on the main thread. Tests that drive the dispatcher directly
-            // (and a handler that somehow runs on the main thread already) skip the queue hop.
-            // Production HTTP workers are NEVER on the main thread, so this branch is test-only in
-            // practice — but it keeps the dispatcher unit-testable without a live dispatcher Node.
-            if (MainThreadDispatcher.IsMainThread)
-            {
-                return DispatchTool(toolName, body);
-            }
-
-            // Marshal to the main thread and await. EnqueueAsync faults the task with
-            // MainThreadBlockedException (never drained) or TimeoutException (ran long) on timeout.
-            return MainThreadDispatcher.EnqueueAsync(() => DispatchTool(toolName, body), timeoutMs)
-                .GetAwaiter().GetResult();
+            gateResult = DispatchOnMainThread(toolName, body, isMutating, gateMode, timeoutMs);
         }
-
-        /// <summary>
-        /// Test-only seam: when non-null, <see cref="DispatchOnMainThread"/> invokes this delegate
-        /// instead of marshaling through <see cref="MainThreadDispatcher"/>. The binary-less test
-        /// host cannot construct the dispatcher Node, so the real queue-and-drain path has nothing
-        /// to drain it; this seam lets the HTTP integration test run handlers inline and exercise
-        /// the routing + envelope contract. Mirrors the <see cref="BridgeLog.SetLoggersForTests"/>
-        /// pattern. Never set in production; cleared by <see cref="ResetForTests"/>.
-        /// </summary>
-        static Func<string, string, int, ToolDispatchResult>? _dispatchForTests;
-
-        /// <summary>Test-only: install an inline dispatcher (or null to restore the real path).</summary>
-        internal static void SetDispatchForTests(Func<string, string, int, ToolDispatchResult>? dispatcher) =>
-            _dispatchForTests = dispatcher;
-
-        /// <summary>Test-only: clear the inline dispatcher seam.</summary>
-        internal static void ResetForTests() => _dispatchForTests = null;
-
-        /// <summary>
-        /// Invoke the registered handler for <paramref name="toolName"/> with <paramref name="body"/>.
-        /// Returns the handler's <see cref="ToolDispatchResult"/>; a missing handler surfaces a
-        /// <c>tool_not_found</c> failure (defensive — the routing layer already rejected unknown
-        /// names, but a race between Contains and TryDispatch could still miss). Mirrors Unity's
-        /// <c>DispatchTool</c>.
-        /// </summary>
-        static ToolDispatchResult DispatchTool(string toolName, string body)
+        catch (MainThreadBlockedException)
         {
-            return BridgeToolRegistry.TryDispatch(toolName, body)
-                ?? ToolDispatchResult.Fail("tool_not_found", $"Unknown tool: {toolName}");
+            // The main thread never drained the work within the timeout — almost certainly a Godot
+            // modal blocking the editor. Surface a structured error so an agent can branch (dismiss
+            // the dialog, scene_save, restart) rather than retry blindly.
+            var blocked = ToolDispatchResult.Fail(
+                "main_thread_blocked",
+                $"Tool '{toolName}' could not run — the Godot main thread is blocked by a modal " +
+                "dialog (unsaved changes, export, a third-party editor window) or a long editor " +
+                "operation. Do NOT raise timeout_ms. Check editor state, dismiss any open dialog, " +
+                $"or restart the editor. (waited {timeoutMs}ms)");
+            BridgeHttpResponse.SendJson(context, 200, BridgeEnvelope.BuildFailure(blocked));
+            return;
+        }
+        catch (TimeoutException)
+        {
+            // The handler started but ran past the timeout. Distinguished from main_thread_blocked so
+            // an agent can tell "the work is slow" from "the work never started".
+            var timedOut = ToolDispatchResult.Fail(
+                "timeout",
+                $"Tool '{toolName}' started but did not finish within {timeoutMs}ms. " +
+                "The tool itself is slow — raise timeout_ms or simplify the request.");
+            BridgeHttpResponse.SendJson(context, 200, BridgeEnvelope.BuildFailure(timedOut));
+            return;
+        }
+        catch (Exception e)
+        {
+            // Handler/dispatcher threw an unhandled exception. Surface it as execution_error rather
+            // than crashing the worker.
+            var fault = ToolDispatchResult.Fail("execution_error", e.Message);
+            BridgeHttpResponse.SendJson(context, 200, BridgeEnvelope.BuildFailure(fault));
+            return;
         }
 
-        /// <summary>
-        /// Test-only pass-through to <see cref="DispatchTool"/>. Exposed so the inline dispatcher
-        /// seam (<see cref="SetDispatchForTests"/>) can invoke the real per-tool dispatch path
-        /// (registry lookup + handler) without re-implementing it in the test. Never referenced by
-        /// production code.
-        /// </summary>
-        internal static ToolDispatchResult DispatchToolForTests(string toolName, string body) =>
-            DispatchTool(toolName, body);
+        // Wrap into the canonical envelope. Every dispatch outcome (success or failure) is HTTP 200 —
+        // the request reached the dispatcher and was processed. The ok:false flag + error.code carry
+        // the failure classification; the gate block is prepended into result on a gate-run success.
+        BridgeHttpResponse.SendJson(context, 200,
+            BridgeEnvelope.BuildFromGateResult(gateResult, gateMode));
+    }
 
-        // --- Cleanup helpers --------------------------------------------------------------
+    /// <summary>
+    /// Marshal a gate-wrapped tool dispatch to the editor main thread and await its result. When the
+    /// caller is already on the main thread (e.g. a test driving the dispatcher directly), the
+    /// dispatch runs inline — no queue hop. Otherwise the call goes through
+    /// <see cref="MainThreadDispatcher.EnqueueAsync{T}"/> with the per-call timeout, which distinguishes
+    /// <c>main_thread_blocked</c> (never drained) from <c>timeout</c> (ran long).
+    /// </summary>
+    static GateDispatchResult DispatchOnMainThread(
+        string toolName, string body, bool isMutating, string gateMode, int timeoutMs)
+    {
+        // Test seam: when the integration test installs an inline dispatcher, run the dispatch on the
+        // calling thread directly. The binary-less test host has no live dispatcher Node to drain the
+        // queue, so the real EnqueueAsync path would time out. The seam lets the HTTP integration test
+        // exercise the routing + gate + envelope contract without a Godot Node; the main-thread-
+        // marshaling behavior itself is covered by the MainThreadDispatcher unit tests. Never set in
+        // production.
+        var inlineDispatcher = _dispatchForTests;
+        if (inlineDispatcher != null)
+            return inlineDispatcher(toolName, body, isMutating, gateMode, timeoutMs);
+
+        // Fast path: already on the main thread. Tests that drive the dispatcher directly skip the
+        // queue hop. Production HTTP workers are NEVER on the main thread, so this branch is test-only
+        // in practice — but it keeps the dispatcher unit-testable without a live dispatcher Node.
+        if (MainThreadDispatcher.IsMainThread)
+        {
+            return DispatchWithGate(toolName, body, isMutating, gateMode);
+        }
+
+        // Marshal to the main thread and await. EnqueueAsync faults the task with
+        // MainThreadBlockedException (never drained) or TimeoutException (ran long) on timeout.
+        return MainThreadDispatcher.EnqueueAsync(
+            () => DispatchWithGate(toolName, body, isMutating, gateMode), timeoutMs)
+            .GetAwaiter().GetResult();
+    }
+
+    /// <summary>
+    /// Run one tool through the gate policy. Read-only tools bypass the gate
+    /// (<see cref="GateDispatchResult.Direct"/>); mutating tools run the checkpoint → mutate →
+    /// validate → delta cycle via <see cref="GatePolicy.Execute"/>. The <paramref name="gateMode"/>
+    /// string is parsed here (once) and the parsed mode threads into <see cref="GatePolicy.Execute"/>
+    /// — the policy decides whether to run the cycle based on the parsed <see cref="GateMode"/>.
+    ///
+    /// <para>
+    /// <paramref name="gateMode"/> here is the EFFECTIVE mode after request → project → tool
+    /// precedence resolution in <see cref="HandleToolDispatch"/>. paths_hint was already validated
+    /// non-empty for enforce/warn before the main-thread hop; <see cref="GatePolicy.Execute"/>
+    /// degrades gracefully if it is somehow empty (defensive).
+    /// </para>
+    /// </summary>
+    static GateDispatchResult DispatchWithGate(
+        string toolName, string body, bool isMutating, string gateMode)
+    {
+        if (!isMutating)
+        {
+            // Read-only tool: no gate. Run the handler directly and wrap in a non-gate result.
+            return GateDispatchResult.Direct(DispatchTool(toolName, body));
+        }
+
+        // Mutating tool: route through the mandatory gate path. Parse the effective mode string once;
+        // the paths_hint re-extraction keeps GatePolicy self-contained (it does not trust the caller's
+        // pre-validation — an empty hint here degrades to a skipped gate, see GatePolicy.Execute).
+        var mode = GatePolicy.ParseMode(gateMode);
+        var pathsHint = BridgeRequestBody.ExtractPathsHint(body);
+        return GatePolicy.Execute(mode, pathsHint, () => DispatchTool(toolName, body));
+    }
+
+    /// <summary>
+    /// Test-only seam: when non-null, <see cref="DispatchOnMainThread"/> invokes this delegate instead
+    /// of marshaling through <see cref="MainThreadDispatcher"/>. The binary-less test host cannot
+    /// construct the dispatcher node, so the real queue-and-drain path has nothing to drain it; this
+    /// seam lets the HTTP integration test run the gate-wrapped dispatch inline and exercise the
+    /// routing + gate + envelope contract. Mirrors the <see cref="BridgeLog.SetLoggersForTests"/>
+    /// pattern. Never set in production; cleared by <see cref="ResetForTests"/>.
+    /// </summary>
+    static Func<string, string, bool, string, int, GateDispatchResult>? _dispatchForTests;
+
+    /// <summary>Test-only: install an inline dispatcher (or null to restore the real path).</summary>
+    internal static void SetDispatchForTests(
+        Func<string, string, bool, string, int, GateDispatchResult>? dispatcher) =>
+        _dispatchForTests = dispatcher;
+
+    /// <summary>Test-only: clear the inline dispatcher seam.</summary>
+    internal static void ResetForTests() => _dispatchForTests = null;
+
+    /// <summary>
+    /// Invoke the registered handler for <paramref name="toolName"/> with <paramref name="body"/>.
+    /// Returns the handler's <see cref="ToolDispatchResult"/>; a missing handler surfaces a
+    /// <c>tool_not_found</c> failure (defensive — the routing layer already rejected unknown names,
+    /// but a race between Contains and TryDispatch could still miss). Mirrors Unity's
+    /// <c>DispatchTool</c>.
+    /// </summary>
+    static ToolDispatchResult DispatchTool(string toolName, string body)
+    {
+        return BridgeToolRegistry.TryDispatch(toolName, body)
+            ?? ToolDispatchResult.Fail("tool_not_found", $"Unknown tool: {toolName}");
+    }
+
+    /// <summary>
+    /// Test-only pass-through to <see cref="DispatchWithGate"/>. Exposed so the inline dispatcher seam
+    /// (<see cref="SetDispatchForTests"/>) can invoke the real gate-wrapped dispatch path (gate policy
+    /// + registry lookup + handler) without re-implementing it in the test. Never referenced by
+    /// production code. Carries the gate context (isMutating + gateMode) so the gate path is exercised
+    /// end-to-end through the inline seam.
+    /// </summary>
+    internal static GateDispatchResult DispatchWithGateForTests(
+        string toolName, string body, bool isMutating, string gateMode) =>
+        DispatchWithGate(toolName, body, isMutating, gateMode);
+
+    // --- Cleanup helpers --------------------------------------------------------------
 
         static void TryCleanupListener()
         {

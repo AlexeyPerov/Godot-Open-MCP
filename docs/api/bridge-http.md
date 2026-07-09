@@ -49,6 +49,7 @@ These mean the request reached the dispatcher and was processed, but the tool fa
 | Code | Meaning | Agent action |
 |---|---|---|
 | `invalid_request` | The body parsed but a required field was missing or wrong. | Fix the arguments and retry. |
+| `paths_hint_required` | A mutating tool was called with `gate` set to `enforce` or `warn` but no `paths_hint`. There is no whole-project fallback. | Pass a non-empty `paths_hint` (the `res://` paths the mutation touches) and retry. |
 | `main_thread_blocked` | The Godot main thread did not pick up the work within the timeout — almost certainly a modal dialog (unsaved changes, export, a third-party editor window). | Do **not** raise `timeout_ms`. Dismiss any open dialog, `scene_save`, or restart the editor. |
 | `timeout` | The handler started but ran past the timeout. | Raise `timeout_ms` or simplify the request. |
 | `execution_error` | The handler threw an unhandled exception (a handler bug). | Report the error; do not retry blindly. |
@@ -69,14 +70,46 @@ These mean the request did not reach the dispatcher (routing/transport fault):
 The dispatcher reads these scalar fields straight off the raw JSON body:
 
 - `timeout_ms` (optional, integer) — per-call dispatch timeout in milliseconds. Clamped to `[1000, 600000]`; defaults to `30000` when absent. Distinguishes `main_thread_blocked` (never drained) from `timeout` (ran long).
-- `gate` (optional, string) — gate mode override. **No-op in P2.1**; honored when the gate flow lands (P3.5).
-- `paths_hint` (optional, string array) — mutation scope for the gate. **No-op in P2.1**; mandatory for mutators when the gate lands (P3.5).
+- `gate` (optional, string) — gate mode for this call. One of `enforce`, `warn`, `off`. Precedence: request `gate` → project default (`.godot-open-mcp/settings.json`, not yet wired) → the tool's registered default (currently `off` for every tool).
+- `paths_hint` (optional, string array) — mutation scope (`res://` paths) the gate checkpoints and validates against. **Required** when `gate` is `enforce` or `warn`; optional when `gate` is `off`. There is no whole-project fallback.
 
 All other fields are the tool's own arguments, parsed by the handler.
 
-## Gate (deferred to P3.5)
+## Gate
 
-P2.1 mutators dispatch **directly** — there is no gate wrapping. The `gate` and `paths_hint` fields may appear in tool schemas for forward-compatibility but are no-ops until P3.5. When the gate lands, the envelope may widen to carry gate metadata, but `ok` + `error.code` will stay stable so existing clients keep parsing.
+Every mutating tool routes through the gate policy (`GatePolicy.Execute`) — a checkpoint → mutate → validate → delta cycle. Read-only tools bypass the gate entirely.
+
+**Modes:**
+
+- `off` (default for every tool) — the mutation runs directly; no checkpoint/validate overhead. The gate outcome is `skipped`.
+- `enforce` — the cycle runs. New errors introduced by the mutation fail the gate (`outcome: failed`, `failed: true`). The mutation still ran — the gate outcome is informational unless a caller rolls back.
+- `warn` — the cycle runs but never hard-fails; new errors surface as `outcome: warned`.
+
+**`paths_hint` is required** when the gate is `enforce`/`warn`. An empty hint is rejected with `paths_hint_required` before the main-thread hop (no whole-project fallback).
+
+**Outcome is surfaced inside `result`.** The gate block is prepended into the handler's JSON output object so the canonical `{ok, result, error}` envelope stays stable:
+
+```json
+{
+  "ok": true,
+  "result": {
+    "gate": {
+      "mode": "enforce",
+      "outcome": "passed",
+      "ran": true,
+      "failed": false,
+      "checkpointId": "cp_ab12cd",
+      "categoriesRun": ["broken_references", "missing_scripts", "import_health"],
+      "checkpointMs": 3, "validateMs": 5, "totalMs": 9,
+      "delta": { "newErrors": 0, "newWarnings": 0, "resolvedErrors": 0, "resolvedWarnings": 0 },
+      "agentNextSteps": ["Gate passed — no new issues detected."]
+    },
+    "...handler output fields..."
+  }
+}
+```
+
+When the gate did not run (`off` / read-only tool), only `mode`, `outcome` (`skipped`), `ran` (`false`), and `failed` are emitted. A failed mutation surfaces as `ok:false` + `error` with no gate block (the mutation itself faulted).
 
 ## Auth (deferred to P5.2)
 
@@ -87,6 +120,9 @@ A per-session bearer token is minted into the instance lock on bridge start. The
 - HTTP routing + dispatch: `packages/bridge/Editor/Bridge/BridgeHttpServer.cs`
 - Envelope builders: `packages/bridge/Editor/Bridge/BridgeEnvelope.cs`
 - Request-body parsing: `packages/bridge/Editor/Bridge/BridgeRequestBody.cs`
+- Gate policy (checkpoint → mutate → validate → delta): `packages/bridge/Editor/Gate/GatePolicy.cs`
+- Verify adapter (checkpoint/validate/delta over the verify package): `packages/bridge/Editor/Gate/VerifyGateAdapter.cs`
+- Gate default + precedence: `packages/bridge/Editor/Gate/GateDefaultPolicy.cs`
 - Tool registry: `packages/bridge/Editor/Tools/BridgeToolRegistry.cs`
 - Dispatch result model: `packages/bridge/Editor/Tools/ToolDispatchResult.cs`
 - MCP-side client (envelope unwrap): `mcp-server/src/live-client.ts`
