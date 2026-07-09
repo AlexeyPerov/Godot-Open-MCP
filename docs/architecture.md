@@ -13,7 +13,7 @@ A desktop **Hub** app for guided setup is planned but deferred.
 
 - `mcp-server/` — MCP stdio server, tool registry, routing.
 - `packages/bridge/` — Godot HTTP bridge and typed tool handlers (shipped as `addons/godot_open_mcp/`).
-- `packages/verify/` — validation rules and fixes used by gate flows.
+- `packages/verify/` — validation rules and fixes used by gate flows (standalone; bridge depends on verify).
 - `cli/` — `godot-open-mcp-cli` command-line tooling.
 - `skills/` — agent playbooks (`SKILL.md`).
 - `demo/` — Godot C# demo project with fixtures.
@@ -209,6 +209,13 @@ Phase 2 must not start until the parity smoke is green on a clean checkout. The 
 - `packages/bridge/Editor/Bridge/BridgeBindAddress.cs` — loopback-only bind decision (P1.3); widens to remote+auth in P5.2.
 - `packages/bridge/Editor/Bridge/InstancePortResolver.cs` — per-project deterministic port (`20000 + sha256(path) % 10000`) and `~/.godot-open-mcp/instances/<hash>.json` lock path (P1.4). Mirrors `mcp-server/src/instance-discovery.ts` byte-for-byte.
 - `packages/bridge/Editor/Bridge/BridgeInstanceLock.cs` — instance lock + heartbeat file lifecycle (Acquire/UpdateState/Release, stale-lock sweep by PID liveness) for multi-instance port discovery (P1.4).
+
+### Verify package (`packages/verify/`)
+
+- `packages/verify/Editor/Core/` — the standalone verify contract surface (P3.1): `IVerifyRule` (a scoped rule with a stable `Id`), `VerifyIssue` + `VerifySeverity` (a finding with a stable `IssueCode` that links rules to fixes), `IssueKey` (the canonical `{ruleId}|{severity}|{assetPath}|{issueCode}` identity string shared by gate tools, the capability catalog, and the delta), `VerifyScope` / `VerifyRunMode` / `VerifyResult` (a scoped scan and its outcome), and `CheckpointFingerprint` (per-rule before/after fingerprint for the gate delta). All pure-managed (no Godot API), so the package compiles standalone with no bridge dependency (bridge depends on verify, not the reverse).
+- `packages/verify/Editor/Fixes/FixProviderRegistry.cs` — the fix registry (P3.1): `IFixProvider` (a remedy with a `FixId` and a `Safe` flag), `FixProviderRegistry` (resolves providers for a rule+issue pair and reports the real `Safe` flag, defaulting to unsafe on throw). The canonical issue id is the join key between rules and fixes. P3.1 ships the contracts only; concrete rules (P3.2–P3.4) and safe fixes (P3.7) register into these.
+- `packages/verify/Editor/Core/VerifyRunner.cs` — the verify entry point (P3.1): holds the registered rule set, runs scoped scans (catching per-rule exceptions so a thrown rule never crashes a gate check), and builds `CheckpointFingerprint`s. Editor-only (`#if TOOLS`); its only Godot coupling is the `VerifyLog` seam.
+- `packages/verify/Editor/VerifyLog.cs` — logging seam for verify (P3.1), mirroring the bridge's `BridgeLog`; the test host swaps sinks to no-ops so a thrown rule's warning path never P/Invoke into native Godot in the binary-less host.
 
 ## Versioning
 
