@@ -1,11 +1,13 @@
 # Agent rules
 
 - **Layered AGENTS.md (deepest rule wins).** `AGENTS.md` files are co-located with the code they govern. Precedence flows root → package → subtree: a deeper file may add or narrow rules for its subtree, but never silently contradicts a root rule unless that root rule explicitly allows an exception. On overlap, the deepest applicable rule is most specific. Current layers:
-  - Root (`AGENTS.md`) — cross-cutting rules (Unity-first porting, specs gitignored, docs ownership).
+  - Root (`AGENTS.md`) — cross-cutting rules (master-only branching, Unity-first porting, specs gitignored, docs ownership).
   - `packages/bridge/AGENTS.md` — bridge transport, tool registration, gate policy.
   - `packages/verify/AGENTS.md` — verify rules (must declare issue codes), fixes, capability catalog sync.
   - `mcp-server/AGENTS.md` — tool definitions, routing, offline-read no-cache philosophy.
   - `hub/AGENTS.md` — SvelteKit/Tauri UI (Phase 11).
+
+- **Work on `master`; do not branch.** Unless the user explicitly asks for a separate branch, do all work on `master` and commit there directly. Do not create feature/topic branches (`feat/*`, `fix/*`, etc.) on your own initiative, and do not commit the same logical change across multiple branches. If you inherit a repo that is already on a non-`master` branch, merge it into `master` (fast-forward when possible) and delete the branch before continuing. The single-branch `master` workflow keeps the history linear and avoids drift between branches. Branch only when the user requests it.
 
 - **Mandatory Unity-first porting protocol.** Before planning, documenting, or implementing any non-trivial change (architecture, bridge, MCP tools, gate/verify, CLI, routing, docs that define contracts), consult **Unity Open MCP** as the canonical reference. Do not reinvent patterns that already exist there.
 
