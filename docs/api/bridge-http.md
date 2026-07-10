@@ -111,6 +111,16 @@ Every mutating tool routes through the gate policy (`GatePolicy.Execute`) — a 
 
 When the gate did not run (`off` / read-only tool), only `mode`, `outcome` (`skipped`), `ran` (`false`), and `failed` are emitted. A failed mutation surfaces as `ok:false` + `error` with no gate block (the mutation itself faulted).
 
+### Gate meta-tools (explicit workflow)
+
+Three read-only tools expose the gate's checkpoint / validate / delta steps directly, so an agent can run the safety workflow across separate tool calls instead of relying on the per-mutation implicit cycle:
+
+- `godot_open_mcp_validate_edit` — scoped verify pass over `res://` paths. Returns `passed` (strict on any `Error` severity), `issues[]` (ruleId/categoryId, severity, code/issueCode, assetPath, description, optional evidence, `fixCandidates[]` / `fixId`+`fixSafe`), `categoriesRun`, `rulesApplied`, `durationMs`. Optional `categories` narrows the rule set; an unknown rule id returns a structured `error.code:unknown_rule` body (the tool still succeeds).
+- `godot_open_mcp_checkpoint_create` — captures a project-health baseline into a session-scoped in-memory store. Returns `checkpointId` (the resume key), `timestamp`, and a per-rule `fingerprint` map of `errors` / `warnings` / `issueKeys[]`. Recommended `paths` scope the baseline; an empty/absent array yields a baseline of nothing.
+- `godot_open_mcp_delta` — compares current state against a stored checkpoint. Returns `passed` (strict on new errors), a `summary` of new/resolved counts, and `newIssues[]` / `resolvedIssues[]` (canonical `{ruleId}|{severity}|{assetPath}|{issueCode}` keys). **Session-safe recovery:** a checkpoint that is no longer in the store (cleared on script recompile, assembly reload, or editor restart) returns `passed:true` + `unavailable:true` + `agentNextSteps[]` — NOT a hard error — so the agent can fall back to `validate_edit`.
+
+These bypass the gate dispatch path (they are read-only) and surface their JSON output verbatim as the `result` field.
+
 ## Auth (deferred to P5.2)
 
 A per-session bearer token is minted into the instance lock on bridge start. The MCP server attaches `Authorization: Bearer <token>` to every request when present. Enforcement is opt-in via `authMode` in project settings (`"none"` default | `"required"`). In P2.1 the bridge does not enforce auth.
@@ -123,6 +133,8 @@ A per-session bearer token is minted into the instance lock on bridge start. The
 - Gate policy (checkpoint → mutate → validate → delta): `packages/bridge/Editor/Gate/GatePolicy.cs`
 - Verify adapter (checkpoint/validate/delta over the verify package): `packages/bridge/Editor/Gate/VerifyGateAdapter.cs`
 - Gate default + precedence: `packages/bridge/Editor/Gate/GateDefaultPolicy.cs`
+- Checkpoint store (session-scoped baseline for the explicit meta-tools): `packages/bridge/Editor/Gate/CheckpointStore.cs`
+- Gate meta-tools (`validate_edit` / `checkpoint_create` / `delta` handlers + registration): `packages/bridge/Editor/MetaTools/`
 - Tool registry: `packages/bridge/Editor/Tools/BridgeToolRegistry.cs`
 - Dispatch result model: `packages/bridge/Editor/Tools/ToolDispatchResult.cs`
 - MCP-side client (envelope unwrap): `mcp-server/src/live-client.ts`

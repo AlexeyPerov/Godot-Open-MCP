@@ -1,5 +1,8 @@
 /specs/
 
+# ZCode local session state (plans, scratch)
+.zcode/
+
 # Node / TypeScript
 node_modules/
 dist/

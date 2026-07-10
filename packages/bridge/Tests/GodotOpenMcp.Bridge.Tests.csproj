@@ -84,6 +84,7 @@
          the integration test drive the dispatcher directly (the test runs on the main thread, so
          no queue hop is needed and no live dispatcher Node is required). -->
     <Compile Include="..\Editor\Bridge\BridgeRequestBody.cs" Link="Source\BridgeRequestBody.cs" />
+    <Compile Include="..\Editor\Bridge\JsonBody.cs" Link="Source\JsonBody.cs" />
     <Compile Include="..\Editor\Bridge\BridgeEnvelope.cs" Link="Source\BridgeEnvelope.cs" />
     <Compile Include="..\Editor\Tools\ToolDispatchResult.cs" Link="Source\ToolDispatchResult.cs" />
     <Compile Include="..\Editor\Tools\BridgeToolRegistry.cs" Link="Source\BridgeToolRegistry.cs" />
@@ -136,6 +137,19 @@
     <Compile Include="..\Editor\Gate\GateDefaultPolicy.cs" Link="Source\Gate\GateDefaultPolicy.cs" />
     <Compile Include="..\Editor\Gate\GatePolicy.cs" Link="Source\Gate\GatePolicy.cs" />
     <Compile Include="..\Editor\Gate\VerifyGateAdapter.cs" Link="Source\Gate\VerifyGateAdapter.cs" />
+    <!-- P3.6 — gate meta-tools (validate_edit / checkpoint_create / delta). The CheckpointStore +
+         CheckpointStoreEntry + GateTools registration are pure-managed (Dictionary/list math, no Godot
+         APIs) and compile into the binary-less host. The three MetaTools (ValidateEditTool /
+         CheckpointCreateTool / DeltaTool) read body fields via JsonBody (linked above) and call
+         VerifyGateAdapter (linked above) + FixProviderRegistry (linked below); their JSON builders are
+         pure string assembly. The VerifyGateAdapter call paths that touch VerifyRunner / live Godot APIs
+         are not reached by the JSON-builder tests, which inject synthetic VerifyResult / CheckpointStore
+         state — so the binary-less host never faults. -->
+    <Compile Include="..\Editor\Gate\CheckpointStore.cs" Link="Source\Gate\CheckpointStore.cs" />
+    <Compile Include="..\Editor\MetaTools\GateTools.cs" Link="Source\MetaTools\GateTools.cs" />
+    <Compile Include="..\Editor\MetaTools\ValidateEditTool.cs" Link="Source\MetaTools\ValidateEditTool.cs" />
+    <Compile Include="..\Editor\MetaTools\CheckpointCreateTool.cs" Link="Source\MetaTools\CheckpointCreateTool.cs" />
+    <Compile Include="..\Editor\MetaTools\DeltaTool.cs" Link="Source\MetaTools\DeltaTool.cs" />
     <!-- Verify package sources (the bridge depends on verify — packages/verify/AGENTS.md). Linked here
          so VerifyGateAdapter + GatePolicy compile against the real contract types. TOOLS is defined
          above so the #if TOOLS guard on VerifyRunner/VerifyLog/LiveResourceResolver/LiveImportHealthResolver

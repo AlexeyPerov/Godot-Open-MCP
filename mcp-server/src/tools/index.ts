@@ -26,6 +26,9 @@ import { sceneSave } from "./scene-save.js";
 import { sceneListOpened } from "./scene-list-opened.js";
 import { sceneGetData } from "./scene-get-data.js";
 import { sceneCreate } from "./scene-create.js";
+import { validateEdit } from "./validate-edit.js";
+import { checkpointCreate } from "./checkpoint-create.js";
+import { delta } from "./delta.js";
 
 /** Ordered list of every tool exposed over stdio MCP. */
 export const ALL_TOOLS: Tool[] = [
@@ -41,4 +44,10 @@ export const ALL_TOOLS: Tool[] = [
   sceneListOpened,
   sceneGetData,
   sceneCreate,
+  // P3.6 — gate meta-tools (read-only, group core). The explicit checkpoint →
+  // mutate → delta workflow surface: validate_edit for a scoped health check,
+  // checkpoint_create to capture a baseline, delta to compare post-mutation.
+  validateEdit,
+  checkpointCreate,
+  delta,
 ];

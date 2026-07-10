@@ -93,6 +93,12 @@ namespace GodotOpenMcp.Bridge.Editor
                 // surface; idempotent re-register refreshes the handler references after a domain
                 // reload.
                 SceneTools.RegisterSceneTools();
+                // P3.6 — gate meta-tools: godot_open_mcp_validate_edit / checkpoint_create /
+                // delta. Read-only (bypass the gate), group core. Registered alongside the node/scene
+                // families so an agent can run the explicit checkpoint → mutate → delta workflow in
+                // one session. Idempotent re-register refreshes the handler references after a
+                // domain reload.
+                GateTools.RegisterGateTools();
 
                 // Start the HTTP listener serving /ping and POST /tools/{name}. Stays down
                 // (and connected:false) if the bind fails — the editor remains usable, the
