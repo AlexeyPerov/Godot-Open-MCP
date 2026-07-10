@@ -30,10 +30,10 @@ namespace GodotOpenMcp.Verify.Fixes
     /// </summary>
     public sealed class FixResult
     {
-        // Mutable DTO fields populated via object initializer by IFixProvider.Apply.
+        // Mutable DTO fields populated via object initializer by IFixProviders.Apply.
         public bool Success;
         public string Description = null!;
-        public string[] TouchedPaths = null!;
+        public string[]? TouchedPaths;
     }
 
     /// <summary>
@@ -107,15 +107,15 @@ namespace GodotOpenMcp.Verify.Fixes
         private static bool _defaultsRegistered;
 
         /// <summary>
-        /// Register the built-in fix providers. Idempotent. P3.1 ships no concrete fixes; P3.7
-        /// populates this with the first <c>Safe: true</c> providers (e.g. <c>remove_missing_script</c>
-        /// analog). Safe to call repeatedly and from the verify EditorPlugin enable path.
+        /// Register the built-in fix providers. Idempotent. P3.7 populates this with the first
+        /// <c>Safe: true</c> provider (<c>remove_missing_script</c>); later phases add more. Safe to call
+        /// repeatedly and from the verify EditorPlugin enable path.
         /// </summary>
         public static void RegisterDefaults()
         {
             if (_defaultsRegistered) return;
             _defaultsRegistered = true;
-            // P3.7+: _providers.Add(new RemoveMissingScriptFix());
+            _providers.Add(new RemoveMissingScriptFix());
         }
 
         /// <summary>

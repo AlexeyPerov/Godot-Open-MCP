@@ -47,7 +47,11 @@ namespace GodotOpenMcp.Verify.Tests.Fixes
             FixProviderRegistry.Register(new StubProvider("fix_a", safe: true));
             FixProviderRegistry.Register(new StubProvider("fix_a", safe: false));
 
-            Assert.Equal(new[] { "fix_a" }, FixProviderRegistry.AvailableFixIds());
+            // Registering the same FixId twice keeps a single entry. The default provider
+            // (remove_missing_script) registered by EnsureDefaultsRegistered may also be present — assert
+            // the dedup invariant (fix_a appears exactly once) rather than the full registry contents.
+            var ids = FixProviderRegistry.AvailableFixIds();
+            Assert.Single(ids, id => id == "fix_a");
         }
 
         [Fact]
@@ -158,7 +162,11 @@ namespace GodotOpenMcp.Verify.Tests.Fixes
             FixProviderRegistry.Register(new StubProvider("fix_a", safe: true));
             FixProviderRegistry.Register(new StubProvider("fix_b", safe: false));
 
-            Assert.Equal(new[] { "fix_a", "fix_b" }, FixProviderRegistry.AvailableFixIds());
+            // Both stubs are listed. EnsureDefaultsRegistered may also surface the default
+            // remove_missing_script provider; assert the stubs are present rather than the full set.
+            var ids = FixProviderRegistry.AvailableFixIds();
+            Assert.Contains("fix_a", ids);
+            Assert.Contains("fix_b", ids);
         }
 
         // --- Stubs ---------------------------------------------------------------------------------

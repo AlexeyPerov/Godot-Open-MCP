@@ -113,13 +113,41 @@ When the gate did not run (`off` / read-only tool), only `mode`, `outcome` (`ski
 
 ### Gate meta-tools (explicit workflow)
 
-Three read-only tools expose the gate's checkpoint / validate / delta steps directly, so an agent can run the safety workflow across separate tool calls instead of relying on the per-mutation implicit cycle:
+Three read-only tools expose the gate's checkpoint / validate / delta steps directly, so an agent can run the safety workflow across separate tool calls instead of relying on the per-mutation implicit cycle. A fourth mutating tool (`apply_fix`) applies structured remediations for the issues those checks surface:
 
 - `godot_open_mcp_validate_edit` — scoped verify pass over `res://` paths. Returns `passed` (strict on any `Error` severity), `issues[]` (ruleId/categoryId, severity, code/issueCode, assetPath, description, optional evidence, `fixCandidates[]` / `fixId`+`fixSafe`), `categoriesRun`, `rulesApplied`, `durationMs`. Optional `categories` narrows the rule set; an unknown rule id returns a structured `error.code:unknown_rule` body (the tool still succeeds).
 - `godot_open_mcp_checkpoint_create` — captures a project-health baseline into a session-scoped in-memory store. Returns `checkpointId` (the resume key), `timestamp`, and a per-rule `fingerprint` map of `errors` / `warnings` / `issueKeys[]`. Recommended `paths` scope the baseline; an empty/absent array yields a baseline of nothing.
 - `godot_open_mcp_delta` — compares current state against a stored checkpoint. Returns `passed` (strict on new errors), a `summary` of new/resolved counts, and `newIssues[]` / `resolvedIssues[]` (canonical `{ruleId}|{severity}|{assetPath}|{issueCode}` keys). **Session-safe recovery:** a checkpoint that is no longer in the store (cleared on script recompile, assembly reload, or editor restart) returns `passed:true` + `unavailable:true` + `agentNextSteps[]` — NOT a hard error — so the agent can fall back to `validate_edit`.
+- `godot_open_mcp_apply_fix` — apply (or preview) a structured fix for a canonical issue id. **`dry_run` defaults to true** (preview only); pass `dry_run:false` to apply. Omit `fix_id` to list every fix that can resolve the issue (safe vs unsafe); set it to preview or apply a specific fix.
 
-These bypass the gate dispatch path (they are read-only) and surface their JSON output verbatim as the `result` field.
+The first three bypass the gate dispatch path (they are read-only) and surface their JSON output verbatim as the `result` field. `apply_fix` is mutating: a dry-run apply bypasses the gate (it mutates nothing), while a non-dry-run apply routes through `ApplyFixGateRunner` (gate + rollback).
+
+#### `apply_fix` dispatch and rollback
+
+`apply_fix` has two dispatch shapes:
+
+- **Dry-run** (`dry_run:true`, the default) — a preview: returns the fix description + `safe` flag (`fix_id` set), or the list of fix ids that can resolve the issue (`fix_id` omitted). No project change, so it bypasses the gate like a read-only tool. `paths_hint` is not required for a dry-run.
+- **Non-dry-run** (`dry_run:false`) — the real apply. Routes through `ApplyFixGateRunner`, which snapshots the issue's asset file before the fix, runs the checkpoint → apply → validate → delta cycle, then **rolls back** if the fix failed OR the gate detected new errors under `enforce`. `paths_hint` is required under enforce/warn (the gate checkpoints it for rollback).
+
+A rolled-back apply surfaces a top-level `rollback` block in the result so an agent can tell "the fix ran and stuck" from "the fix was undone — no project change remains":
+
+```json
+{
+  "ok": true,
+  "result": {
+    "gate": { "mode": "enforce", "outcome": "failed", "ran": true, "failed": true, "delta": { "newErrors": 1, "...": "..." }, "agentNextSteps": ["..."] },
+    "rollback": { "rolledBack": true, "reason": "fix introduced 1 new error(s) under enforce — restored touched files to pre-fix state", "restoredPaths": ["res://Main.tscn"] },
+    "dryRun": false,
+    "success": true,
+    "description": "Removed broken script attachment from 'res://Main.tscn'.",
+    "touchedPaths": ["res://Main.tscn"]
+  }
+}
+```
+
+Structured errors (all `ok:false` with a stable `error.code`): `missing_parameter` (empty `issue_id`), `invalid_issue_id` (malformed key), `fix_not_applicable` (provider cannot fix this issue), `fix_failed` (`Apply` returned failure), `fix_error` (`Apply` threw). An unknown `fix_id` is an `ok:true` body with `error.code:unknown_fix` listing `availableFixIds` + `applicableFixIdsForIssue` so the agent can self-correct without a second round-trip.
+
+The initial `Safe:true` provider is `remove_missing_script` — resolves `missing_scripts|missing_script` by removing the broken `script = ExtResource("id")` attachment from a `.tscn`/`.tres` (and dropping the orphaned `[ext_resource]` declaration when no node still uses it). More providers register through `FixProviderRegistry`.
 
 ## Auth (deferred to P5.2)
 
@@ -134,7 +162,10 @@ A per-session bearer token is minted into the instance lock on bridge start. The
 - Verify adapter (checkpoint/validate/delta over the verify package): `packages/bridge/Editor/Gate/VerifyGateAdapter.cs`
 - Gate default + precedence: `packages/bridge/Editor/Gate/GateDefaultPolicy.cs`
 - Checkpoint store (session-scoped baseline for the explicit meta-tools): `packages/bridge/Editor/Gate/CheckpointStore.cs`
-- Gate meta-tools (`validate_edit` / `checkpoint_create` / `delta` handlers + registration): `packages/bridge/Editor/MetaTools/`
+- Gate meta-tools (`validate_edit` / `checkpoint_create` / `delta` / `apply_fix` handlers + registration): `packages/bridge/Editor/MetaTools/`
+- `apply_fix` gate runner (gate + safe auto-fix rollback): `packages/bridge/Editor/MetaTools/ApplyFixGateRunner.cs`
+- Fix rollback (byte-level snapshot/restore): `packages/verify/Editor/Fixes/FixRollback.cs`
+- Fix providers (`remove_missing_script` + registry): `packages/verify/Editor/Fixes/`
 - Tool registry: `packages/bridge/Editor/Tools/BridgeToolRegistry.cs`
 - Dispatch result model: `packages/bridge/Editor/Tools/ToolDispatchResult.cs`
 - MCP-side client (envelope unwrap): `mcp-server/src/live-client.ts`

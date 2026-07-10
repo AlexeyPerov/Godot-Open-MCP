@@ -72,6 +72,11 @@
     <Compile Include="..\Editor\Core\VerifyRunner.cs" Link="Source\VerifyRunner.cs" />
     <Compile Include="..\Editor\VerifyLog.cs" Link="Source\VerifyLog.cs" />
     <Compile Include="..\Editor\Fixes\FixProviderRegistry.cs" Link="Source\FixProviderRegistry.cs" />
+    <!-- P3.7 fix providers + rollback. Pure-managed (File/Path/Dictionary only — no Godot API surface), so
+         they compile into this binary-less host directly. RemoveMissingScriptFix text-edits .tscn/.tres;
+         FixRollback keeps byte-level temp backups. -->
+    <Compile Include="..\Editor\Fixes\RemoveMissingScriptFix.cs" Link="Source\Fixes\RemoveMissingScriptFix.cs" />
+    <Compile Include="..\Editor\Fixes\FixRollback.cs" Link="Source\Fixes\FixRollback.cs" />
     <!-- P3.2 broken-references rule. The rule + parser + resolver-contract are pure-managed (no Godot
          API), so they compile into this binary-less host directly. LiveResourceResolver is #if TOOLS and
          GodotSharp-coupled; TOOLS is defined above so it compiles, but its ResourceLoader/ResourceUID

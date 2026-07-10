@@ -18,6 +18,14 @@ namespace GodotOpenMcp.Bridge.Tests
     /// </para>
     /// </para>
     /// </summary>
+    /// <summary>
+    /// Tests share the process-static <see cref="CheckpointStore"/> with <see cref="GateMetaToolsTests"/>
+    /// (which also clears/stores entries). The <c>[Collection]</c> attribute serializes the two classes
+    /// against each other so the LRU-ordering assertions (e.g. <c>Get_RefreshesAccessClock</c>) never
+    /// observe mid-mutation state from a concurrent class.
+    /// </summary>
+    [Collection("CheckpointStore")]
+    [CollectionDefinition("CheckpointStore", DisableParallelization = true)]
     public class CheckpointStoreTests
     {
         public CheckpointStoreTests()

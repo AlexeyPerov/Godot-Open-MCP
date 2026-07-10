@@ -367,14 +367,23 @@ namespace GodotOpenMcp.Bridge.Editor
 
         if (isMutating && gateMode != GateDefaultPolicy.Off)
         {
-            var pathsHint = BridgeRequestBody.ExtractPathsHint(body);
-            if (pathsHint == null || pathsHint.Length == 0)
+            // P3.7 — a dry-run apply_fix mutates nothing (it previews Describe / fix-list / unknown-fix),
+            // so it does not need a paths_hint scope and is dispatched read-only (see DispatchWithGate).
+            // Exempt it from the paths_hint requirement so an agent can preview a fix without inventing a
+            // scope; a non-dry-run apply still requires the hint (the gate checkpoints it for rollback).
+            var exemptFromPathsHint = toolName == GateTools.ApplyFixToolName
+                && JsonBody.GetBool(body, "dry_run", true);
+            if (!exemptFromPathsHint)
             {
-                // Cheap reject on the worker thread — do not marshal to the main thread just to fail.
-                // The structured code lets an agent re-issue with paths_hint set without guessing.
-                BridgeHttpResponse.SendJson(context, 200,
-                    BridgeEnvelope.BuildPathsHintRequired(toolName, gateMode));
-                return;
+                var pathsHint = BridgeRequestBody.ExtractPathsHint(body);
+                if (pathsHint == null || pathsHint.Length == 0)
+                {
+                    // Cheap reject on the worker thread — do not marshal to the main thread just to fail.
+                    // The structured code lets an agent re-issue with paths_hint set without guessing.
+                    BridgeHttpResponse.SendJson(context, 200,
+                        BridgeEnvelope.BuildPathsHintRequired(toolName, gateMode));
+                    return;
+                }
             }
         }
 
@@ -480,6 +489,23 @@ namespace GodotOpenMcp.Bridge.Editor
         {
             // Read-only tool: no gate. Run the handler directly and wrap in a non-gate result.
             return GateDispatchResult.Direct(DispatchTool(toolName, body));
+        }
+
+        // P3.7 — apply_fix has two dispatch shapes:
+        //   - dry-run (default): a preview (Describe / fix list / unknown-fix). No project change, so it
+        //     bypasses the gate like a read-only tool. Routing it through the gate would run a checkpoint
+        //     + validate cycle for a no-op mutation, wasting a verify scan and (under enforce) potentially
+        //     flagging pre-existing errors against a preview that changed nothing.
+        //   - non-dry-run: the real apply. Route through ApplyFixGateRunner, which wraps the gate cycle
+        //     with safe auto-fix rollback (a fix that fails or introduces new errors is restored to its
+        //     pre-fix state and the envelope carries a `rollback` block).
+        if (toolName == GateTools.ApplyFixToolName)
+        {
+            var applyDryRun = JsonBody.GetBool(body, "dry_run", true);
+            if (applyDryRun)
+                return GateDispatchResult.Direct(DispatchTool(toolName, body));
+            var applyPathsHint = BridgeRequestBody.ExtractPathsHint(body);
+            return ApplyFixGateRunner.Execute(body, gateMode, applyPathsHint);
         }
 
         // Mutating tool: route through the mandatory gate path. Parse the effective mode string once;

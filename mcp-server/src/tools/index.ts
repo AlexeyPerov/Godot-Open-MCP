@@ -29,6 +29,7 @@ import { sceneCreate } from "./scene-create.js";
 import { validateEdit } from "./validate-edit.js";
 import { checkpointCreate } from "./checkpoint-create.js";
 import { delta } from "./delta.js";
+import { applyFix } from "./apply-fix.js";
 
 /** Ordered list of every tool exposed over stdio MCP. */
 export const ALL_TOOLS: Tool[] = [
@@ -50,4 +51,8 @@ export const ALL_TOOLS: Tool[] = [
   validateEdit,
   checkpointCreate,
   delta,
+  // P3.7 — apply_fix: apply (or preview) a structured fix for a verify issue. Mutating
+  // (non-dry-run applies run through the gate with safe auto-fix rollback); a dry-run
+  // apply bypasses the gate. The initial Safe:true provider is remove_missing_script.
+  applyFix,
 ];

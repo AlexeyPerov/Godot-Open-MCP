@@ -152,15 +152,26 @@ namespace GodotOpenMcp.Bridge.Editor
             var output = mutation.Output ?? "null";
 
             var gateBlock = BuildGateBlockJson(result, gateMode);
+            // P3.7 — a non-dry-run apply_fix that failed or introduced new errors is rolled back to its
+            // pre-fix state by ApplyFixGateRunner. Surface that as a top-level `rollback` block so an
+            // agent can tell "the fix ran and stuck" from "the fix was undone — no project change
+            // remains". Null when no rollback ran (the common case for every other mutating tool).
+            var rollbackBlock = result.RolledBack ? BuildRollbackBlockJson(result) : null;
 
-            // Fast path: the handler returned an object. Insert `"gate":{...},` right after the opening
-            // brace. The output keeps all its own keys; the gate block is purely additive.
+            // Fast path: the handler returned an object. Insert `"gate":{...},` (and `"rollback":{...},`
+            // when present) right after the opening brace. The output keeps all its own keys; the gate
+            // and rollback blocks are purely additive.
             if (output.Length > 0 && output[0] == '{')
             {
-                var sb = new StringBuilder(64 + gateBlock.Length + output.Length);
+                var sb = new StringBuilder(64 + gateBlock.Length + output.Length + (rollbackBlock?.Length ?? 0));
                 sb.Append("{\"ok\":true,\"result\":{");
                 sb.Append("\"gate\":");
                 sb.Append(gateBlock);
+                if (rollbackBlock != null)
+                {
+                    sb.Append(",\"rollback\":");
+                    sb.Append(rollbackBlock);
+                }
                 sb.Append(',');
                 // Splice the rest of the handler object (skip its opening brace).
                 sb.Append(output, 1, output.Length - 1);
@@ -169,13 +180,42 @@ namespace GodotOpenMcp.Bridge.Editor
             }
 
             // Non-object output: wrap under `mutation` so the result stays a well-formed object.
-            var wrapped = new StringBuilder(80 + gateBlock.Length + output.Length);
+            var wrapped = new StringBuilder(80 + gateBlock.Length + output.Length + (rollbackBlock?.Length ?? 0));
             wrapped.Append("{\"ok\":true,\"result\":{\"gate\":");
             wrapped.Append(gateBlock);
+            if (rollbackBlock != null)
+            {
+                wrapped.Append(",\"rollback\":");
+                wrapped.Append(rollbackBlock);
+            }
             wrapped.Append(",\"mutation\":");
             wrapped.Append(output);
             wrapped.Append("}}");
             return wrapped.ToString();
+        }
+
+        /// <summary>
+        /// Serialize the P3.7 rollback block: <c>{ rolledBack, reason, restoredPaths[] }</c>. Emitted only
+        /// when <see cref="GateDispatchResult.RolledBack"/> is true. Restored paths are the <c>res://</c>
+        /// forms <c>ApplyFixGateRunner</c> normalized. Mirrors Unity's <c>BridgeJson</c> rollback block.
+        /// </summary>
+        static string BuildRollbackBlockJson(GateDispatchResult result)
+        {
+            var sb = new StringBuilder(128);
+            sb.Append("{\"rolledBack\":true");
+            sb.Append(",\"reason\":").Append(BridgeJson.EscapeString(result.RollbackReason));
+            sb.Append(",\"restoredPaths\":[");
+            var paths = result.RestoredPaths;
+            if (paths != null)
+            {
+                for (int i = 0; i < paths.Length; i++)
+                {
+                    if (i > 0) sb.Append(',');
+                    sb.Append(BridgeJson.EscapeString(paths[i]));
+                }
+            }
+            sb.Append("]}");
+            return sb.ToString();
         }
 
         /// <summary>

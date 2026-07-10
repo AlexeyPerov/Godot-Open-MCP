@@ -16,12 +16,12 @@ namespace GodotOpenMcp.Bridge.Editor
     ///
     /// <para>
     /// Ported (copy) from Unity Open MCP's <c>JsonBody</c>, narrowed to the <c>GetString</c> /
-    /// <c>GetStringArray</c> surface the P3.6 gate meta-tools (<c>validate_edit</c>,
-    /// <c>checkpoint_create</c>, <c>delta</c>) need. <see cref="BridgeRequestBody.ExtractPathsHint"/>
-    /// already implements a near-identical array scan; it is not folded in here because the dispatcher
-    /// path owns its parser and the contract differs (absent-vs-empty semantics). Future handlers
-    /// that need <c>GetBool</c> / <c>GetInt</c> / <c>GetObjectArray</c> will widen this type from the
-    /// Unity original as needed.
+    /// <c>GetStringArray</c> / <c>GetBool</c> surface the gate meta-tools (<c>validate_edit</c>,
+    /// <c>checkpoint_create</c>, <c>delta</c>, P3.7 <c>apply_fix</c>) need.
+    /// <see cref="BridgeRequestBody.ExtractPathsHint"/> already implements a near-identical array scan;
+    /// it is not folded in here because the dispatcher path owns its parser and the contract differs
+    /// (absent-vs-empty semantics). Future handlers that need <c>GetInt</c> / <c>GetObjectArray</c>
+    /// will widen this type from the Unity original as needed.
     /// </para>
     ///
     /// <para>
@@ -56,6 +56,39 @@ namespace GodotOpenMcp.Bridge.Editor
             if (json[start] != '"') return null;
             start++;
             return ReadQuotedString(json, ref start);
+        }
+
+        /// <summary>
+        /// Read a JSON boolean field. Returns <paramref name="defaultValue"/> when the key is absent, when
+        /// the value is the literal <c>null</c>, or when the value is not a boolean. Never throws — a
+        /// malformed value yields the default so the caller's contract holds without a parse fault. Used by
+        /// <c>apply_fix</c> (<c>dry_run</c>, default true). Mirrors Unity's <c>JsonBody.GetBool</c>.
+        /// </summary>
+        internal static bool GetBool(string json, string key, bool defaultValue)
+        {
+            if (string.IsNullOrEmpty(json)) return defaultValue;
+            var pattern = "\"" + key + "\"";
+            var idx = json.IndexOf(pattern, StringComparison.Ordinal);
+            if (idx < 0) return defaultValue;
+            var colonIdx = json.IndexOf(':', idx + pattern.Length);
+            if (colonIdx < 0) return defaultValue;
+            var start = colonIdx + 1;
+            while (start < json.Length && char.IsWhiteSpace(json[start])) start++;
+            if (start >= json.Length) return defaultValue;
+            // Literal null → treat as absent (default).
+            if (start + 3 < json.Length
+                && json[start] == 'n' && json[start + 1] == 'u'
+                && json[start + 2] == 'l' && json[start + 3] == 'l')
+                return defaultValue;
+            if (json[start] == 't')
+            {
+                // Accept "true" (a stricter check would verify the remaining chars; the value is either a
+                // well-formed JSON bool from the MCP client or absent, so a truncated "tru" is not a real
+                // input).
+                return true;
+            }
+            if (json[start] == 'f') return false;
+            return defaultValue;
         }
 
         /// <summary>

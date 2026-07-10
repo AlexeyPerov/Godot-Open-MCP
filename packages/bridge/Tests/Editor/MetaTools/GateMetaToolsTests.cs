@@ -37,6 +37,12 @@ namespace GodotOpenMcp.Bridge.Tests
     /// malformed payload surfaces as a parse failure, not a string-substring false-pass.
     /// </para>
     /// </summary>
+    /// <summary>
+    /// Shares the process-static <see cref="CheckpointStore"/> with <see cref="CheckpointStoreTests"/>; the
+    /// <c>[Collection]</c> attribute serializes the two classes so the delta-tool missing-checkpoint path
+    /// and the store's LRU-ordering assertions never race.
+    /// </summary>
+    [Collection("CheckpointStore")]
     public class GateMetaToolsTests
     {
         public GateMetaToolsTests()
@@ -148,7 +154,7 @@ namespace GodotOpenMcp.Bridge.Tests
         // --- GateTools registration ---------------------------------------------
 
         [Fact]
-        public void RegisterGateTools_RegistersAllThreeToolsReadOnlyCoreGroup()
+        public void RegisterGateTools_RegistersAllFourToolsReadOnlyCoreGroup()
         {
             BridgeToolRegistry.ResetForTests();
             GateTools.RegisterGateTools();
@@ -156,12 +162,14 @@ namespace GodotOpenMcp.Bridge.Tests
             Assert.True(BridgeToolRegistry.Contains(GateTools.ValidateEditToolName));
             Assert.True(BridgeToolRegistry.Contains(GateTools.CheckpointCreateToolName));
             Assert.True(BridgeToolRegistry.Contains(GateTools.DeltaToolName));
+            Assert.True(BridgeToolRegistry.Contains(GateTools.ApplyFixToolName));
 
             Assert.Equal("godot_open_mcp_validate_edit", GateTools.ValidateEditToolName);
             Assert.Equal("godot_open_mcp_checkpoint_create", GateTools.CheckpointCreateToolName);
             Assert.Equal("godot_open_mcp_delta", GateTools.DeltaToolName);
+            Assert.Equal("godot_open_mcp_apply_fix", GateTools.ApplyFixToolName);
 
-            // All three are read-only (bypass the gate) and in the core group.
+            // The three gate meta-tools are read-only (bypass the gate) and in the core group.
             var entry = BridgeToolRegistry.TryGet(GateTools.ValidateEditToolName, out var ve);
             Assert.True(entry);
             Assert.False(ve!.IsMutating);
@@ -175,6 +183,13 @@ namespace GodotOpenMcp.Bridge.Tests
             Assert.True(BridgeToolRegistry.TryGet(GateTools.DeltaToolName, out var de));
             Assert.False(de!.IsMutating);
             Assert.Equal("core", de.Group);
+
+            // P3.7 — apply_fix is mutating (non-dry-run applies route through ApplyFixGateRunner for
+            // rollback); default gate "off" matches every other mutator.
+            Assert.True(BridgeToolRegistry.TryGet(GateTools.ApplyFixToolName, out var af));
+            Assert.True(af!.IsMutating);
+            Assert.Equal("off", af.DefaultGate);
+            Assert.Equal("core", af.Group);
 
             BridgeToolRegistry.ResetForTests();
         }

@@ -85,10 +85,12 @@ namespace GodotOpenMcp.Bridge.Editor
     /// <summary>
     /// Outcome of dispatching one tool through the gate. Wraps the tool's own
     /// <see cref="ToolDispatchResult"/> with the gate telemetry (checkpoint id, outcome, delta, timing,
-    /// agent guidance). When the gate did not run (read-only tool or <see cref="GateMode.Off"/>), only
+    /// agent guidance). When the gate did not run (read-only tool or <see cref="GateMode"/>.Off), only
     /// <see cref="Mutation"/> / <see cref="GateRan"/> / <see cref="Outcome"/> / <see cref="GateFailed"/>
-    /// are populated. Ported (copy) from Unity Open MCP's <c>GateDispatchResult</c>, with the
-    /// apply_fix rollback / batch / settle / dirty-scene / logs fields stripped (later phases).
+    /// are populated. Ported (copy) from Unity Open MCP's <c>GateDispatchResult</c>, with the apply_fix
+    /// rollback fields added in P3.7 (<see cref="RolledBack"/> / <see cref="RollbackReason"/> /
+    /// <see cref="RestoredPaths"/>) and the batch / settle / dirty-scene / logs fields stripped (later
+    /// phases).
     /// </summary>
     public sealed class GateDispatchResult
     {
@@ -128,6 +130,21 @@ namespace GodotOpenMcp.Bridge.Editor
 
         /// <summary>Actionable, agent-facing next-step hints derived from the delta + outcome.</summary>
         public string[]? AgentNextSteps;
+
+        /// <summary>
+        /// P3.7 — true when a non-dry-run <c>apply_fix</c> was rolled back to its pre-fix state. Set by
+        /// <c>ApplyFixGateRunner</c> when the fix failed to apply OR the gate detected new errors under
+        /// Enforce after the fix. When true, <see cref="RestoredPaths"/> lists the <c>res://</c> paths
+        /// restored and <see cref="RollbackReason"/> explains the trigger. Surfaced as a top-level
+        /// <c>rollback</c> block in the response envelope.
+        /// </summary>
+        public bool RolledBack;
+
+        /// <summary>Human-readable reason the fix was rolled back (null when <see cref="RolledBack"/> is false).</summary>
+        public string? RollbackReason;
+
+        /// <summary>The <c>res://</c> paths restored to their pre-fix bytes (null when no rollback ran).</summary>
+        public string[]? RestoredPaths;
 
         /// <summary>
         /// Build a non-gate result (read-only tool or <see cref="GateMode.Off"/>): the mutation result

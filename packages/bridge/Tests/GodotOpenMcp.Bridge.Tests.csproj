@@ -150,6 +150,13 @@
     <Compile Include="..\Editor\MetaTools\ValidateEditTool.cs" Link="Source\MetaTools\ValidateEditTool.cs" />
     <Compile Include="..\Editor\MetaTools\CheckpointCreateTool.cs" Link="Source\MetaTools\CheckpointCreateTool.cs" />
     <Compile Include="..\Editor\MetaTools\DeltaTool.cs" Link="Source\MetaTools\DeltaTool.cs" />
+    <!-- P3.7 — apply_fix tool + rollback gate runner. ApplyFixTool reads body fields via JsonBody (linked
+         above) and calls FixProviderRegistry (linked above); its JSON builders are pure string assembly.
+         ApplyFixGateRunner calls GatePolicy.Execute + FixRollback (linked above) and Godot's
+         ProjectSettings.GlobalizePath (the GlobalizePath call paths are not reached by the JSON-builder
+         tests, which inject synthetic GateDispatchResult state). -->
+    <Compile Include="..\Editor\MetaTools\ApplyFixTool.cs" Link="Source\MetaTools\ApplyFixTool.cs" />
+    <Compile Include="..\Editor\MetaTools\ApplyFixGateRunner.cs" Link="Source\MetaTools\ApplyFixGateRunner.cs" />
     <!-- Verify package sources (the bridge depends on verify — packages/verify/AGENTS.md). Linked here
          so VerifyGateAdapter + GatePolicy compile against the real contract types. TOOLS is defined
          above so the #if TOOLS guard on VerifyRunner/VerifyLog/LiveResourceResolver/LiveImportHealthResolver
@@ -166,6 +173,11 @@
     <Compile Include="..\..\verify\Editor\Core\VerifyRunner.cs" Link="Source\Verify\Core\VerifyRunner.cs" />
     <Compile Include="..\..\verify\Editor\VerifyLog.cs" Link="Source\Verify\VerifyLog.cs" />
     <Compile Include="..\..\verify\Editor\Fixes\FixProviderRegistry.cs" Link="Source\Verify\Fixes\FixProviderRegistry.cs" />
+    <!-- P3.7 fix providers + rollback. Pure-managed (File/Path/Dictionary only — no Godot API), so they
+         compile into the binary-less host. ApplyFixTool calls provider.Apply/Describe; ApplyFixGateRunner
+         uses FixRollback; both are exercised by the MetaTools tests with synthetic state. -->
+    <Compile Include="..\..\verify\Editor\Fixes\RemoveMissingScriptFix.cs" Link="Source\Verify\Fixes\RemoveMissingScriptFix.cs" />
+    <Compile Include="..\..\verify\Editor\Fixes\FixRollback.cs" Link="Source\Verify\Fixes\FixRollback.cs" />
     <Compile Include="..\..\verify\Editor\Rules\BrokenReferences\IssueCodes.cs" Link="Source\Verify\Rules\BrokenReferences\IssueCodes.cs" />
     <Compile Include="..\..\verify\Editor\Rules\BrokenReferences\IResourceResolver.cs" Link="Source\Verify\Rules\BrokenReferences\IResourceResolver.cs" />
     <Compile Include="..\..\verify\Editor\Rules\BrokenReferences\LiveResourceResolver.cs" Link="Source\Verify\Rules\BrokenReferences\LiveResourceResolver.cs" />
