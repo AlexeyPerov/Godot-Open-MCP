@@ -70,3 +70,36 @@ test("handleCallTool surfaces a structured error when a registered tool has no l
   assert.ok(block.type === "text");
   assert.match(block.text, /no live client is wired/);
 });
+
+// --- P3.8 capabilities is built locally (no bridge hop) ---------------------
+
+test("handleCallTool resolves capabilities locally without a live client", async () => {
+  // capabilities is the one tool resolved in-process (buildCapabilities over ALL_TOOLS + catalog).
+  // It must NOT require a LiveClient and must NOT POST to the bridge — so it succeeds with no client.
+  const result = await handleCallTool({
+    name: "godot_open_mcp_capabilities",
+    arguments: {},
+  });
+  assert.equal(result.isError, undefined);
+  const block = result.content[0];
+  assert.equal(block.type, "text");
+  assert.ok(block.type === "text");
+  const body = JSON.parse(block.text);
+  assert.ok(Array.isArray(body.tools));
+  assert.ok(Array.isArray(body.rules));
+  assert.ok(Array.isArray(body.fixes));
+  assert.ok(body.tools.length >= 1, "capabilities lists at least one tool");
+});
+
+test("handleCallTool capabilities kind:rules narrows to rules only", async () => {
+  const result = await handleCallTool({
+    name: "godot_open_mcp_capabilities",
+    arguments: { kind: "rules" },
+  });
+  const body = JSON.parse((result.content[0] as { text: string }).text);
+  assert.equal(body.tools.length, 0);
+  assert.ok(body.rules.length >= 3, "rules surface present");
+  assert.equal(body.fixes.length, 0);
+  // counts still describe the whole surface even under a kind filter.
+  assert.ok(body.counts.toolsImplemented >= 1);
+});

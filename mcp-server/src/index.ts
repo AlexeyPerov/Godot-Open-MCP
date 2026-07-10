@@ -23,6 +23,8 @@ import {
   CallToolRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { ALL_TOOLS } from "./tools/index.js";
+import { buildCapabilities, type CapabilitiesFilter } from "./capabilities/build-capabilities.js";
+import { RULE_CATALOG, FIX_CATALOG } from "./capabilities/rule-catalog.js";
 import { readPackageVersion } from "./package-version.js";
 import {
   PORT_OVERRIDE_ENV_VAR,
@@ -50,8 +52,11 @@ export async function handleListTools(): Promise<{ tools: typeof ALL_TOOLS }> {
 /**
  * CallTool handler. Defensive: returns a structured `isError` response for
  * unknown tools instead of throwing so a malformed client cannot kill the
- * server process. Routed tools (currently `godot_open_mcp_ping`) dispatch
- * through the supplied LiveClient.
+ * server process. Routed tools dispatch through the supplied LiveClient.
+ *
+ * One tool is resolved LOCALLY (no bridge hop): `godot_open_mcp_capabilities`.
+ * Its response is built in-process from ALL_TOOLS + the rule/fix catalog, mirroring Unity Open MCP's
+ * tool-router `routeCapabilities` (local-only). It must NOT POST to the bridge.
  *
  * `liveClient` is optional so the unit test for the unknown-tool path does
  * not need to spin up a client. The stdio `main()` always supplies one.
@@ -73,6 +78,31 @@ export async function handleCallTool(params: {
       ],
     };
   }
+
+  const args =
+    params.arguments && typeof params.arguments === "object"
+      ? (params.arguments as Record<string, unknown>)
+      : {};
+
+  // P3.8 — capabilities is built locally over the full tool + rule + fix catalog. No bridge round-trip,
+  // so it does not need a liveClient and never POSTs. The kind / include_planned filters pass through.
+  if (toolName === "godot_open_mcp_capabilities") {
+    const filter: CapabilitiesFilter = {};
+    if (args.kind === "tools" || args.kind === "rules" || args.kind === "fixes") {
+      filter.kind = args.kind;
+    }
+    if (typeof args.include_planned === "boolean") {
+      filter.includePlanned = args.include_planned;
+    }
+    const result = buildCapabilities(
+      { tools: ALL_TOOLS, rules: RULE_CATALOG, fixes: FIX_CATALOG },
+      filter,
+    );
+    return {
+      content: [{ type: "text", text: JSON.stringify(result) }],
+    };
+  }
+
   if (!liveClient) {
     return {
       isError: true,
@@ -84,10 +114,6 @@ export async function handleCallTool(params: {
       ],
     };
   }
-  const args =
-    params.arguments && typeof params.arguments === "object"
-      ? (params.arguments as Record<string, unknown>)
-      : {};
   return liveClient.route(toolName, args);
 }
 
