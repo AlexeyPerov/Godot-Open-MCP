@@ -371,6 +371,41 @@ export class LiveClient {
       // serialize it verbatim so the agent sees exactly what the handler
       // produced. A missing `result` is treated as null.
       const result = "result" in env ? env.result : null;
+      // P4.8 — screenshot image envelope. When the result is an object carrying
+      // `mediaType: "image/png"` and a non-empty base64 `data` string, unwrap it
+      // into an MCP image content block plus a short text metadata block (the
+      // metadata = result minus the base64 `data` field, so the agent gets the
+      // width/height/byteLength/mode/caption/clamped fields without the base64
+      // blob duplicated in a text block). The base64 payload never appears
+      // inside a text JSON block on this path. Error responses (ok:false) stay
+      // structured text errors. Adapted from Unity Open MCP's
+      // live-client.ts `inlineImage` unwrap (copy fidelity for the image-block
+      // shape), generalized to the `mediaType`+`data` envelope naming.
+      if (
+        result !== null &&
+        typeof result === "object" &&
+        !Array.isArray(result)
+      ) {
+        const r = result as Record<string, unknown>;
+        const mediaType = r.mediaType;
+        const data = r.data;
+        if (
+          typeof mediaType === "string" &&
+          mediaType === "image/png" &&
+          typeof data === "string" &&
+          data.length > 0
+        ) {
+          const metadata: Record<string, unknown> = { ...r };
+          delete metadata.data;
+          return {
+            content: [
+              { type: "image", data, mimeType: mediaType },
+              { type: "text", text: JSON.stringify(metadata) },
+            ],
+            isError: false,
+          };
+        }
+      }
       return {
         content: [{ type: "text", text: JSON.stringify(result) }],
         isError: false,

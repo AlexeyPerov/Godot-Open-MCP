@@ -799,3 +799,168 @@ test("node_find: no_edited_scene failure code passes through", async () => {
     await bridge.close();
   }
 });
+
+// ----- P4.8: screenshot image-envelope unwrapping -----
+//
+// The screenshot tools return the bridge image envelope: result = { mediaType: "image/png",
+// data: "<base64>", width, height, byteLength, mode, caption, clamped, ... }. The client must
+// detect this shape and emit an MCP image content block + a text metadata block (the metadata =
+// result minus the base64 `data` field), so the base64 payload never appears inside a text JSON
+// block on success. These tests pin the C# ↔ TS contract for the image envelope.
+
+test("postTool: screenshot image envelope unwraps into image + text metadata blocks", async () => {
+  // The bridge returns the image envelope. The client must emit TWO content blocks:
+  //   [0] = { type: "image", data: <base64>, mimeType: "image/png" }
+  //   [1] = { type: "text", text: <metadata JSON without the base64 `data` field> }
+  // and isError:false. The base64 must NOT appear in the text block.
+  const imageResult = {
+    mediaType: "image/png",
+    data: "iVBORw0KGgoAAAANSUhEUg==",
+    width: 512,
+    height: 512,
+    byteLength: 1024,
+    mode: "isolated",
+    caption: "Isolated 'Cube' from front view",
+    clamped: false,
+    source: "Cube (front)",
+    bounds: {
+      center: [0, 0, 0],
+      size: [1, 1, 1],
+      radius: 0.866,
+      cameraDistance: 2.0,
+      near: 0.05,
+      far: 4000,
+      usedFallbackBounds: false,
+    },
+  };
+  const bridge = await startBridgeStub(
+    successEnvelopeHandler("godot_open_mcp_screenshot_isolated", imageResult),
+  );
+  try {
+    const client = new LiveClient(bridge.port);
+    const result = await client.route("godot_open_mcp_screenshot_isolated", {
+      node_ref: { node_path: "Cube" },
+    });
+    assert.equal(result.isError, false, "image envelope is not an error");
+    assert.equal(result.content.length, 2, "image envelope yields exactly 2 blocks");
+
+    // Block 0: image content.
+    const imgBlock = result.content[0];
+    assert.equal(imgBlock.type, "image");
+    if (imgBlock.type === "image") {
+      assert.equal(imgBlock.data, "iVBORw0KGgoAAAANSUhEUg==");
+      assert.equal(imgBlock.mimeType, "image/png");
+    }
+
+    // Block 1: text metadata — the result minus the `data` field.
+    const textBlock = result.content[1];
+    assert.equal(textBlock.type, "text");
+    if (textBlock.type === "text") {
+      const meta = JSON.parse(textBlock.text);
+      assert.equal(meta.mediaType, "image/png");
+      assert.equal(meta.width, 512);
+      assert.equal(meta.height, 512);
+      assert.equal(meta.byteLength, 1024);
+      assert.equal(meta.mode, "isolated");
+      assert.equal(meta.clamped, false);
+      assert.equal(meta.data, undefined, "base64 `data` must NOT leak into the text metadata");
+      assert.equal(meta.bounds.cameraDistance, 2.0);
+    }
+  } finally {
+    await bridge.close();
+  }
+});
+
+test("postTool: screenshot viewport image envelope preserves clamped:true", async () => {
+  // A viewport capture that exceeded the 3840 px cap and was downscaled reports clamped:true.
+  const imageResult = {
+    mediaType: "image/png",
+    data: "iVBORw0KGgo=",
+    width: 3840,
+    height: 2160,
+    byteLength: 2048,
+    mode: "viewport",
+    caption: "3D editor viewport (3840x2160)",
+    clamped: true,
+    source: "3d",
+  };
+  const bridge = await startBridgeStub(
+    successEnvelopeHandler("godot_open_mcp_screenshot_viewport", imageResult),
+  );
+  try {
+    const client = new LiveClient(bridge.port);
+    const result = await client.route("godot_open_mcp_screenshot_viewport", {});
+    assert.equal(result.isError, false);
+    assert.equal(result.content[0].type, "image");
+    const textBlock = result.content[1];
+    if (textBlock.type === "text") {
+      const meta = JSON.parse(textBlock.text);
+      assert.equal(meta.clamped, true);
+      assert.equal(meta.mode, "viewport");
+      assert.equal(meta.data, undefined);
+    }
+  } finally {
+    await bridge.close();
+  }
+});
+
+test("postTool: non-image result is NOT misframed as an image", async () => {
+  // A regular JSON result (no mediaType/data) must still serialize as a single text block —
+  // the image unwrap must be keyed on mediaType:"image/png" + non-empty data, not fire on
+  // every object result.
+  const resultPayload = { entries: [], returned: 0, capture: { nativeOutputComplete: false } };
+  const bridge = await startBridgeStub(
+    successEnvelopeHandler("godot_open_mcp_console_get_logs", resultPayload),
+  );
+  try {
+    const client = new LiveClient(bridge.port);
+    const result = await client.route("godot_open_mcp_console_get_logs", {});
+    assert.equal(result.isError, false);
+    assert.equal(result.content.length, 1, "non-image result yields a single text block");
+    assert.equal(result.content[0].type, "text");
+    assert.deepEqual(JSON.parse(textOf(result)), resultPayload);
+  } finally {
+    await bridge.close();
+  }
+});
+
+test("postTool: image envelope with empty data falls back to text (defensive)", async () => {
+  // A malformed image envelope (data is empty) must not produce an empty image block; the
+  // client falls back to the standard text serialization so the agent sees the raw envelope.
+  const malformed = { mediaType: "image/png", data: "", width: 1, height: 1 };
+  const bridge = await startBridgeStub(
+    successEnvelopeHandler("godot_open_mcp_screenshot_viewport", malformed),
+  );
+  try {
+    const client = new LiveClient(bridge.port);
+    const result = await client.route("godot_open_mcp_screenshot_viewport", {});
+    assert.equal(result.isError, false);
+    assert.equal(result.content.length, 1, "empty-data image envelope falls back to text");
+    assert.equal(result.content[0].type, "text");
+  } finally {
+    await bridge.close();
+  }
+});
+
+test("postTool: screenshot failure envelope stays a structured text error (not an image)", async () => {
+  // A render_unavailable failure from a headless environment must surface as isError:true
+  // with the bridge error code — never as an image block.
+  const bridge = await startBridgeStub(
+    failureEnvelopeHandler(
+      "godot_open_mcp_screenshot_viewport",
+      "render_unavailable",
+      "Viewport has no render texture (rendering device unavailable? running --headless?).",
+    ),
+  );
+  try {
+    const client = new LiveClient(bridge.port);
+    const result = await client.route("godot_open_mcp_screenshot_viewport", {});
+    assert.equal(result.isError, true);
+    assert.equal(result.content.length, 1);
+    assert.equal(result.content[0].type, "text");
+    const body = JSON.parse(textOf(result));
+    assert.equal(body.error.code, "render_unavailable");
+  } finally {
+    await bridge.close();
+  }
+});

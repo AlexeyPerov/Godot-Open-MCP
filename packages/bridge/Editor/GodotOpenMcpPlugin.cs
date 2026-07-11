@@ -134,6 +134,14 @@ namespace GodotOpenMcp.Bridge.Editor
                 BridgeLog.InstallCollectorSink();
                 ConsoleTools.RegisterConsoleTools();
 
+                // P4.8 — screenshot tools: screenshot_viewport (active editor 2D/3D viewport),
+                // screenshot_camera (off-screen capture from a Camera2D/Camera3D), and
+                // screenshot_isolated (render a Node3D in an isolated world from six views). All three
+                // are read-only (group editor, gate off) — they create transient editor render nodes
+                // but free them on every path and write no project files. Idempotent re-register
+                // refreshes the handler references after a domain reload.
+                ScreenshotTools.RegisterScreenshotTools();
+
                 // Start the HTTP listener serving /ping and POST /tools/{name}. Stays down
                 // (and connected:false) if the bind fails — the editor remains usable, the
                 // bridge is just unreachable. The listener thread is the only off-thread path;

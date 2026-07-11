@@ -185,6 +185,15 @@
          and verified via the headless Godot smoke. -->
     <Compile Include="..\Runtime\Logging\GodotLogEntry.cs" Link="Source\Logging\GodotLogEntry.cs" />
     <Compile Include="..\Runtime\Logging\GodotLogCollector.cs" Link="Source\Logging\GodotLogCollector.cs" />
+    <!-- P4.8 — screenshot tools. The pure-managed runtime math (ScreenshotMath — clamp/framing/
+         clip/color/PNG-signature, Godot-free) and the pure-managed editor pieces (ScreenshotBodies
+         body parsers, ScreenshotResult image-envelope builder) compile into the binary-less host for
+         off-editor unit testing. The editor-only handler (ScreenshotTools registration + the three
+         handlers) and the render service (ScreenshotService — EditorInterface/SubViewport/
+         RenderingServer/World3D-coupled) are #if TOOLS and verified via the headless Godot smoke. -->
+    <Compile Include="..\Runtime\Screenshot\ScreenshotMath.cs" Link="Source\Screenshot\ScreenshotMath.cs" />
+    <Compile Include="..\Editor\Screenshot\ScreenshotBodies.cs" Link="Source\Screenshot\ScreenshotBodies.cs" />
+    <Compile Include="..\Editor\Screenshot\ScreenshotResult.cs" Link="Source\Screenshot\ScreenshotResult.cs" />
     <!-- P3.5 — gate on mutators. The gate types (GateMode/GateOutcome/DeltaData/GateDispatchResult/
          GatePolicy/GateDefaultPolicy) and the VerifyGateAdapter are pure-managed for the parts the unit
          tests exercise (decision matrix, next-step hints, delta math, gate-mode parsing). GatePolicy

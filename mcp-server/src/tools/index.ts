@@ -45,6 +45,9 @@ import { editorSelectionGet } from "./editor-selection-get.js";
 import { editorSelectionSet } from "./editor-selection-set.js";
 import { consoleGetLogs } from "./console-get-logs.js";
 import { consoleClearLogs } from "./console-clear-logs.js";
+import { screenshotViewport } from "./screenshot-viewport.js";
+import { screenshotCamera } from "./screenshot-camera.js";
+import { screenshotIsolated } from "./screenshot-isolated.js";
 
 /** Ordered list of every tool exposed over stdio MCP. */
 export const ALL_TOOLS: Tool[] = [
@@ -117,4 +120,14 @@ export const ALL_TOOLS: Tool[] = [
   // gate-free (get is read-only; clear mutates only ephemeral state — no checkpoint/delta coverage).
   consoleGetLogs,
   consoleClearLogs,
+  // P4.8 — screenshot tools: screenshot_viewport (active editor 2D/3D viewport), screenshot_camera
+  // (off-screen capture from a Camera2D/Camera3D), and screenshot_isolated (render a Node3D in an
+  // isolated world from six views). All three are read-only (gate-free) and return the PNG as an MCP
+  // image content block (image/png) plus a short text metadata block. The bridge image envelope
+  // (mediaType + base64 data + metadata) is unwrapped by live-client.ts — the base64 payload never
+  // appears inside a text JSON block on success. Temporary render nodes (SubViewport, clone camera,
+  // light) are freed on every path; no project files are written.
+  screenshotViewport,
+  screenshotCamera,
+  screenshotIsolated,
 ];

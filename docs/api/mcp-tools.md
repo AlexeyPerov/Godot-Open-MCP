@@ -18,6 +18,7 @@ Tool names follow the `godot_open_mcp_*` convention (ADR-003).
 | resource | `resource_find`, `resource_get_data`, `resource_create`, `resource_modify`, `resource_move`, `resource_delete` | create/modify/move/delete | `.tres`/`.res` discovery + bounded property inspection (read-only) + gated create/modify (P4.2) + file lifecycle move/delete (P4.3). |
 | filesystem | `filesystem_list`, `filesystem_reimport` | reimport | Indexed `res://` directory listing (read-only) + exact-file reimport or full scan with a bounded, truthful settle status (P4.4). |
 | editor | `editor_application_get_state`, `editor_application_set_state`, `editor_selection_get`, `editor_selection_set`, `console_get_logs`, `console_clear_logs` | set_state, selection_set | Play-process state read + start/stop with a bounded observation window (P4.5); node selection read + replace/clear (P4.6); bounded log collector get/clear (P4.7). Godot launches the game as a separate OS process — no pause/compile fields. Selection is node-only; the log collector is addon-owned (not the native Output panel). |
+| screenshot | `screenshot_viewport`, `screenshot_camera`, `screenshot_isolated` | (none — all read-only) | Editor viewport capture, off-screen `Camera2D`/`Camera3D` capture, and isolated `Node3D` capture (P4.8). All three return MCP image content blocks (`image/png`); transient render nodes are freed on every path and no files are written. |
 
 ## Route policy
 
@@ -500,6 +501,70 @@ NOTE: Godot's C# API exposes no managed hook to clear the editor's own Output pa
 ```
 
 `cleared` is the number of entries removed; `retained` is the post-clear count (always 0).
+
+## Screenshot tools (P4.8)
+
+Three read-only (gate-free) tools that capture images and return them as **MCP image content blocks** (`image/png`). Unlike every other tool, the success result is a two-block content array: the image first, then a short text block with capture metadata (width, height, byteLength, mode, caption, clamped). The base64 PNG payload never appears inside the text JSON block on success — the MCP server detects the bridge image envelope (`mediaType: "image/png"` + non-empty `data`) and unwraps it into the image block. Error responses stay structured text errors.
+
+All three tools create transient editor render nodes (an off-screen `SubViewport`, a clone camera, a light, optionally a `WorldEnvironment`) but free them on every path — success, error, and timeout — and write no project files. Headless / no-GPU environments produce a structured `render_unavailable` / `empty_image` error rather than a blank image.
+
+**Shared limits:**
+
+- Positive dimensions only (>= 1 px); caller requests above 16384 px are rejected.
+- The longest encoded edge is clamped to **3840 px** (aspect preserved). The result reports `clamped: true` when downscaling was applied.
+- The encoded PNG must stay under an **8 MB** transport ceiling. If it still exceeds that after dimension clamping, the tool rejects it with `image_too_large`.
+
+### `godot_open_mcp_screenshot_viewport`
+
+Capture the active Godot editor 2D or 3D viewport. Read-only (gate-free). The viewport is read back in-memory via `EditorInterface.GetEditorViewport2D()` / `GetEditorViewport3D(0)`; no file is written.
+
+**Input:**
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `mode` | `"2d"` \| `"3d"` | `"3d"` | Which editor viewport to capture. |
+
+**Result:** image content block (`image/png`) + text metadata block (`{ mediaType, width, height, byteLength, mode, caption, clamped, source }`).
+
+**Errors:** `invalid_capture_mode` (unknown mode), `viewport_unavailable` (no open viewport), `render_unavailable` (no GPU / `--headless` / readback failure), `empty_image` (readback produced no pixels), `png_encode_failed`, `image_too_large`.
+
+### `godot_open_mcp_screenshot_camera`
+
+Render an off-screen capture from a `Camera2D` or `Camera3D` in the edited scene. Read-only (gate-free). The source camera is never moved — a transient `SubViewport` shares the camera's world (`World3D` / `World2D`) and clones its transform/projection so the off-screen render sees the same content.
+
+**Input:**
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `node_ref` | object | (required) | `{ instance_id?, node_path? }` — `instance_id` is priority 1, `node_path` priority 2. Must resolve to a `Camera2D` or `Camera3D`. |
+| `width` | integer | 1920 | Clamped to a 3840 px longest edge (aspect preserved). |
+| `height` | integer | 1080 | Clamped to a 3840 px longest edge (aspect preserved). |
+
+**Result:** image content block + text metadata block (`{ mediaType, width, height, byteLength, mode:"camera", caption, clamped, source }`).
+
+**Errors:** `invalid_dimensions`, `node_not_found`, `invalid_camera_node` (target is not `Camera2D`/`Camera3D`), `render_unavailable`, `empty_image`, `png_encode_failed`, `image_too_large`.
+
+### `godot_open_mcp_screenshot_isolated`
+
+Render a `Node3D` alone in an isolated world from one of six directions. Read-only (gate-free). The target is duplicated **without its scripts** (so `_EnterTree`/`_Ready` side effects never run) into a fresh `SubViewport` with `OwnWorld3D = true`, framed by a transient camera computed from the combined AABB of the target's `VisualInstance3D` descendants. An empty/degenerate geometry falls back to a 0.1-unit bounds box (`usedFallbackBounds: true` in the metadata).
+
+**Input:**
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `node_ref` | object | (required) | `{ instance_id?, node_path? }`. Must resolve to a `Node3D`. |
+| `camera_view` | enum | `"front"` | `front` (-Z), `back` (+Z), `left` (-X), `right` (+X), `top` (+Y), `bottom` (-Y). |
+| `background` | enum | `"solid_color"` | `solid_color` (uses `background_color` via a transient `WorldEnvironment`) or `transparent` (alpha-clear). |
+| `background_color` | string | `"#404040"` | Hex color (`#RGB` / `#RRGGBB` / `#RRGGBBAA`). Ignored when `background` is `transparent`. |
+| `field_of_view` | number | 60 | Degrees, range [1, 179]. |
+| `near_clip_plane` | number | 0.05 | Loosened (moved closer) by the framing math to guarantee the target is inside the clip range. |
+| `far_clip_plane` | number | 4000 | Loosened (moved farther) by the framing math to guarantee the target is inside the clip range. |
+| `padding` | number | 1.2 | Framing padding multiplier. Larger values zoom out. |
+| `resolution` | integer | 512 | Square output resolution (px). Clamped to a 3840 px longest edge. |
+
+**Result:** image content block + text metadata block (`{ mediaType, width, height, byteLength, mode:"isolated", caption, clamped, source, bounds: { center, size, radius, cameraDistance, near, far, usedFallbackBounds } }`).
+
+**Errors:** `invalid_capture_mode` (unknown view/background/color), `invalid_dimensions`, `invalid_isolated_node` (target is not `Node3D`), `node_not_found`, `degenerate_geometry` (camera framing impossible after fallback rules), `render_unavailable`, `empty_image`, `png_encode_failed`, `image_too_large`.
 
 ## Source of truth
 
