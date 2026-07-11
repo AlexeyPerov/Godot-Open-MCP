@@ -41,6 +41,10 @@ import { filesystemList } from "./filesystem-list.js";
 import { filesystemReimport } from "./filesystem-reimport.js";
 import { editorApplicationGetState } from "./editor-application-get-state.js";
 import { editorApplicationSetState } from "./editor-application-set-state.js";
+import { editorSelectionGet } from "./editor-selection-get.js";
+import { editorSelectionSet } from "./editor-selection-set.js";
+import { consoleGetLogs } from "./console-get-logs.js";
+import { consoleClearLogs } from "./console-clear-logs.js";
 
 /** Ordered list of every tool exposed over stdio MCP. */
 export const ALL_TOOLS: Tool[] = [
@@ -98,4 +102,19 @@ export const ALL_TOOLS: Tool[] = [
   // state. Godot launches the game as a separate OS process, so the state model is start/stop only.
   editorApplicationGetState,
   editorApplicationSetState,
+  // P4.6 — editor selection tools: editor_selection_get (read-only node selection snapshot) and
+  // editor_selection_set (replace/clear the selection, gated). Get reports the selected nodes as
+  // shallow NodeData + the active (last-selected) node + count + scene path; set resolves every ref
+  // before clearing (all-or-nothing) and returns the observed post-change selection. Godot selection
+  // is node-only — no asset/component/global-object fields.
+  editorSelectionGet,
+  editorSelectionSet,
+  // P4.7 — console log tools: console_get_logs (read-only query of the bounded collector, newest-first,
+  // with severity/age/max-entries filters and capture-capability metadata) and console_clear_logs
+  // (gate-free direct — clears only the ephemeral addon collector, never the native Output panel).
+  // The collector is fed by the bridge's own logging path; Godot exposes no managed global log hook at
+  // 4.3, so this is the addon's captured activity, not the entire editor Output. Both tools are
+  // gate-free (get is read-only; clear mutates only ephemeral state — no checkpoint/delta coverage).
+  consoleGetLogs,
+  consoleClearLogs,
 ];

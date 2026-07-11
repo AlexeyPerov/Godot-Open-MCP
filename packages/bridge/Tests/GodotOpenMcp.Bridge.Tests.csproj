@@ -169,6 +169,22 @@
     <Compile Include="..\Editor\Tools\EditorApplicationStateData.cs" Link="Source\EditorApplicationStateData.cs" />
     <Compile Include="..\Editor\Tools\EditorApplicationSetStateBody.cs" Link="Source\EditorApplicationSetStateBody.cs" />
     <Compile Include="..\Editor\Tools\EditorStateSettleWait.cs" Link="Source\EditorStateSettleWait.cs" />
+    <!-- P4.6 — editor selection tools. The pure-managed pieces (EditorSelectionData DTO +
+         EditorSelectionSetBody parser, including its NodeRef) compile into the binary-less host for
+         off-editor unit testing; the editor-only handler (EditorSelectionTools.GetSelection /
+         SetSelection — EditorInterface/EditorSelection-coupled) is #if TOOLS and verified via the
+         headless Godot smoke / gate integration tests. EditorSelectionData serializes via an inlined
+         BridgeJson-style escaper (no dependency on the editor-only BridgeJson). -->
+    <Compile Include="..\Editor\Tools\EditorSelectionData.cs" Link="Source\EditorSelectionData.cs" />
+    <Compile Include="..\Editor\Tools\EditorSelectionSetBody.cs" Link="Source\EditorSelectionSetBody.cs" />
+    <!-- P4.7 — console log tools. The pure-managed runtime pieces (GodotLogEntry DTO +
+         GodotLogCollector ring buffer — both under Runtime/Logging/, no #if TOOLS, no Godot API
+         surface) compile into the binary-less host for off-editor unit testing, including
+         concurrency and eviction coverage. The editor-only handler (ConsoleTools.GetLogs / ClearLogs
+         — GodotLogCollector.Current-coupled) and the BridgeLog → collector forward sink are #if TOOLS
+         and verified via the headless Godot smoke. -->
+    <Compile Include="..\Runtime\Logging\GodotLogEntry.cs" Link="Source\Logging\GodotLogEntry.cs" />
+    <Compile Include="..\Runtime\Logging\GodotLogCollector.cs" Link="Source\Logging\GodotLogCollector.cs" />
     <!-- P3.5 — gate on mutators. The gate types (GateMode/GateOutcome/DeltaData/GateDispatchResult/
          GatePolicy/GateDefaultPolicy) and the VerifyGateAdapter are pure-managed for the parts the unit
          tests exercise (decision matrix, next-step hints, delta math, gate-mode parsing). GatePolicy

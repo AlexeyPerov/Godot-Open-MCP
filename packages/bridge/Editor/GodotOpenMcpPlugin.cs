@@ -117,6 +117,22 @@ namespace GodotOpenMcp.Bridge.Editor
                 // families so an agent can drive the editor's play lifecycle. Idempotent re-register
                 // refreshes the handler references after a domain reload.
                 EditorApplicationTools.RegisterEditorApplicationTools();
+                // P4.6 — editor selection tools: godot_open_mcp_editor_selection_get (read-only node
+                // selection snapshot) and godot_open_mcp_editor_selection_set (replace/clear the
+                // selection, gated). Registered alongside the other editor families so an agent can
+                // inspect and drive the editor's node selection. Idempotent re-register refreshes the
+                // handler references after a domain reload.
+                EditorSelectionTools.RegisterEditorSelectionTools();
+
+                // P4.7 — console log tools. Install the process-wide log collector and wire BridgeLog
+                // to forward into it (no recursive logging — the collector write path never logs back).
+                // Then register godot_open_mcp_console_get_logs (read-only) and
+                // godot_open_mcp_console_clear_logs (gate-free direct — mutates only ephemeral addon
+                // state, not project files or the native Output panel). Idempotent re-register refreshes
+                // the handler references after a domain reload.
+                GodotOpenMcp.Bridge.Runtime.Logging.GodotLogCollector.GetOrCreate();
+                BridgeLog.InstallCollectorSink();
+                ConsoleTools.RegisterConsoleTools();
 
                 // Start the HTTP listener serving /ping and POST /tools/{name}. Stays down
                 // (and connected:false) if the bind fails — the editor remains usable, the
@@ -164,6 +180,10 @@ namespace GodotOpenMcp.Bridge.Editor
                 // dispatcher is freed last so any teardown work the later subsystems
                 // marshal still lands on a live pump).
                 BridgeHttpServer.Stop();
+                // P4.7 — detach the BridgeLog → collector forward sink. The collector itself stays
+                // readable (see GodotLogCollector.Current remarks) so console_get_logs can still
+                // surface the most recent session's lines after a disable.
+                BridgeLog.RemoveCollectorSink();
                 BridgeSession.ResetForDisable();
 
                 FreeDispatcher();

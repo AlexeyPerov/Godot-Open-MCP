@@ -17,7 +17,7 @@ Tool names follow the `godot_open_mcp_*` convention (ADR-003).
 | scene | `scene_open`, `scene_save`, `scene_list_opened`, `scene_get_data`, `scene_create` | open/save/create | Scene lifecycle + read. |
 | resource | `resource_find`, `resource_get_data`, `resource_create`, `resource_modify`, `resource_move`, `resource_delete` | create/modify/move/delete | `.tres`/`.res` discovery + bounded property inspection (read-only) + gated create/modify (P4.2) + file lifecycle move/delete (P4.3). |
 | filesystem | `filesystem_list`, `filesystem_reimport` | reimport | Indexed `res://` directory listing (read-only) + exact-file reimport or full scan with a bounded, truthful settle status (P4.4). |
-| editor | `editor_application_get_state`, `editor_application_set_state` | set_state | Play-process state read + start/stop with a bounded observation window (P4.5). Godot launches the game as a separate OS process — no pause/compile fields. |
+| editor | `editor_application_get_state`, `editor_application_set_state`, `editor_selection_get`, `editor_selection_set`, `console_get_logs`, `console_clear_logs` | set_state, selection_set | Play-process state read + start/stop with a bounded observation window (P4.5); node selection read + replace/clear (P4.6); bounded log collector get/clear (P4.7). Godot launches the game as a separate OS process — no pause/compile fields. Selection is node-only; the log collector is addon-owned (not the native Output panel). |
 
 ## Route policy
 
@@ -387,6 +387,119 @@ Start or stop the Godot editor's play process. Mutating (default gate `enforce`)
 **Errors:** `paths_hint_required` (missing/empty `paths_hint`), `invalid_scene_selector` (`scene` is not `main`/`current`/a valid `res://` scene path), `scene_not_found` (explicit path does not exist), `current_scene_unavailable` (no edited scene, or unsaved), `already_playing` (a process is running a different scene — observed state surfaced under `result`), `play_start_failed` / `play_stop_failed` (the `EditorInterface` API threw — observed state surfaced), `state_transition_timeout` (the requested state was not observed within `timeoutMs` — last observed state surfaced under `result`; a caller can safely follow up with `editor_application_get_state`).
 
 **No automatic save.** A play start does not save the edited scene first. A `current` start requires a saved edited scene (a path); a freshly-created unsaved scene yields `current_scene_unavailable`.
+
+## `godot_open_mcp_editor_selection_get`
+
+Get the Godot editor's current node selection as structured data. Read-only (gate-free).
+
+Godot's `EditorSelection` selects scene-tree `Node`s only — there is no asset-GUID or component selection distinction, and no first-class "active object". So the result is a flat list of selected nodes (each as shallow `NodeData`) plus the active (last-selected) node. Godot has no first-class active-object concept; the last selected node is reported as active, matching how the editor inspector tracks the most-recently-clicked node.
+
+**Input:** empty object.
+
+**Result:**
+
+```json
+{
+  "nodes": [
+    { "instanceId": 12345, "name": "Player", "path": "/root/Main/Player", "type": "Node3D", "scriptResourcePath": null, "childCount": 2, "children": null }
+  ],
+  "activeNode": { "instanceId": 12345, "name": "Player", "path": "/root/Main/Player", "type": "Node3D", "scriptResourcePath": null, "childCount": 2, "children": null },
+  "count": 1,
+  "scenePath": "res://main.tscn"
+}
+```
+
+An empty selection (`count: 0`, `activeNode: null`) is a success, not an error. `scenePath` is the active edited scene path (or null when no scene is edited).
+
+## `godot_open_mcp_editor_selection_set`
+
+Set the Godot editor's node selection to the provided nodes (replacing any current selection). Mutating (default gate `enforce`). The selection write changes no files, but the gate still runs because the tool changes editor selection state (the verify delta is clean in the common case).
+
+All refs are resolved completely BEFORE the current selection is cleared — a single bad ref leaves the existing selection intact (all-or-nothing). Resolution precedence: `instance_id` (priority 1) then `node_path` (priority 2). Each resolved node must belong to the active edited scene; duplicates (after resolution) and foreign-scene nodes are rejected.
+
+**Input:**
+- `select` (optional) — array of node refs; empty/omitted clears. Each ref: `{ instance_id?: integer, node_path?: string }`. When both are set, `instance_id` wins.
+- `paths_hint` (required) — active edited scene path (or `res://project.godot` for a clear). Mandatory even when `gate` is `off`.
+- `gate` (optional, default `enforce`) — `enforce` | `warn` | `off`.
+
+**Result:**
+
+```json
+{
+  "nodes": [
+    { "instanceId": 12345, "name": "Player", "path": "/root/Main/Player", "type": "Node3D", "scriptResourcePath": null, "childCount": 2, "children": null }
+  ],
+  "activeNode": { "instanceId": 12345, "name": "Player", "path": "/root/Main/Player", "type": "Node3D", "scriptResourcePath": null, "childCount": 2, "children": null },
+  "count": 1,
+  "scenePath": "res://main.tscn",
+  "cleared": true
+}
+```
+
+The observed post-change selection (same shape as `editor_selection_get`) plus a `cleared` boolean. Order is preserved in the request; the observed post-state may reorder (Godot's `EditorSelection` does not guarantee order-stable reads).
+
+**Errors:** `paths_hint_required` (missing/empty `paths_hint`), `selection_limit_exceeded` (request exceeds the hard maximum of 256 nodes), `edited_scene_unavailable` (non-empty selection with no edited scene), `node_not_found` (a ref cannot resolve — names the offending index), `node_not_in_edited_scene` (resolved node belongs elsewhere), `duplicate_node` (multiple refs resolve to the same node), `selection_update_failed` (observed post-state differs from requested — observed state surfaced under `result`), `selection_unavailable` (`EditorInterface.GetSelection()` returned null).
+
+## `godot_open_mcp_console_get_logs`
+
+Retrieve captured Godot Open MCP log lines, newest-first. Read-only (gate-free).
+
+**NOTE:** Godot's C# API exposes no global managed log hook at the 4.3 baseline, so this returns the addon's own captured activity (bridge lifecycle, tool-handler errors, routed game/script output when a supported hook is active) — NOT the entire Godot editor Output panel. The response carries explicit capture-capability metadata so callers do not over-trust the contents. Each entry has a monotonic `sequence` (for future event-stream cursor use), a `logType` (`log`/`warning`/`error`), the `message`, a UTC `timestamp`, an optional `stackTrace`, and a `source` (`bridge`/`script`/`engine`/`tool`).
+
+**Input:**
+- `max_entries` (optional, default 100, [1, 1000]) — max entries to return (newest-first, so the cap keeps the most recent).
+- `log_type_filter` (optional) — array of `"log"` | `"warning"` | `"error"`; omitted means all. Multiple values are unioned.
+- `include_stack_trace` (optional, default false) — include stack traces.
+- `last_minutes` (optional, default 0 = all retained, non-negative) — only lines captured in the last N minutes.
+
+**Result:**
+
+```json
+{
+  "entries": [
+    {
+      "sequence": 42,
+      "logType": "error",
+      "message": "Example",
+      "timestamp": "2026-07-10T19:00:00.000Z",
+      "stackTrace": null,
+      "source": "bridge"
+    }
+  ],
+  "returned": 1,
+  "retained": 20,
+  "capacity": 1000,
+  "order": "newest_first",
+  "capture": {
+    "nativeOutputComplete": false,
+    "engineErrorSinkActive": false
+  }
+}
+```
+
+An empty result is a successful response with capture metadata, not an error. `capture.nativeOutputComplete` is always `false` at the 4.3 baseline; `capture.engineErrorSinkActive` is `false` unless a version-gated engine error sink is armed.
+
+**Errors:** `invalid_max_entries` (outside [1, 1000]), `invalid_log_type` (unknown filter value), `invalid_last_minutes` (negative), `console_unavailable` (collector not initialized).
+
+## `godot_open_mcp_console_clear_logs`
+
+Clear the Godot Open MCP log cache (read by `console_get_logs`). Gate-free direct — mutates only ephemeral addon-owned collector state, not project files or Godot editor state. Checkpoint/delta cannot meaningfully cover ephemeral memory, so there is no `paths_hint` and no gate surface.
+
+NOTE: Godot's C# API exposes no managed hook to clear the editor's own Output panel, so (unlike Unity) this clears ONLY the addon-side collector — `nativeOutputCleared` is always `false`. The collector sequence is NOT reset on clear (a future event-stream cursor stays monotonic across a clear).
+
+**Input:** empty object.
+
+**Result:**
+
+```json
+{
+  "cleared": 20,
+  "retained": 0,
+  "nativeOutputCleared": false
+}
+```
+
+`cleared` is the number of entries removed; `retained` is the post-clear count (always 0).
 
 ## Source of truth
 
