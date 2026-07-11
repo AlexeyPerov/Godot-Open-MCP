@@ -54,6 +54,16 @@ namespace GodotOpenMcp.Bridge.Editor
         /// <summary>Build a failure result carrying a stable code + message.</summary>
         public static ToolDispatchResult Fail(string code, string message) =>
             new ToolDispatchResult(false, null, code, message);
+
+        /// <summary>
+        /// Build a failure result carrying a stable code + message AND an observed-state JSON payload
+        /// (P4.3 partial-failure contract). Used by <c>resource_move</c>/<c>resource_delete</c> when a
+        /// multi-file operation partially fails — the agent needs the observed final paths/states to
+        /// recover, alongside the structured error. The dispatcher splices <paramref name="output"/>
+        /// into the <c>"result"</c> field even on failure when it is non-null.
+        /// </summary>
+        public static ToolDispatchResult FailWithOutput(string code, string message, string output) =>
+            new ToolDispatchResult(false, output, code, message);
     }
 }
 #endif

@@ -51,6 +51,12 @@ namespace GodotOpenMcp.Bridge.Editor
         /// <summary>The MCP tool name for the resource mutator (P4.2).</summary>
         internal const string ResourceModifyToolName = "godot_open_mcp_resource_modify";
 
+        /// <summary>The MCP tool name for the resource file mover (P4.3).</summary>
+        internal const string ResourceMoveToolName = "godot_open_mcp_resource_move";
+
+        /// <summary>The MCP tool name for the resource file deleter (P4.3).</summary>
+        internal const string ResourceDeleteToolName = "godot_open_mcp_resource_delete";
+
         // --- registration -----------------------------------------------------------
 
         /// <summary>
@@ -59,8 +65,11 @@ namespace GodotOpenMcp.Bridge.Editor
         /// <c>godot_open_mcp_resource_get_data</c> (group <c>resource</c>, default gate <c>off</c> —
         /// read-only). P4.2 adds two gated mutators — <c>godot_open_mcp_resource_create</c> and
         /// <c>godot_open_mcp_resource_modify</c> (group <c>resource</c>, default gate <c>enforce</c>
-        /// — both write <c>.tres</c>/<c>.res</c> files to disk). Registered once at plugin enable;
-        /// safe to call again on re-enable (the registry is idempotent).
+        /// — both write <c>.tres</c>/<c>.res</c> files to disk). P4.3 adds two gated file-lifecycle
+        /// mutators — <c>godot_open_mcp_resource_move</c> and <c>godot_open_mcp_resource_delete</c>
+        /// (group <c>resource</c>, default gate <c>enforce</c> — relocate/remove <c>.tres</c>/
+        /// <c>.res</c> files + <c>.import</c> sidecars via <c>DirAccess</c>). Registered once at
+        /// plugin enable; safe to call again on re-enable (the registry is idempotent).
         /// </summary>
         internal static void RegisterResourceTools()
         {
@@ -88,6 +97,18 @@ namespace GodotOpenMcp.Bridge.Editor
                 defaultGate: "enforce",
                 group: "resource",
                 handler: Modify));
+            BridgeToolRegistry.Register(new BridgeToolEntry(
+                name: ResourceMoveToolName,
+                isMutating: true,
+                defaultGate: "enforce",
+                group: "resource",
+                handler: Move));
+            BridgeToolRegistry.Register(new BridgeToolEntry(
+                name: ResourceDeleteToolName,
+                isMutating: true,
+                defaultGate: "enforce",
+                group: "resource",
+                handler: Delete));
         }
 
         // --- godot_open_mcp_resource_find -------------------------------------------
@@ -819,6 +840,273 @@ namespace GodotOpenMcp.Bridge.Editor
             return ToolDispatchResult.Ok(sb.ToString());
         }
 
+        // --- godot_open_mcp_resource_move ------------------------------------------
+
+        /// <summary>
+        /// Handler for <c>godot_open_mcp_resource_move</c>. Mutating (default gate
+        /// <c>enforce</c>). Moves a <c>.tres</c>/<c>.res</c> file (and its <c>.import</c> sidecar when
+        /// present) to a new <c>res://</c> destination via <c>DirAccess.RenameAbsolute</c>. Adapted
+        /// from Unity Open MCP's <c>AssetsTools.Move</c> (adapt fidelity — <c>AssetDatabase.MoveAsset</c>
+        /// becomes explicit file + <c>.import</c> handling because Godot has no single engine API that
+        /// moves both atomically) and Godot-MCP's <c>Tool_Resource.Move</c> (behavior reference —
+        /// <c>DirAccess</c> + sidecar <c>try/finally</c>-scan).
+        ///
+        /// <para>
+        /// <b>No reference rewriting.</b> Hard-coded <c>res://</c> references in other text assets are
+        /// not rewritten. UID-based references are expected to remain stable where Godot supports them.
+        /// Use <c>resource_find</c> / <c>find_references</c> to check dependents before moving.
+        /// </para>
+        ///
+        /// <para>
+        /// <b>Atomicity.</b> Preflight (same-path, existence, collision, extension) runs before any
+        /// mutation. The primary file moves first, the sidecar second. If the sidecar move fails, a
+        /// rollback of the primary file is attempted and the result exposes the observed final state —
+        /// the contract never claims atomicity across two OS-level operations.
+        /// </para>
+        ///
+        /// <para>
+        /// <b>paths_hint.</b> Must contain BOTH the source and destination paths — this is the gate
+        /// scope AND a handler-level guard that fires even when an agent overrides with
+        /// <c>gate:"off"</c>.
+        /// </para>
+        ///
+        /// Structured failures: <c>missing_parameter</c>, <c>paths_hint_required</c>,
+        /// <c>invalid_path</c>, <c>same_path</c>, <c>resource_not_found</c>, <c>destination_exists</c>,
+        /// <c>resource_move_failed</c>, <c>resource_move_partial</c>, <c>filesystem_unavailable</c>.
+        /// Must not throw.
+        /// </summary>
+        internal static ToolDispatchResult Move(string body)
+        {
+            var request = ResourceMoveBody.Parse(body);
+
+            if (!request.HasSourcePath)
+            {
+                return ToolDispatchResult.Fail(
+                    "missing_parameter",
+                    "resource_move requires 'source_path' (a res:// path or uid:// identifier).");
+            }
+            if (!request.HasDestinationPath)
+            {
+                return ToolDispatchResult.Fail(
+                    "missing_parameter",
+                    "resource_move requires 'destination_path' (the new res:// destination ending in .tres or .res).");
+            }
+
+            // Normalize source path (accept uid:// and map to res://).
+            var rawSource = request.SourcePath!;
+            string sourcePath;
+            if (ResourcePathNormalizer.IsUid(rawSource))
+            {
+                var uidResolved = ResolveUidToPath(rawSource);
+                if (uidResolved == null)
+                    return ToolDispatchResult.Fail(
+                        "resource_not_found",
+                        $"uid '{rawSource}' does not resolve to any resource.");
+                sourcePath = uidResolved;
+            }
+            else
+            {
+                if (!ResourcePathNormalizer.TryRequireResFilePath(rawSource, out sourcePath, out var srcError))
+                    return ToolDispatchResult.Fail("invalid_path", srcError);
+            }
+
+            // Normalize destination path (must be a res:// file path).
+            if (!ResourcePathNormalizer.TryRequireResFilePath(request.DestinationPath!, out var destPath, out var dstError))
+                return ToolDispatchResult.Fail("invalid_path", dstError);
+
+            // Reject same-path moves (after normalization so res://a.tres == res://a.tres is caught).
+            if (sourcePath == destPath)
+                return ToolDispatchResult.Fail(
+                    "same_path",
+                    $"source_path and destination_path are identical ('{sourcePath}').");
+
+            // Reject extension changes (the move must preserve the resource extension so the importer
+            // treats the file the same way).
+            if (!ResourcePathNormalizer.HasResourceExtension(destPath))
+                return ToolDispatchResult.Fail(
+                    "invalid_path",
+                    $"destination_path must end with '.tres' or '.res'; got '{request.DestinationPath}'.");
+
+            // Handler-level paths_hint guard — fires even under gate:"off". Must contain BOTH paths.
+            var pathsHint = BridgeRequestBody.ExtractPathsHint(body);
+            var hintError = ValidatePathsHintBoth(pathsHint, sourcePath, destPath, out var hintHasSource, out var hintHasDest);
+            if (hintError != null)
+                return ToolDispatchResult.Fail("paths_hint_required", hintError);
+            if (!hintHasSource)
+                return ToolDispatchResult.Fail(
+                    "paths_hint_required",
+                    $"paths_hint must contain the source path '{sourcePath}'.");
+            if (!hintHasDest)
+                return ToolDispatchResult.Fail(
+                    "paths_hint_required",
+                    $"paths_hint must contain the destination path '{destPath}'.");
+
+            // Source must exist as a file.
+            if (!FileAccess.FileExists(sourcePath))
+                return ToolDispatchResult.Fail(
+                    "resource_not_found",
+                    $"No file exists at '{sourcePath}'.");
+
+            // Destination must not exist (no overwrite).
+            if (FileAccess.FileExists(destPath))
+                return ToolDispatchResult.Fail(
+                    "destination_exists",
+                    $"A file already exists at '{destPath}'. resource_move does not overwrite.");
+
+            // Destination sidecar collision check.
+            var dstImport = destPath + ".import";
+            if (FileAccess.FileExists(dstImport))
+                return ToolDispatchResult.Fail(
+                    "destination_exists",
+                    $"An .import sidecar already exists at '{dstImport}' (destination collision).");
+
+            // Filesystem must be ready.
+            var efs = EditorInterface.Singleton.GetResourceFilesystem();
+            if (efs == null || !efs.GetFilesystem().IsReady())
+                return ToolDispatchResult.Fail(
+                    "filesystem_unavailable",
+                    "The editor filesystem is not ready; wait for the import scan to finish and retry.");
+
+            // Delegate the file operation to ResourceFileOperations.
+            var move = ResourceFileOperations.Move(sourcePath, destPath);
+
+            // Build the result envelope.
+            var sb = new StringBuilder(256);
+            sb.Append("{\"before\":");
+            (move.Before ?? new ResourceIdentity()).AppendJsonTo(sb);
+            if (move.Success)
+            {
+                sb.Append(",\"after\":");
+                (move.After ?? new ResourceIdentity()).AppendJsonTo(sb);
+                sb.Append(",\"sidecarMoved\":").Append(move.SidecarMoved ? "true" : "false");
+                sb.Append(",\"filesystemScan\":");
+                move.FilesystemScan.AppendJsonTo(sb);
+                sb.Append(",\"moved\":true}");
+                return ToolDispatchResult.Ok(sb.ToString());
+            }
+
+            // Partial / failed move — include observed-state diagnostics.
+            sb.Append(",\"sidecarMoved\":").Append(move.SidecarMoved ? "true" : "false");
+            sb.Append(",\"filesystemScan\":");
+            move.FilesystemScan.AppendJsonTo(sb);
+            sb.Append(",\"sourceExistsAfter\":").Append(move.SourceExistsAfter ? "true" : "false");
+            sb.Append(",\"destinationExistsAfter\":").Append(move.DestinationExistsAfter ? "true" : "false");
+            sb.Append(",\"rolledBack\":").Append(move.RolledBack ? "true" : "false");
+            sb.Append(",\"moved\":false}");
+            return ToolDispatchResult.FailWithOutput(
+                move.ErrorCode ?? "resource_move_failed",
+                move.ErrorMessage ?? "resource_move failed.",
+                sb.ToString());
+        }
+
+        // --- godot_open_mcp_resource_delete ----------------------------------------
+
+        /// <summary>
+        /// Handler for <c>godot_open_mcp_resource_delete</c>. Mutating (default gate
+        /// <c>enforce</c>). Removes a <c>.tres</c>/<c>.res</c> file (and its <c>.import</c> sidecar
+        /// when present) via <c>DirAccess.RemoveAbsolute</c>. Adapted from Unity Open MCP's
+        /// <c>AssetsTools.Delete</c> (adapt fidelity — <c>AssetDatabase.DeleteAsset</c> becomes
+        /// explicit file + <c>.import</c> handling) and Godot-MCP's <c>Tool_Resource.Delete</c>
+        /// (behavior reference — <c>DirAccess.RemoveAbsolute</c> + sidecar <c>try/finally</c>-scan).
+        ///
+        /// <para>
+        /// <b>Pre-delete snapshot.</b> The identity (path/uid/type) is captured BEFORE the file is
+        /// removed so the agent has a durable record of what was deleted.
+        /// </para>
+        ///
+        /// <para>
+        /// <b>Atomicity.</b> The primary file is removed first, the sidecar second. If the sidecar
+        /// removal fails, the result exposes the orphan sidecar path and recovery guidance — the
+        /// contract never claims atomicity across two OS-level operations.
+        /// </para>
+        ///
+        /// <para>
+        /// <b>paths_hint.</b> Must contain the resource path (the gate scope AND a handler-level guard
+        /// that fires even when an agent overrides with <c>gate:"off"</c>). The known sidecar path may
+        /// also be included.
+        /// </para>
+        ///
+        /// Structured failures: <c>missing_parameter</c>, <c>paths_hint_required</c>,
+        /// <c>invalid_path</c>, <c>resource_not_found</c>, <c>resource_delete_failed</c>,
+        /// <c>resource_delete_partial</c>, <c>filesystem_unavailable</c>. Must not throw.
+        /// </summary>
+        internal static ToolDispatchResult Delete(string body)
+        {
+            var request = ResourceDeleteBody.Parse(body);
+
+            if (!request.HasResourcePath)
+            {
+                return ToolDispatchResult.Fail(
+                    "missing_parameter",
+                    "resource_delete requires 'resource_path' (a res:// path or uid:// identifier).");
+            }
+
+            // Normalize target path (accept uid:// and map to res://).
+            var rawPath = request.ResourcePath!;
+            string resPath;
+            if (ResourcePathNormalizer.IsUid(rawPath))
+            {
+                var uidResolved = ResolveUidToPath(rawPath);
+                if (uidResolved == null)
+                    return ToolDispatchResult.Fail(
+                        "resource_not_found",
+                        $"uid '{rawPath}' does not resolve to any resource.");
+                resPath = uidResolved;
+            }
+            else
+            {
+                if (!ResourcePathNormalizer.TryRequireResFilePath(rawPath, out resPath, out var normError))
+                    return ToolDispatchResult.Fail("invalid_path", normError);
+            }
+
+            // Handler-level paths_hint guard — fires even under gate:"off".
+            var pathsHint = BridgeRequestBody.ExtractPathsHint(body);
+            var hintError = ValidatePathsHint(pathsHint, resPath, out var hintContainsPath);
+            if (hintError != null)
+                return ToolDispatchResult.Fail("paths_hint_required", hintError);
+            if (!hintContainsPath)
+                return ToolDispatchResult.Fail(
+                    "paths_hint_required",
+                    $"paths_hint must contain the resource path '{resPath}'.");
+
+            // Target must exist as a file.
+            if (!FileAccess.FileExists(resPath))
+                return ToolDispatchResult.Fail(
+                    "resource_not_found",
+                    $"No file exists at '{resPath}'.");
+
+            // Filesystem must be ready.
+            var efs = EditorInterface.Singleton.GetResourceFilesystem();
+            if (efs == null || !efs.GetFilesystem().IsReady())
+                return ToolDispatchResult.Fail(
+                    "filesystem_unavailable",
+                    "The editor filesystem is not ready; wait for the import scan to finish and retry.");
+
+            // Delegate the file operation to ResourceFileOperations.
+            var del = ResourceFileOperations.Delete(resPath);
+
+            // Build the result envelope.
+            var sb = new StringBuilder(256);
+            sb.Append("{\"resource\":");
+            del.Resource.AppendJsonTo(sb);
+            sb.Append(",\"sidecarDeleted\":").Append(del.SidecarDeleted ? "true" : "false");
+            sb.Append(",\"filesystemScan\":");
+            del.FilesystemScan.AppendJsonTo(sb);
+            if (del.Success)
+            {
+                sb.Append(",\"deleted\":true}");
+                return ToolDispatchResult.Ok(sb.ToString());
+            }
+
+            // Partial delete — include orphan sidecar diagnostics.
+            sb.Append(",\"orphanSidecarPath\":").Append(BridgeJson.EscapeString(del.OrphanSidecarPath));
+            sb.Append(",\"deleted\":false}");
+            return ToolDispatchResult.FailWithOutput(
+                del.ErrorCode ?? "resource_delete_failed",
+                del.ErrorMessage ?? "resource_delete failed.",
+                sb.ToString());
+        }
+
         // --- shared helpers ---------------------------------------------------------
 
         /// <summary>uid:// text → res:// path, or null when the uid is unknown. Main-thread only.</summary>
@@ -884,6 +1172,16 @@ namespace GodotOpenMcp.Bridge.Editor
                 Type = type,
             };
         }
+
+        /// <summary>
+        /// Build a <see cref="ResourceIdentity"/> for a resource path, for the file-level move/delete
+        /// operations (P4.3). Exposed as <c>internal</c> so <see cref="ResourceFileOperations"/> can
+        /// build before/after/snapshot identities without duplicating the UID/type lookup. When
+        /// <paramref name="knownType"/> is null, the type is read from the editor filesystem.
+        /// Main-thread only.
+        /// </summary>
+        internal static ResourceIdentity BuildIdentityForFileOps(string resPath, string? knownType = null)
+            => BuildIdentity(resPath, knownType, out _);
 
         /// <summary>
         /// Normalize a user-supplied directory argument to a <c>res://</c> directory path
@@ -997,6 +1295,27 @@ namespace GodotOpenMcp.Bridge.Editor
             foreach (var p in pathsHint)
             {
                 if (p == expectedPath) { containsPath = true; break; }
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Variant of <see cref="ValidatePathsHint"/> for move operations where <c>paths_hint</c>
+        /// must contain BOTH the source and destination paths. Returns null on success, or an error
+        /// message when the hint is missing/empty. Also reports whether each path is present.
+        /// </summary>
+        static string? ValidatePathsHintBoth(string[]? pathsHint, string sourcePath, string destPath,
+            out bool containsSource, out bool containsDest)
+        {
+            containsSource = false;
+            containsDest = false;
+            if (pathsHint == null || pathsHint.Length == 0)
+                return "paths_hint is required and must be non-empty.";
+
+            foreach (var p in pathsHint)
+            {
+                if (p == sourcePath) containsSource = true;
+                if (p == destPath) containsDest = true;
             }
             return null;
         }

@@ -15,7 +15,7 @@ Tool names follow the `godot_open_mcp_*` convention (ADR-003).
 | core | `ping`, `validate_edit`, `checkpoint_create`, `delta`, `apply_fix`, `capabilities` | `apply_fix` only | Always visible in `ListTools`. |
 | node | `node_find`, `node_create`, `node_modify`, `node_set_parent`, `node_duplicate`, `node_delete` | create/modify/set-parent/duplicate/delete | Scene-tree operations. |
 | scene | `scene_open`, `scene_save`, `scene_list_opened`, `scene_get_data`, `scene_create` | open/save/create | Scene lifecycle + read. |
-| resource | `resource_find`, `resource_get_data`, `resource_create`, `resource_modify` | create/modify | `.tres`/`.res` discovery + bounded property inspection (read-only) + gated create/modify (P4.2). |
+| resource | `resource_find`, `resource_get_data`, `resource_create`, `resource_modify`, `resource_move`, `resource_delete` | create/modify/move/delete | `.tres`/`.res` discovery + bounded property inspection (read-only) + gated create/modify (P4.2) + file lifecycle move/delete (P4.3). |
 
 ## Route policy
 
@@ -199,6 +199,64 @@ Modify writable properties of an existing Godot resource (`.tres`/`.res`) throug
 `changed` lists patches whose value actually changed; `unchanged` lists no-op patches. The standard `gate` block is prepended into `result`.
 
 **Errors:** `missing_parameter` (no `resource_path` or empty `patches`), `paths_hint_required`, `invalid_path`, `resource_not_found`, `resource_load_failed`, `resource_not_writable` (imported/generated resource), `patch_invalid`, `value_type_mismatch`, `no_changes` (all patches already match), `resource_save_failed`, `filesystem_unavailable`.
+
+## `godot_open_mcp_resource_move`
+
+Move a Godot resource file (`.tres`/`.res`) and its `.import` sidecar to a new `res://` destination via `DirAccess.RenameAbsolute`. Mutating (default gate `enforce`). The destination must not already exist — no overwrite. The destination parent directory is created when missing. The `.import` sidecar is moved alongside the primary file when present.
+
+**No reference rewriting.** Hard-coded `res://` references in other text assets are NOT rewritten. UID-based references are expected to remain stable where Godot supports them. Use `resource_find` to check dependents before moving.
+
+**Atomicity.** Preflight (same-path, existence, collision, extension) runs before any mutation. The primary file moves first, the sidecar second. If the sidecar move fails, a rollback of the primary file is attempted and the result exposes the observed final state — the contract never claims atomicity across two OS-level operations.
+
+**Input:**
+- `source_path` (required) — `res://` path or `uid://` (mapped first).
+- `destination_path` (required) — new `res://` destination, must end in `.tres`/`.res` (extension changes rejected), must not exist.
+- `paths_hint` (required) — mutation scope; must contain BOTH `source_path` and `destination_path`. Mandatory even when `gate` is `off`.
+- `gate` (optional, default `enforce`) — `enforce` | `warn` | `off`.
+
+**Result (success):**
+
+```json
+{
+  "before": { "resourcePath": "res://old.tres", "uid": "uid://abc", "type": "Resource" },
+  "after": { "resourcePath": "res://dir/new.tres", "uid": "uid://abc", "type": "Resource" },
+  "sidecarMoved": false,
+  "filesystemScan": { "settled": true, "scanTriggered": true, "settledMs": 0, "reason": null },
+  "moved": true
+}
+```
+
+`before`/`after` are `ResourceIdentity` objects. `sidecarMoved` is `true` when a `.import` sidecar was relocated. `filesystemScan` reports whether the editor filesystem scan settled within the budget.
+
+**Partial failure** (e.g. primary moved but sidecar failed and rollback was not possible): the error carries an observed-state payload under `result` — `sourceExistsAfter`, `destinationExistsAfter`, `rolledBack` — so the agent can recover.
+
+**Errors:** `missing_parameter` (no `source_path`/`destination_path`), `paths_hint_required` (missing/empty/incomplete `paths_hint`), `invalid_path` (bad scheme/extension/traversal/directory), `same_path` (normalized source equals destination), `resource_not_found` (source missing), `destination_exists` (destination file or sidecar collision), `resource_move_failed` (primary rename fails before any move, or rolled back), `resource_move_partial` (primary moved but sidecar failed and rollback not possible), `filesystem_unavailable`.
+
+## `godot_open_mcp_resource_delete`
+
+Delete a Godot resource file (`.tres`/`.res`) and its `.import` sidecar via `DirAccess.RemoveAbsolute`. Mutating (default gate `enforce`). Delete is explicit and immediate — no soft-delete or recycle bin. A pre-delete identity snapshot (`path`/`uid`/`type`) is returned so the agent has a durable record of what was removed. The `.import` sidecar is removed alongside the primary file when present.
+
+**Atomicity.** The primary file is removed first, the sidecar second. If the sidecar removal fails, the orphan `.import` path is reported — the contract never claims atomicity across two OS-level operations.
+
+**Input:**
+- `resource_path` (required) — `res://` path or `uid://` (mapped first).
+- `paths_hint` (required) — mutation scope; must contain `resource_path`. Mandatory even when `gate` is `off`.
+- `gate` (optional, default `enforce`) — `enforce` | `warn` | `off`.
+
+**Result (success):**
+
+```json
+{
+  "resource": { "resourcePath": "res://doomed.tres", "uid": "uid://abc", "type": "Resource" },
+  "sidecarDeleted": false,
+  "filesystemScan": { "settled": true, "scanTriggered": true, "settledMs": 0, "reason": null },
+  "deleted": true
+}
+```
+
+`resource` is the pre-delete `ResourceIdentity` snapshot. On partial failure (sidecar remains), the error carries `orphanSidecarPath` so the agent can clean up.
+
+**Errors:** `missing_parameter` (no `resource_path`), `paths_hint_required`, `invalid_path`, `resource_not_found` (target missing), `resource_delete_failed` (primary removal fails), `resource_delete_partial` (primary removed but sidecar remains), `filesystem_unavailable`.
 
 ## Source of truth
 

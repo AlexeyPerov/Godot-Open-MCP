@@ -379,13 +379,18 @@ export class LiveClient {
 
     if (env.ok === false) {
       // Failure. The bridge always emits { code, message } under `error`; fall
-      // back defensively if a malformed envelope omits it.
+      // back defensively if a malformed envelope omits it. When the bridge also
+      // carries a `result` field (P4.3 partial-failure contract — e.g.
+      // resource_move where the primary moved but the sidecar didn't), surface
+      // the observed-state payload via `detail` so the agent can recover.
       const err = env.error ?? { code: "execution_error", message: undefined };
+      const detail = "result" in env ? { error: err, result: env.result } : undefined;
       return makeErrorResult({
         code: err.code ?? "execution_error",
         message:
           err.message ??
           `Tool '${toolName}' failed with ok:false but no error message.`,
+        detail,
       });
     }
 

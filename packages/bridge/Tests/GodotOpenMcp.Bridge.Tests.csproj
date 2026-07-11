@@ -145,6 +145,15 @@
     <Compile Include="..\Editor\Tools\ResourcePropertyPatch.cs" Link="Source\ResourcePropertyPatch.cs" />
     <Compile Include="..\Editor\Tools\ResourceCreateBody.cs" Link="Source\ResourceCreateBody.cs" />
     <Compile Include="..\Editor\Tools\ResourceModifyBody.cs" Link="Source\ResourceModifyBody.cs" />
+    <!-- P4.3 — resource file lifecycle tools (resource_move / resource_delete). The pure-managed
+         pieces (ResourceMoveBody + ResourceDeleteBody parsers) compile into the binary-less host;
+         the editor-only handler (ResourceTools.Move / Delete), the file-operation abstraction
+         (ResourceFileOperations — DirAccess/FileAccess/EditorInterface-coupled), and the
+         ToolDispatchResult.FailWithOutput partial-failure factory are #if TOOLS and verified via the
+         headless Godot smoke / live call path, not here. The gate integration tests stub the gate
+         and the handler, so they exercise only the dispatch routing + paths_hint guard. -->
+    <Compile Include="..\Editor\Tools\ResourceMoveBody.cs" Link="Source\ResourceMoveBody.cs" />
+    <Compile Include="..\Editor\Tools\ResourceDeleteBody.cs" Link="Source\ResourceDeleteBody.cs" />
     <!-- P3.5 — gate on mutators. The gate types (GateMode/GateOutcome/DeltaData/GateDispatchResult/
          GatePolicy/GateDefaultPolicy) and the VerifyGateAdapter are pure-managed for the parts the unit
          tests exercise (decision matrix, next-step hints, delta math, gate-mode parsing). GatePolicy

@@ -35,6 +35,8 @@ import { resourceFind } from "./resource-find.js";
 import { resourceGetData } from "./resource-get-data.js";
 import { resourceCreate } from "./resource-create.js";
 import { resourceModify } from "./resource-modify.js";
+import { resourceMove } from "./resource-move.js";
+import { resourceDelete } from "./resource-delete.js";
 
 /** Ordered list of every tool exposed over stdio MCP. */
 export const ALL_TOOLS: Tool[] = [
@@ -73,4 +75,10 @@ export const ALL_TOOLS: Tool[] = [
   // default gate enforce. Both write .tres/.res files to disk through ResourceSaver.
   resourceCreate,
   resourceModify,
+  // P4.3 — resource file lifecycle tools: resource_move (relocate a .tres/.res file + .import
+  // sidecar via DirAccess) and resource_delete (remove a .tres/.res file + .import sidecar).
+  // Mutating, group resource, default gate enforce. Both handle the .import sidecar explicitly and
+  // reconcile the editor filesystem after the operation. No reference rewriting.
+  resourceMove,
+  resourceDelete,
 ];

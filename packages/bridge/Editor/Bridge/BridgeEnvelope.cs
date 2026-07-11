@@ -93,6 +93,21 @@ namespace GodotOpenMcp.Bridge.Editor
                     "execution_error",
                     "BuildFailure called with a successful ToolDispatchResult — bridge bug.");
             }
+            // P4.3 — partial-failure results carry an observed-state JSON payload (Output) alongside
+            // the error code/message so an agent can recover from a half-completed multi-file
+            // operation (e.g. resource_move where the primary moved but the sidecar didn't). When
+            // Output is present, fold it into the failure envelope under `result` — backward
+            // compatible: existing failures with null Output are unchanged.
+            if (!string.IsNullOrEmpty(result.Output))
+            {
+                var sb = new StringBuilder(64 + (result.Output?.Length ?? 0));
+                sb.Append("{\"ok\":false,\"error\":{");
+                sb.Append("\"code\":").Append(BridgeJson.EscapeString(result.ErrorCode ?? "execution_error"));
+                sb.Append(",\"message\":").Append(BridgeJson.EscapeString(result.ErrorMessage));
+                sb.Append("},\"result\":").Append(result.Output);
+                sb.Append('}');
+                return sb.ToString();
+            }
             return BuildFailure(result.ErrorCode ?? "execution_error", result.ErrorMessage);
         }
 
