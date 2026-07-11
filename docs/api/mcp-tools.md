@@ -15,7 +15,7 @@ Tool names follow the `godot_open_mcp_*` convention (ADR-003).
 | core | `ping`, `validate_edit`, `checkpoint_create`, `delta`, `apply_fix`, `capabilities` | `apply_fix` only | Always visible in `ListTools`. |
 | node | `node_find`, `node_create`, `node_modify`, `node_set_parent`, `node_duplicate`, `node_delete` | create/modify/set-parent/duplicate/delete | Scene-tree operations. |
 | scene | `scene_open`, `scene_save`, `scene_list_opened`, `scene_get_data`, `scene_create` | open/save/create | Scene lifecycle + read. |
-| resource | `resource_find`, `resource_get_data` | none | `.tres`/`.res` discovery + bounded property inspection. Read-only; mutation lands in P4.2/P4.3. |
+| resource | `resource_find`, `resource_get_data`, `resource_create`, `resource_modify` | create/modify | `.tres`/`.res` discovery + bounded property inspection (read-only) + gated create/modify (P4.2). |
 
 ## Route policy
 
@@ -140,6 +140,65 @@ Each property node carries `name`, `variantType`, `value` (scalar/JSON-raw/`null
 **Errors:** `missing_parameter` (no `resource_path`), `invalid_path` (bad scheme/extension), `resource_not_found` (path/uid does not resolve), `resource_load_failed` (`ResourceLoader.Load` fails), `serialization_failed` (property access/serialization fails safely).
 
 **Tip:** prefer `compact` first, then drill in with `property_path` or a higher `max_depth`. `full` can be expensive on large resources.
+
+## `godot_open_mcp_resource_create`
+
+Create a new Godot resource (`.tres`/`.res`) by instantiating a `Resource` subclass via `ClassDB` and persisting it through `ResourceSaver`. Mutating (default gate `enforce`). The destination must not already exist — no overwrite. Optional initial properties are validated and applied before the first save (all-or-nothing; a single bad patch aborts the create with no file written).
+
+**Input:**
+- `resource_path` (required) — new `res://` destination, must end in `.tres`/`.res`, must not exist.
+- `type_class_name` (optional, default `Resource`) — instantiable `Resource` subclass (e.g. `StandardMaterial3D`, `FastNoiseLite`, `Gradient`). Validated via `ClassDB`: must exist, be instantiable, and inherit `Resource`.
+- `properties` (optional) — array of `{ path, value }` initial property assignments (see patch grammar below).
+- `paths_hint` (required) — mutation scope; must contain `resource_path`. Mandatory even when `gate` is `off`.
+- `gate` (optional, default `enforce`) — `enforce` | `warn` | `off`.
+
+**Property-path grammar** (shared with `resource_modify`):
+- `property` — set a top-level property.
+- `nested/property` — traverse a sub-resource, then set.
+- `array/[0]` — set an array element by index (the array grows to fit).
+- `dictionary/[key]` — set a dictionary value by string key.
+
+The first segment must be a property name. Values are raw JSON converted to the property's `Variant.Type`: `bool`, `int`, `float`, `string`, vectors as `[x,y,...]`, colors as `[r,g,b,a]`, resource refs as `{"resource_path":"res://..."}` , or `null` to clear.
+
+**Result:**
+
+```json
+{
+  "resource": { "resourcePath": "res://materials/wood.tres", "uid": "uid://abc", "type": "StandardMaterial3D" },
+  "changed": ["albedo_color"],
+  "unchanged": [],
+  "saved": true
+}
+```
+
+`changed` / `unchanged` list property paths that actually changed vs matched the default. The standard `gate` block (mode, outcome, ran, failed, delta, agentNextSteps) is prepended into `result`.
+
+**Errors:** `missing_parameter` (no `resource_path`), `paths_hint_required` (missing/empty/incomplete `paths_hint`), `invalid_path` (bad scheme/extension/traversal), `resource_exists` (destination already exists), `resource_type_invalid` (class missing/abstract/non-instantiable/not a `Resource`), `patch_invalid` (bad path, duplicate path, unknown property, bad index/key), `value_type_mismatch` (value cannot convert to the target type), `no_changes` (all initial properties already match), `resource_save_failed` (`ResourceSaver.Save` returns non-OK), `filesystem_unavailable`.
+
+## `godot_open_mcp_resource_modify`
+
+Modify writable properties of an existing Godot resource (`.tres`/`.res`) through explicit property-path assignments, then persist via `ResourceSaver`. Mutating (default gate `enforce`). All patches are validated atomically before any mutation — a single bad path or value aborts with the resource untouched. No-op detection reports `no_changes` (save skipped) when all patches already match. Imported/generated resources (those with a `.import` sidecar) are rejected with `resource_not_writable`.
+
+**Input:**
+- `resource_path` (required) — `res://` path or `uid://` (mapped first).
+- `patches` (required, non-empty) — array of `{ path, value }` property patches (see grammar above).
+- `paths_hint` (required) — mutation scope; must contain `resource_path`. Mandatory even when `gate` is `off`.
+- `gate` (optional, default `enforce`) — `enforce` | `warn` | `off`.
+
+**Result:**
+
+```json
+{
+  "resource": { "resourcePath": "res://materials/wood.tres", "uid": "uid://abc", "type": "StandardMaterial3D" },
+  "changed": ["albedo_color", "roughness"],
+  "unchanged": ["metallic"],
+  "saved": true
+}
+```
+
+`changed` lists patches whose value actually changed; `unchanged` lists no-op patches. The standard `gate` block is prepended into `result`.
+
+**Errors:** `missing_parameter` (no `resource_path` or empty `patches`), `paths_hint_required`, `invalid_path`, `resource_not_found`, `resource_load_failed`, `resource_not_writable` (imported/generated resource), `patch_invalid`, `value_type_mismatch`, `no_changes` (all patches already match), `resource_save_failed`, `filesystem_unavailable`.
 
 ## Source of truth
 

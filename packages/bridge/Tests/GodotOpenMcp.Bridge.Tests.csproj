@@ -136,6 +136,15 @@
     <Compile Include="..\Editor\Tools\ResourceData.cs" Link="Source\ResourceData.cs" />
     <Compile Include="..\Editor\Tools\ResourceFindBody.cs" Link="Source\ResourceFindBody.cs" />
     <Compile Include="..\Editor\Tools\ResourceGetDataBody.cs" Link="Source\ResourceGetDataBody.cs" />
+    <!-- P4.2 — resource mutation tools (resource_create / resource_modify). The pure-managed pieces
+         (ResourcePropertyPatch path grammar + shared patch-list extractor, ResourceCreateBody +
+         ResourceModifyBody parsers) compile into the binary-less host; the editor-only handler
+         (ResourceTools.Create / Modify) and the ResourcePropertyPatcher are #if TOOLS and
+         ClassDB/ResourceSaver/ResourceLoader-coupled, so they are verified via the headless Godot
+         smoke / live call path, not here. -->
+    <Compile Include="..\Editor\Tools\ResourcePropertyPatch.cs" Link="Source\ResourcePropertyPatch.cs" />
+    <Compile Include="..\Editor\Tools\ResourceCreateBody.cs" Link="Source\ResourceCreateBody.cs" />
+    <Compile Include="..\Editor\Tools\ResourceModifyBody.cs" Link="Source\ResourceModifyBody.cs" />
     <!-- P3.5 — gate on mutators. The gate types (GateMode/GateOutcome/DeltaData/GateDispatchResult/
          GatePolicy/GateDefaultPolicy) and the VerifyGateAdapter are pure-managed for the parts the unit
          tests exercise (decision matrix, next-step hints, delta math, gate-mode parsing). GatePolicy

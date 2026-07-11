@@ -33,6 +33,8 @@ import { applyFix } from "./apply-fix.js";
 import { capabilities } from "./capabilities.js";
 import { resourceFind } from "./resource-find.js";
 import { resourceGetData } from "./resource-get-data.js";
+import { resourceCreate } from "./resource-create.js";
+import { resourceModify } from "./resource-modify.js";
 
 /** Ordered list of every tool exposed over stdio MCP. */
 export const ALL_TOOLS: Tool[] = [
@@ -66,4 +68,9 @@ export const ALL_TOOLS: Tool[] = [
   // route (POST /tools/{name}); offline resource reads arrive in Phase 7.
   resourceFind,
   resourceGetData,
+  // P4.2 — resource mutation tools: resource_create (instantiate a Resource subclass + save) and
+  // resource_modify (apply validated property-path patches + save). Mutating, group resource,
+  // default gate enforce. Both write .tres/.res files to disk through ResourceSaver.
+  resourceCreate,
+  resourceModify,
 ];
