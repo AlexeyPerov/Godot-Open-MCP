@@ -17,6 +17,7 @@ Tool names follow the `godot_open_mcp_*` convention (ADR-003).
 | scene | `scene_open`, `scene_save`, `scene_list_opened`, `scene_get_data`, `scene_create` | open/save/create | Scene lifecycle + read. |
 | resource | `resource_find`, `resource_get_data`, `resource_create`, `resource_modify`, `resource_move`, `resource_delete` | create/modify/move/delete | `.tres`/`.res` discovery + bounded property inspection (read-only) + gated create/modify (P4.2) + file lifecycle move/delete (P4.3). |
 | filesystem | `filesystem_list`, `filesystem_reimport` | reimport | Indexed `res://` directory listing (read-only) + exact-file reimport or full scan with a bounded, truthful settle status (P4.4). |
+| editor | `editor_application_get_state`, `editor_application_set_state` | set_state | Play-process state read + start/stop with a bounded observation window (P4.5). Godot launches the game as a separate OS process — no pause/compile fields. |
 
 ## Route policy
 
@@ -331,6 +332,61 @@ The call blocks until the import pipeline settles (bounded by `timeout_ms`). A t
 `mode` is `"files"` or `"full_scan"`. `settle` reports whether the scan started, whether it settled, the scanning progress (when busy), the elapsed settle time, and a `reason` on timeout (`"timeout"`, `"scan_did_not_start"`, `"not_attempted"` on a pre-flight failure).
 
 **Errors:** `paths_hint_required` (missing/empty/incomplete `paths_hint`, or full scan without `["res://"]`), `invalid_path` (bad scheme/traversal/directory), `file_not_found` (any requested file missing), `filesystem_unavailable`, `reimport_failed` (Godot rejects the reimport/scan — observed state is surfaced under `result`).
+
+## `godot_open_mcp_editor_application_get_state`
+
+Get a truthful snapshot of the Godot editor's play-process state. Read-only (gate-free).
+
+Godot launches the game as a **separate OS process** (not an in-editor playmode toggle), so the state model is deliberately narrower than Unity's `editor_status`: there is no `isPaused`, no `isCompiling`, no domain-reload concept. The tool reports only what is observable — whether a play process is running and which scene it is running.
+
+**Input:** empty object.
+
+**Result:**
+
+```json
+{
+  "isPlaying": true,
+  "playingScene": "res://main.tscn",
+  "editorVersion": "4.3.stable.mono",
+  "observedAt": "2026-07-10T19:00:00.000Z"
+}
+```
+
+`playingScene` is `null` when not playing or when Godot does not report a path. `observedAt` is an ISO-8601 UTC timestamp so callers can correlate the snapshot with their own request timing.
+
+## `godot_open_mcp_editor_application_set_state`
+
+Start or stop the Godot editor's play process. Mutating (default gate `enforce`). The play lifecycle writes no files, but the gate still runs because the tool changes editor/project runtime state (the verify delta is clean in the common case).
+
+**Input:**
+- `is_playing` (optional, default `false`) — `true` starts a play process for the selected scene; `false` stops any running process.
+- `scene` (optional) — selector, only meaningful when `is_playing` is `true`:
+  - `"main"` (default) — `EditorInterface.PlayMainScene`.
+  - `"current"` — `EditorInterface.PlayCurrentScene` (requires a saved edited scene).
+  - an explicit `res://...tscn` / `res://...scn` path — `EditorInterface.PlayCustomScene` (must exist).
+- `timeout_ms` (optional, default `5000`, clamped `[1000, 60000]`) — bounded state-transition deadline.
+- `paths_hint` (required) — the explicit scene path (custom scene), the edited scene path (`current`), or `res://project.godot` (`main` and `stop`). Mandatory even when `gate` is `off`.
+- `gate` (optional, default `enforce`) — `enforce` | `warn` | `off`.
+
+**Result (start):**
+
+```json
+{
+  "requested": { "action": "start", "scene": "main" },
+  "before": { "isPlaying": false, "playingScene": null, "editorVersion": "4.3.stable.mono", "observedAt": "..." },
+  "after": { "isPlaying": true, "playingScene": "res://main.tscn", "editorVersion": "4.3.stable.mono", "observedAt": "..." },
+  "state": { "isPlaying": true, "playingScene": "res://main.tscn", "editorVersion": "4.3.stable.mono", "observedAt": "..." },
+  "settled": true,
+  "elapsedMs": 0,
+  "timeoutMs": 5000
+}
+```
+
+`requested.action` is `"start"` (transition observed), `"start_noop"` (already playing the same scene — idempotent), `"stop"` (transition observed), or `"stop_noop"` (already stopped — idempotent success). `before`/`after` are the observed snapshots; `state` is an alias for the final observed state. `settled` is `true` when the requested state was observed within `timeoutMs`.
+
+**Errors:** `paths_hint_required` (missing/empty `paths_hint`), `invalid_scene_selector` (`scene` is not `main`/`current`/a valid `res://` scene path), `scene_not_found` (explicit path does not exist), `current_scene_unavailable` (no edited scene, or unsaved), `already_playing` (a process is running a different scene — observed state surfaced under `result`), `play_start_failed` / `play_stop_failed` (the `EditorInterface` API threw — observed state surfaced), `state_transition_timeout` (the requested state was not observed within `timeoutMs` — last observed state surfaced under `result`; a caller can safely follow up with `editor_application_get_state`).
+
+**No automatic save.** A play start does not save the edited scene first. A `current` start requires a saved edited scene (a path); a freshly-created unsaved scene yields `current_scene_unavailable`.
 
 ## Source of truth
 

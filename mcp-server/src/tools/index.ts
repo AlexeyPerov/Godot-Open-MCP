@@ -39,6 +39,8 @@ import { resourceMove } from "./resource-move.js";
 import { resourceDelete } from "./resource-delete.js";
 import { filesystemList } from "./filesystem-list.js";
 import { filesystemReimport } from "./filesystem-reimport.js";
+import { editorApplicationGetState } from "./editor-application-get-state.js";
+import { editorApplicationSetState } from "./editor-application-set-state.js";
 
 /** Ordered list of every tool exposed over stdio MCP. */
 export const ALL_TOOLS: Tool[] = [
@@ -89,4 +91,11 @@ export const ALL_TOOLS: Tool[] = [
   // ReimportFiles/Scan with a bounded, truthful settle status.
   filesystemList,
   filesystemReimport,
+  // P4.5 — editor application-state tools: editor_application_get_state (read-only play-process
+  // snapshot) and editor_application_set_state (start main/current/custom scene or stop play, gated).
+  // Get-state reports isPlaying + playingScene + editorVersion + observedAt (no Unity pause/compile);
+  // set-state observes the requested transition with a bounded deadline and never claims an unobserved
+  // state. Godot launches the game as a separate OS process, so the state model is start/stop only.
+  editorApplicationGetState,
+  editorApplicationSetState,
 ];

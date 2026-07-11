@@ -111,6 +111,12 @@ namespace GodotOpenMcp.Bridge.Editor
                 // agent can browse the res:// tree and ask the editor to notice changed files.
                 // Idempotent re-register refreshes the handler references after a domain reload.
                 FileSystemTools.RegisterFilesystemTools();
+                // P4.5 — editor application-state tools: godot_open_mcp_editor_application_get_state
+                // (read-only play-process snapshot) and godot_open_mcp_editor_application_set_state
+                // (start main/current/custom scene or stop play, gated). Registered alongside the other
+                // families so an agent can drive the editor's play lifecycle. Idempotent re-register
+                // refreshes the handler references after a domain reload.
+                EditorApplicationTools.RegisterEditorApplicationTools();
 
                 // Start the HTTP listener serving /ping and POST /tools/{name}. Stays down
                 // (and connected:false) if the bind fails — the editor remains usable, the

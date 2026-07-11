@@ -161,6 +161,14 @@
     <Compile Include="..\Editor\Tools\FileSystemEntryData.cs" Link="Source\FileSystemEntryData.cs" />
     <Compile Include="..\Editor\Tools\FileSystemListBody.cs" Link="Source\FileSystemListBody.cs" />
     <Compile Include="..\Editor\Tools\FileSystemReimportBody.cs" Link="Source\FileSystemReimportBody.cs" />
+    <!-- P4.5 — editor application-state tools. The pure-managed pieces
+         (EditorApplicationStateData DTO, EditorApplicationSetStateBody parser,
+         EditorStateSettleWait bounded observation loop) are linked for unit testing. The
+         editor-only handler (EditorApplicationTools.GetState / SetState — EditorInterface/Engine/
+         OS-coupled) is #if TOOLS and verified via the headless Godot smoke / gate integration tests. -->
+    <Compile Include="..\Editor\Tools\EditorApplicationStateData.cs" Link="Source\EditorApplicationStateData.cs" />
+    <Compile Include="..\Editor\Tools\EditorApplicationSetStateBody.cs" Link="Source\EditorApplicationSetStateBody.cs" />
+    <Compile Include="..\Editor\Tools\EditorStateSettleWait.cs" Link="Source\EditorStateSettleWait.cs" />
     <!-- P3.5 — gate on mutators. The gate types (GateMode/GateOutcome/DeltaData/GateDispatchResult/
          GatePolicy/GateDefaultPolicy) and the VerifyGateAdapter are pure-managed for the parts the unit
          tests exercise (decision matrix, next-step hints, delta math, gate-mode parsing). GatePolicy
