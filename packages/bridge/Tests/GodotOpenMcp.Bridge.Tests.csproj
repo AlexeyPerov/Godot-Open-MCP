@@ -154,6 +154,13 @@
          and the handler, so they exercise only the dispatch routing + paths_hint guard. -->
     <Compile Include="..\Editor\Tools\ResourceMoveBody.cs" Link="Source\ResourceMoveBody.cs" />
     <Compile Include="..\Editor\Tools\ResourceDeleteBody.cs" Link="Source\ResourceDeleteBody.cs" />
+    <!-- P4.4 — filesystem tools. The pure-managed body parsers (FileSystemListBody /
+         FileSystemReimportBody) and the FileSystemEntryData DTO are linked for unit testing. The
+         editor-only handler (FileSystemTools.List / Reimport — EditorFileSystem/FileAccess/OS-
+         coupled) is #if TOOLS and verified via the headless Godot smoke / gate integration tests. -->
+    <Compile Include="..\Editor\Tools\FileSystemEntryData.cs" Link="Source\FileSystemEntryData.cs" />
+    <Compile Include="..\Editor\Tools\FileSystemListBody.cs" Link="Source\FileSystemListBody.cs" />
+    <Compile Include="..\Editor\Tools\FileSystemReimportBody.cs" Link="Source\FileSystemReimportBody.cs" />
     <!-- P3.5 — gate on mutators. The gate types (GateMode/GateOutcome/DeltaData/GateDispatchResult/
          GatePolicy/GateDefaultPolicy) and the VerifyGateAdapter are pure-managed for the parts the unit
          tests exercise (decision matrix, next-step hints, delta math, gate-mode parsing). GatePolicy

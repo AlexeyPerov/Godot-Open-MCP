@@ -16,6 +16,7 @@ Tool names follow the `godot_open_mcp_*` convention (ADR-003).
 | node | `node_find`, `node_create`, `node_modify`, `node_set_parent`, `node_duplicate`, `node_delete` | create/modify/set-parent/duplicate/delete | Scene-tree operations. |
 | scene | `scene_open`, `scene_save`, `scene_list_opened`, `scene_get_data`, `scene_create` | open/save/create | Scene lifecycle + read. |
 | resource | `resource_find`, `resource_get_data`, `resource_create`, `resource_modify`, `resource_move`, `resource_delete` | create/modify/move/delete | `.tres`/`.res` discovery + bounded property inspection (read-only) + gated create/modify (P4.2) + file lifecycle move/delete (P4.3). |
+| filesystem | `filesystem_list`, `filesystem_reimport` | reimport | Indexed `res://` directory listing (read-only) + exact-file reimport or full scan with a bounded, truthful settle status (P4.4). |
 
 ## Route policy
 
@@ -257,6 +258,79 @@ Delete a Godot resource file (`.tres`/`.res`) and its `.import` sidecar via `Dir
 `resource` is the pre-delete `ResourceIdentity` snapshot. On partial failure (sidecar remains), the error carries `orphanSidecarPath` so the agent can clean up.
 
 **Errors:** `missing_parameter` (no `resource_path`), `paths_hint_required`, `invalid_path`, `resource_not_found` (target missing), `resource_delete_failed` (primary removal fails), `resource_delete_partial` (primary removed but sidecar remains), `filesystem_unavailable`.
+
+## `godot_open_mcp_filesystem_list`
+
+List the immediate children of one `res://` directory from the editor's indexed filesystem. Read-only (gate-free). Returns directories first, then files, each group sorted by name (ordinal). No resource is loaded — file types come from `EditorFileSystemDirectory.GetFileType` and UIDs from `ResourceLoader.GetResourceUid` (both read the import index). Listing is one level; recursive full-tree listing is deferred to the offline project indexer (Phase 7).
+
+**Input:**
+- `path` (optional) — `res://` directory (trailing slash optional); omit or pass `res://` for the project root.
+- `page_size` (optional, default 100, max 500) — max entries per page (directories + files combined, directories first).
+- `cursor` (optional) — opaque continuation cursor from a previous response's `pagination.nextCursor`.
+- `include_hidden` (optional, default false) — include hidden entries the editor index exposes.
+
+**Result (success):**
+
+```json
+{
+  "path": "res://materials/",
+  "directoryCount": 1,
+  "fileCount": 2,
+  "entries": [
+    { "name": "sub", "path": "res://materials/sub/", "isDirectory": true, "resourceType": null, "uid": null },
+    {
+      "name": "wood.tres",
+      "path": "res://materials/wood.tres",
+      "isDirectory": false,
+      "resourceType": "StandardMaterial3D",
+      "uid": "uid://abc123"
+    }
+  ],
+  "pagination": { "nextCursor": null, "hasMore": false }
+}
+```
+
+`directoryCount`/`fileCount` describe the full one-level directory; `entries` is the current page (directories first, then files).
+
+**Errors:** `invalid_path` (non-`res://`, traversal, or file path), `directory_not_found` (indexed directory missing), `filesystem_unavailable` (editor filesystem not available).
+
+## `godot_open_mcp_filesystem_reimport`
+
+Reimport specific `res://` files via `EditorFileSystem.ReimportFiles`, or trigger a full `EditorFileSystem.Scan` when no files are given. Mutating (default gate `enforce`). The Godot analog of Unity's `AssetDatabase.Refresh`.
+
+Two modes (selected by whether `files` is non-empty):
+- **exact files** — reimport exactly those files. The entire list is validated and normalized before any file is touched; a single bad/missing entry is a clean error, never a partial effect. Duplicates are removed while preserving first occurrence.
+- **full scan** — trigger `EditorFileSystem.Scan` to pick up added/removed/changed files. Requires explicit `paths_hint: ["res://"]` (no implicit whole-project gate fallback).
+
+The call blocks until the import pipeline settles (bounded by `timeout_ms`). A timeout is a **successful** request with `settle.settled: false` — the tool never falsely claims completion. Call `filesystem_list` / `resource_find` afterwards to observe the post-scan state.
+
+**Input:**
+- `files` (optional) — list of `res://` file paths to reimport exactly. Omitted/empty → full scan.
+- `timeout_ms` (optional, default 5000, clamped [1000, 60000]) — bounded settle timeout.
+- `paths_hint` (required) — the exact files (must contain every requested file), or `["res://"]` for a full scan. Mandatory even when `gate` is `off`.
+- `gate` (optional, default `enforce`) — `enforce` | `warn` | `off`.
+
+**Result (success):**
+
+```json
+{
+  "mode": "files",
+  "requestedFiles": ["res://a.tres"],
+  "reimportedCount": 1,
+  "settle": {
+    "scanStarted": true,
+    "settled": true,
+    "scanningProgress": null,
+    "elapsedMs": 0,
+    "reason": null
+  },
+  "reimported": true
+}
+```
+
+`mode` is `"files"` or `"full_scan"`. `settle` reports whether the scan started, whether it settled, the scanning progress (when busy), the elapsed settle time, and a `reason` on timeout (`"timeout"`, `"scan_did_not_start"`, `"not_attempted"` on a pre-flight failure).
+
+**Errors:** `paths_hint_required` (missing/empty/incomplete `paths_hint`, or full scan without `["res://"]`), `invalid_path` (bad scheme/traversal/directory), `file_not_found` (any requested file missing), `filesystem_unavailable`, `reimport_failed` (Godot rejects the reimport/scan — observed state is surfaced under `result`).
 
 ## Source of truth
 

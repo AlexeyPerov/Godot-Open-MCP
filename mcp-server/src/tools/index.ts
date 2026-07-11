@@ -37,6 +37,8 @@ import { resourceCreate } from "./resource-create.js";
 import { resourceModify } from "./resource-modify.js";
 import { resourceMove } from "./resource-move.js";
 import { resourceDelete } from "./resource-delete.js";
+import { filesystemList } from "./filesystem-list.js";
+import { filesystemReimport } from "./filesystem-reimport.js";
 
 /** Ordered list of every tool exposed over stdio MCP. */
 export const ALL_TOOLS: Tool[] = [
@@ -81,4 +83,10 @@ export const ALL_TOOLS: Tool[] = [
   // reconcile the editor filesystem after the operation. No reference rewriting.
   resourceMove,
   resourceDelete,
+  // P4.4 — filesystem tools: filesystem_list (indexed res:// directory listing, read-only) and
+  // filesystem_reimport (exact-file reimport or full scan, mutating). List reads the editor
+  // filesystem index without loading resources; reimport maps AssetDatabase.Refresh to Godot's
+  // ReimportFiles/Scan with a bounded, truthful settle status.
+  filesystemList,
+  filesystemReimport,
 ];

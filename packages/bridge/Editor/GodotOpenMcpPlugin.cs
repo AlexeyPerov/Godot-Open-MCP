@@ -105,6 +105,12 @@ namespace GodotOpenMcp.Bridge.Editor
                 // an agent can discover and inspect standalone .tres/.res resources. Idempotent
                 // re-register refreshes the handler references after a domain reload.
                 ResourceTools.RegisterResourceTools();
+                // P4.4 — filesystem tools: godot_open_mcp_filesystem_list (indexed directory
+                // listing, read-only) and godot_open_mcp_filesystem_reimport (exact-file
+                // reimport or full scan, mutating). Registered alongside the resource family so an
+                // agent can browse the res:// tree and ask the editor to notice changed files.
+                // Idempotent re-register refreshes the handler references after a domain reload.
+                FileSystemTools.RegisterFilesystemTools();
 
                 // Start the HTTP listener serving /ping and POST /tools/{name}. Stays down
                 // (and connected:false) if the bind fails — the editor remains usable, the
