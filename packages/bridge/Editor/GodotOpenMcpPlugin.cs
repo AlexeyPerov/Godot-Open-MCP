@@ -99,6 +99,12 @@ namespace GodotOpenMcp.Bridge.Editor
                 // one session. Idempotent re-register refreshes the handler references after a
                 // domain reload.
                 GateTools.RegisterGateTools();
+                // P4.1 — resource read tools: godot_open_mcp_resource_find (exact path/UID lookup +
+                // indexed type search) and godot_open_mcp_resource_get_data (bounded property
+                // inspection). Read-only, group resource. Registered alongside the other families so
+                // an agent can discover and inspect standalone .tres/.res resources. Idempotent
+                // re-register refreshes the handler references after a domain reload.
+                ResourceTools.RegisterResourceTools();
 
                 // Start the HTTP listener serving /ping and POST /tools/{name}. Stays down
                 // (and connected:false) if the bind fails — the editor remains usable, the

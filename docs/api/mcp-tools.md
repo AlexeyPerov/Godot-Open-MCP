@@ -15,6 +15,7 @@ Tool names follow the `godot_open_mcp_*` convention (ADR-003).
 | core | `ping`, `validate_edit`, `checkpoint_create`, `delta`, `apply_fix`, `capabilities` | `apply_fix` only | Always visible in `ListTools`. |
 | node | `node_find`, `node_create`, `node_modify`, `node_set_parent`, `node_duplicate`, `node_delete` | create/modify/set-parent/duplicate/delete | Scene-tree operations. |
 | scene | `scene_open`, `scene_save`, `scene_list_opened`, `scene_get_data`, `scene_create` | open/save/create | Scene lifecycle + read. |
+| resource | `resource_find`, `resource_get_data` | none | `.tres`/`.res` discovery + bounded property inspection. Read-only; mutation lands in P4.2/P4.3. |
 
 ## Route policy
 
@@ -78,6 +79,67 @@ The `rules[]` and `fixes[]` arrays mirror the C# verify package and MUST stay in
 | `remove_missing_script` | `missing_scripts` / `missing_script` | true |
 
 The catalog source of truth is `mcp-server/src/capabilities/rule-catalog.ts`; the builder is `mcp-server/src/capabilities/build-capabilities.ts`. There is no planned-rule surface yet — when a rule is stubbed but not built, add it with `implemented:false` + `guidance` so agents get a structured "not yet available" signal.
+
+## `godot_open_mcp_resource_find`
+
+Find Godot resources (`.tres`/`.res`) in the project's `res://` filesystem. Read-only (gate-free). Two modes: direct lookup (by `uid` or `resource_path`) resolves a single resource; indexed type search (by `type_filter`) recursively scans `EditorFileSystem` for files whose importer-assigned type equals or derives from the filter — without eagerly loading every candidate.
+
+**Selector precedence:** `uid` > `resource_path` > `type_filter`. A direct selector resolves at most one resource and ignores search-only options. At least one selector is required.
+
+**Input:**
+- `uid` (optional) — priority 1: `uid://` identifier, resolved via `ResourceUid`.
+- `resource_path` (optional) — priority 2: exact `res://` path (also accepts a `uid://`, mapped first).
+- `type_filter` (optional) — Godot class/type name for the indexed scan (`ClassDB.IsParentClass`).
+- `directory` (optional, default `res://`) — `res://` directory scope for the scan.
+- `page_size` (optional, default 50, max 200) — search-mode result bound.
+- `cursor` (optional) — opaque continuation cursor from a previous `pagination.nextCursor`.
+
+**Result (direct lookup):**
+
+```json
+{
+  "count": 1,
+  "resources": [{ "resourcePath": "res://materials/wood.tres", "uid": "uid://abc", "type": "StandardMaterial3D" }],
+  "pagination": { "nextCursor": null, "hasMore": false }
+}
+```
+
+**Result (type search):** same shape, plus a top-level `total` (the full match count before paging).
+
+**Errors:** `invalid_request` (no selector), `invalid_path` (bad scheme/extension/traversal/directory), `resource_not_found` (path/uid does not resolve), `filesystem_unavailable` (editor filesystem not ready).
+
+## `godot_open_mcp_resource_get_data`
+
+Load a Godot resource (`.tres`/`.res`) and return a bounded, cycle-safe property tree. Read-only (gate-free). Object references that would create a cycle or an unbounded graph are represented by a descriptive reference leaf (`res://` path + `uid` when available), never blindly traversed — process-local instance IDs are not exposed as durable identity.
+
+**Input:**
+- `resource_path` (required) — canonical `res://` path or `uid://` (mapped first). Must end in `.tres`/`.res`.
+- `profile` (optional, default `compact`) — `compact` | `balanced` | `full`. Controls recursion depth (compact = top-level only; balanced = one level of nesting; full = whole bounded tree, hard cap depth 6).
+- `property_path` (optional) — slash-separated drill-down (e.g. `albedo_color`); serializes just that subtree.
+- `max_depth` (optional, [0, 6]) — overrides the profile default depth.
+- `collection_page_size` (optional, default 50, max 200) — max items per Array/Dictionary before clipping.
+- `cursor` (optional) — continuation cursor for large child collections (future use).
+
+**Result:**
+
+```json
+{
+  "identity": { "resourcePath": "res://materials/wood.tres", "uid": "uid://abc", "type": "StandardMaterial3D" },
+  "profile": "compact",
+  "maxDepth": 0,
+  "properties": [
+    { "name": "resource_name", "variantType": "String", "value": "Wood", "children": null, "referenceDescription": null, "truncationReason": null },
+    { "name": "albedo_color", "variantType": "Color", "value": "[1,0,0,1]", "children": null, "referenceDescription": null, "truncationReason": null }
+  ],
+  "truncation": { "truncated": false, "truncationReasons": [] }
+}
+```
+
+Each property node carries `name`, `variantType`, `value` (scalar/JSON-raw/`null`), `children` (nested resources, arrays, dictionaries — `null` for leaves), `referenceDescription` (non-traversed object reference), and `truncationReason` (per-node clip reason). `truncation.truncated` is `true` when any node, collection, or string was clipped.
+
+**Errors:** `missing_parameter` (no `resource_path`), `invalid_path` (bad scheme/extension), `resource_not_found` (path/uid does not resolve), `resource_load_failed` (`ResourceLoader.Load` fails), `serialization_failed` (property access/serialization fails safely).
+
+**Tip:** prefer `compact` first, then drill in with `property_path` or a higher `max_depth`. `full` can be expensive on large resources.
 
 ## Source of truth
 

@@ -31,6 +31,8 @@ import { checkpointCreate } from "./checkpoint-create.js";
 import { delta } from "./delta.js";
 import { applyFix } from "./apply-fix.js";
 import { capabilities } from "./capabilities.js";
+import { resourceFind } from "./resource-find.js";
+import { resourceGetData } from "./resource-get-data.js";
 
 /** Ordered list of every tool exposed over stdio MCP. */
 export const ALL_TOOLS: Tool[] = [
@@ -59,4 +61,9 @@ export const ALL_TOOLS: Tool[] = [
   // P3.8 — capabilities: discover the full capability surface (tools + verify rules + fixes).
   // Built locally in the MCP server (no bridge hop); the CallTool handler special-cases the name.
   capabilities,
+  // P4.1 — resource read tools: resource_find (exact path/UID lookup + indexed type search) and
+  // resource_get_data (bounded, cycle-safe property inspection). Read-only, group resource. Live
+  // route (POST /tools/{name}); offline resource reads arrive in Phase 7.
+  resourceFind,
+  resourceGetData,
 ];

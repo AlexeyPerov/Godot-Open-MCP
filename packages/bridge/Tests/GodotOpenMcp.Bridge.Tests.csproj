@@ -126,6 +126,16 @@
          coupled, so it is verified via the headless Godot smoke / live call path, not here. -->
     <Compile Include="..\Editor\Tools\SceneGetDataBody.cs" Link="Source\SceneGetDataBody.cs" />
     <Compile Include="..\Editor\Tools\SceneCreateBody.cs" Link="Source\SceneCreateBody.cs" />
+    <!-- P4.1 — resource read tools (resource_find / resource_get_data). The pure-managed pieces
+         (ResourcePathNormalizer, ResourceData DTOs, ResourceFindBody + ResourceGetDataBody parsers)
+         compile into the binary-less host (same hand-rolled scalar-extraction style as the scene
+         *Body parsers); the editor-only handler (ResourceTools.Find / GetData) and the
+         GodotPropertySerializer are #if TOOLS and EditorInterface/EditorFileSystem/ResourceLoader-
+         coupled, so they are verified via the headless Godot smoke / live call path, not here. -->
+    <Compile Include="..\Editor\Tools\ResourcePathNormalizer.cs" Link="Source\ResourcePathNormalizer.cs" />
+    <Compile Include="..\Editor\Tools\ResourceData.cs" Link="Source\ResourceData.cs" />
+    <Compile Include="..\Editor\Tools\ResourceFindBody.cs" Link="Source\ResourceFindBody.cs" />
+    <Compile Include="..\Editor\Tools\ResourceGetDataBody.cs" Link="Source\ResourceGetDataBody.cs" />
     <!-- P3.5 — gate on mutators. The gate types (GateMode/GateOutcome/DeltaData/GateDispatchResult/
          GatePolicy/GateDefaultPolicy) and the VerifyGateAdapter are pure-managed for the parts the unit
          tests exercise (decision matrix, next-step hints, delta math, gate-mode parsing). GatePolicy
