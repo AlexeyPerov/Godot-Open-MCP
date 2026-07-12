@@ -50,6 +50,7 @@ import { screenshotCamera } from "./screenshot-camera.js";
 import { screenshotIsolated } from "./screenshot-isolated.js";
 import { reflectionMethodFind } from "./reflection-method-find.js";
 import { reflectionMethodCall } from "./reflection-method-call.js";
+import { bridgeStatus } from "./bridge-status.js";
 
 /** Ordered list of every tool exposed over stdio MCP. */
 export const ALL_TOOLS: Tool[] = [
@@ -142,4 +143,11 @@ export const ALL_TOOLS: Tool[] = [
   // node_path — Activator is used only for pure POCOs.
   reflectionMethodFind,
   reflectionMethodCall,
+  // P5.3 — bridge_status: operator-oriented health snapshot. Composes the instance-lock classifier
+  // (instance-discovery.ts#classifyInstance) with one /ping probe and returns a coarse status token
+  // (running | compiling | stopped | unreachable | dead_bridge) + classification + recoveryHint.
+  // Local/live hybrid route: the CallTool dispatcher special-cases the name and calls
+  // LiveClient.routeBridgeStatus (no POST /tools/bridge_status endpoint on the bridge). Read-only,
+  // gate-free, never spawns Godot. recoveryHint is non-null only for dead_bridge.
+  bridgeStatus,
 ];

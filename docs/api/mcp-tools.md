@@ -12,7 +12,7 @@ Tool names follow the `godot_open_mcp_*` convention (ADR-003).
 
 | Family | Tools | Mutating | Notes |
 |---|---|---|---|
-| core | `ping`, `validate_edit`, `checkpoint_create`, `delta`, `apply_fix`, `capabilities` | `apply_fix` only | Always visible in `ListTools`. |
+| core | `ping`, `validate_edit`, `checkpoint_create`, `delta`, `apply_fix`, `capabilities`, `bridge_status` | `apply_fix` only | Always visible in `ListTools`. |
 | node | `node_find`, `node_create`, `node_modify`, `node_set_parent`, `node_duplicate`, `node_delete` | create/modify/set-parent/duplicate/delete | Scene-tree operations. |
 | scene | `scene_open`, `scene_save`, `scene_list_opened`, `scene_get_data`, `scene_create` | open/save/create | Scene lifecycle + read. |
 | resource | `resource_find`, `resource_get_data`, `resource_create`, `resource_modify`, `resource_move`, `resource_delete` | create/modify/move/delete | `.tres`/`.res` discovery + bounded property inspection (read-only) + gated create/modify (P4.2) + file lifecycle move/delete (P4.3). |
@@ -27,8 +27,11 @@ Tool names follow the `godot_open_mcp_*` convention (ADR-003).
 |---|---|---|
 | **live** | The CallTool handler POSTs to the bridge; the bridge handler runs on the editor main thread. | Most tools (node, scene, gate meta-tools, `apply_fix`). |
 | **local** | The CallTool handler resolves the response in-process — no bridge hop. | `godot_open_mcp_capabilities`. |
+| **local/live hybrid** | The CallTool handler composes a response in-process but runs one `/ping` probe through the live client (auth header + 503 fallback match `ping`). No `POST /tools/{name}` endpoint on the bridge. | `godot_open_mcp_bridge_status`. |
 
 `capabilities` is the one local-only tool: its response is built in-process from `ALL_TOOLS` + the rule/fix catalog via `buildCapabilities`. It never POSTs to the bridge (mirroring Unity Open MCP's tool-router `routeCapabilities`).
+
+`bridge_status` is a local/live hybrid: it reads the instance lock from disk, classifies it (`classifyInstance`), runs one `/ping` probe via the live client, and derives a coarse `status` token server-side. The bridge has no `POST /tools/bridge_status` endpoint — the CallTool handler special-cases the name and calls `LiveClient.routeBridgeStatus` directly.
 
 ## `godot_open_mcp_capabilities`
 
@@ -83,6 +86,73 @@ The `rules[]` and `fixes[]` arrays mirror the C# verify package and MUST stay in
 | `remove_missing_script` | `missing_scripts` / `missing_script` | true |
 
 The catalog source of truth is `mcp-server/src/capabilities/rule-catalog.ts`; the builder is `mcp-server/src/capabilities/build-capabilities.ts`. There is no planned-rule surface yet — when a rule is stubbed but not built, add it with `implemented:false` + `guidance` so agents get a structured "not yet available" signal.
+
+## `godot_open_mcp_bridge_status`
+
+Operator-oriented bridge health snapshot. Composes the instance-lock classifier (`instance-discovery.ts#classifyInstance`) with a single `/ping` probe and returns a coarse `status` token so an operator (or the future Validation Suite) can branch recovery in one call. **Local/live hybrid** route — read-only, gate-free, never spawns Godot. The `/ping` fetch uses the bridge's standard 5 s timeout; the tool takes no arguments.
+
+This is **not** a general agent health check — use `godot_open_mcp_ping` for a lightweight probe. `bridge_status` is the richer, operator-facing surface that distinguishes a clean stop from a transient reload window from a dead bridge.
+
+**Input:** empty object.
+
+**Status vocabulary** (the `status` field an operator/agent branches on):
+
+| `status` | Meaning | When |
+|---|---|---|
+| `running` | Bridge connected and idle. | `/ping` reachable + `connected:true` + not compiling. Live-only tools are usable. |
+| `compiling` | Bridge connected but Godot is compiling/reloading. | `/ping` reachable + `compiling:true`. Retry shortly. |
+| `stopped` | No live listener. | `/ping` unreachable + no live lock PID. Folds two indistinguishable cases: Godot is not running, OR the addon is disabled. Inspect `instance.lock` to disambiguate (`null` → Godot likely down). |
+| `unreachable` | Godot process alive but the listener did not respond. | `/ping` unreachable + lock PID alive. Usually a transient editor-reload window — retry shortly. |
+| `dead_bridge` | Godot process alive but the bridge heartbeat is stale. | `classification === "dead_bridge"`. The addon is not running its HTTP listener (failed to load / disabled mid-session); `/ping` will not recover on its own. See `recoveryHint`. |
+
+**Result:**
+
+```json
+{
+  "status": "running",
+  "ready": true,
+  "classification": "healthy",
+  "recoveryHint": null,
+  "projectPath": "/home/u/MyGame",
+  "instance": {
+    "lockPath": "/home/u/.godot-open-mcp/instances/<sha256>.json",
+    "classification": "healthy",
+    "lock": {
+      "pid": 4242, "port": 22028, "state": "idle",
+      "isCompiling": false, "isPlaying": false,
+      "heartbeatAt": "2026-07-12T00:00:02.000Z",
+      "bridgeVersion": "0.0.1", "godotVersion": "4.3.1.stable.mono"
+    }
+  },
+  "ping": {
+    "reachable": true, "connected": true, "compiling": false, "isPlaying": false,
+    "godotVersion": "4.3.1.stable.mono", "bridgeVersion": "0.0.1", "mode": "live"
+  },
+  "nextStep": "Bridge is ready. Proceed with live-only MCP tools.",
+  "_source": "local"
+}
+```
+
+**Field notes:**
+
+- `ready` — coarse boolean for clients that want a single flag: `true` only when `status === "running"` (the rule a future wait-for-ready CLI poll would terminate on).
+- `classification` — top-level mirror of the instance-lock classification (`healthy | reloading | dead_bridge | gone`) so agents can branch on one field without digging into `instance`.
+- `recoveryHint` — `{ tool, reason, note? } | null`. Non-null **only** for `dead_bridge`. Today it names `godot_open_mcp_console_get_logs` (the closest registered diagnostic) and carries a `note` that it is the bridge-fed addon collector (which stops accumulating once the bridge is dead) and that a dedicated offline `godot_open_mcp_read_compile_errors` is planned for a later phase. The hint tool is always a registered tool — it never points at an unregistered name.
+- `instance.lock` — `null` when no lock was read (no live instance known). The compact summary mirrors the operator-relevant fields (`pid`/`port`/`state`/`isCompiling`/`isPlaying`/`heartbeatAt`/versions); sensitive fields (`authToken`, `projectPath`) are not leaked.
+- `ping` — `{ reachable: false }` when the probe failed (offline/timeout/http error); otherwise the parsed `/ping` body fields.
+- `_source: "local"` — the response is synthesized in the MCP server (no bridge tool endpoint).
+
+**Never errors on an offline bridge.** `stopped` / `unreachable` / `dead_bridge` are successful status reads — the tool returns `isError:false` with the `status` token set. A hard MCP error is reserved for programmer mistakes (e.g. malformed project root).
+
+**Status mapping** (authoritative; `classification` from `classifyInstance`, `ping` from the `/ping` probe):
+
+| classification | ping | lock PID alive | `status` |
+|---|---|---|---|
+| `dead_bridge` | any | any | `dead_bridge` (wins outright) |
+| any | reachable + compiling | any | `compiling` |
+| any | reachable + connected | any | `running` |
+| any | unreachable | true | `unreachable` (transient reload window) |
+| any | unreachable | false | `stopped` |
 
 ## `godot_open_mcp_resource_find`
 

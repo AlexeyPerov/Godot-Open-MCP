@@ -103,6 +103,27 @@ export async function handleCallTool(params: {
     };
   }
 
+  // P5.3 — bridge_status is a local/live hybrid. It composes the instance-lock classifier with one
+  // /ping probe (driven through LiveClient so the auth header + ping cache path match godot_open_mcp_ping).
+  // The synthesis happens in the MCP server (no POST /tools/bridge_status endpoint on the bridge), so it
+  // is special-cased here rather than routed through liveClient.route. Unlike capabilities, it DOES need
+  // a liveClient (to run the /ping probe); the no-liveClient guard below returns the structured test-harness
+  // error for it. Read-only, gate-free, never errors on an offline bridge — `stopped` IS the answer there.
+  if (toolName === "godot_open_mcp_bridge_status") {
+    if (!liveClient) {
+      return {
+        isError: true,
+        content: [
+          {
+            type: "text",
+            text: `Tool ${toolName} is registered but no live client is wired (test harness omission).`,
+          },
+        ],
+      };
+    }
+    return liveClient.routeBridgeStatus();
+  }
+
   if (!liveClient) {
     return {
       isError: true,

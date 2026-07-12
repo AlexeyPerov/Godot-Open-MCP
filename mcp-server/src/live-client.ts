@@ -38,7 +38,17 @@ import { makeErrorResult } from "./results.js";
 import {
   lockPath,
   readInstanceLock,
+  classifyInstance,
+  isPidAlive,
+  type InstanceLock,
 } from "./instance-discovery.js";
+import {
+  deriveBridgeStatus,
+  bridgeStatusRecoveryHint,
+  bridgeStatusNextStep,
+  summarizeBridgeStatusLock,
+  type PingProbe,
+} from "./tools/bridge-status-derive.js";
 
 /** Default fetch timeout for /ping. Matches Unity's PING_TIMEOUT_MS. */
 const PING_TIMEOUT_MS = 5_000;
@@ -517,4 +527,141 @@ export class LiveClient {
       signal: controller.signal,
     }).finally(() => clearTimeout(timer));
   }
+
+  // ── P5.3 — `godot_open_mcp_bridge_status` composition ──────────────────
+  //
+  // Combines the instance-lock classifier (the same pure function the rest of
+  // the client uses for dead-bridge awareness) with one /ping probe driven
+  // through {@link handlePing} so the auth header + 503-fallback path match
+  // what `godot_open_mcp_ping` sees. The coarse `status` token is derived by
+  // the pure mapper in `tools/bridge-status-derive.ts` — this method only
+  // collects the signals (lock + ping) and shapes the response.
+  //
+  // The tool never reports an MCP error on an offline bridge — `stopped` /
+  // `unreachable` / `dead_bridge` ARE the answer in those cases. A thrown
+  // error here would be a programmer mistake (e.g. malformed project root).
+  // `_source: "local"` tags the response as MCP-server-synthesized (no bridge
+  // tool endpoint, no Godot editor spawn). Read-only + gate-free.
+  //
+  // Adapted from Unity Open MCP's ToolRouter.routeBridgeStatus (copy fidelity
+  // for the lock → classify → ping → derive flow + the response shape).
+  // Intentional deltas: no `findUnityForProject` cold-Safe-Mode scan (no
+  // equivalent out-of-band Godot process scan today); recovery tool is
+  // `godot_open_mcp_console_get_logs` (the closest registered diagnostic)
+  // rather than Unity's offline `read_compile_errors` (planned here later).
+  async routeBridgeStatus(): Promise<CallToolResult> {
+    const lockOnDisk = this.projectPath ? lockPath(this.projectPath) : null;
+    let lock: InstanceLock | null = null;
+    try {
+      lock = this.projectPath ? readInstanceLock(this.projectPath) : null;
+    } catch {
+      // Unreadable lock → treat as no lock (gone). readInstanceLock itself
+      // never throws (it returns null on missing/unreadable/unparseable), but
+      // guard anyway so a filesystem error can never crash the status read.
+      lock = null;
+    }
+    const classification = classifyInstance(lock);
+
+    // One /ping probe through the same handler `godot_open_mcp_ping` uses, so
+    // auth + 503-fallback + offline classification are identical. The ping
+    // result is either a success (body in content[0].text) or an isError
+    // structured error (bridge_offline / bridge_timeout / bridge_http_error).
+    const pingResult = await this.handlePing();
+    const pingProbe = normalizePingProbe(pingResult);
+    const lockPidAlive = lock !== null && isPidAlive(lock.pid);
+
+    const status = deriveBridgeStatus({
+      classification,
+      ping: pingProbe,
+      lockPidAlive,
+    });
+
+    const body = {
+      status,
+      // Coarse ready flag for clients that want a single boolean: true only
+      // when the bridge is connected AND idle (the rule a future
+      // wait-for-ready CLI poll would terminate on).
+      ready: status === "running",
+      // Mirrored at the top level so agents can branch on one field without
+      // digging into the `instance` sub-object.
+      classification,
+      recoveryHint: bridgeStatusRecoveryHint(status),
+      projectPath: this.projectPath ?? null,
+      instance: {
+        lockPath: lockOnDisk,
+        classification,
+        lock: lock ? summarizeBridgeStatusLock(lock) : null,
+      },
+      ping: pingProbe.reachable
+        ? {
+            reachable: true,
+            connected: pingProbe.connected,
+            compiling: pingProbe.compiling,
+            isPlaying: pingProbe.isPlaying,
+            godotVersion: pingProbe.godotVersion,
+            bridgeVersion: pingProbe.bridgeVersion,
+            mode: pingProbe.mode,
+          }
+        : { reachable: false },
+      nextStep: bridgeStatusNextStep(status),
+      _source: "local",
+    };
+
+    return {
+      content: [{ type: "text", text: JSON.stringify(body) }],
+      isError: false,
+    };
+  }
+}
+
+/**
+ * Normalize a `handlePing` CallToolResult into the {@link PingProbe} shape the
+ * pure mapper consumes. Success results carry the PingResponse body as the
+ * first text block; error results (bridge_offline / bridge_timeout /
+ * bridge_http_error) mean the ping was unreachable. A non-JSON or non-object
+ * body falls through to unreachable so the mapper picks `stopped` /
+ * `unreachable` rather than throwing.
+ *
+ * Standalone (module-private) so the bridge-status unit tests can drive the
+ * mapper directly without constructing a CallToolResult.
+ */
+function normalizePingProbe(result: CallToolResult): PingProbe {
+  if (result.isError) {
+    return unreachableProbe();
+  }
+  const first = result.content[0];
+  if (!first || first.type !== "text" || typeof first.text !== "string") {
+    return unreachableProbe();
+  }
+  let parsed: unknown = null;
+  try {
+    parsed = JSON.parse(first.text);
+  } catch {
+    return unreachableProbe();
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return unreachableProbe();
+  }
+  const body = parsed as Partial<PingResponse>;
+  return {
+    reachable: true,
+    connected: typeof body.connected === "boolean" ? body.connected : null,
+    compiling: typeof body.compiling === "boolean" ? body.compiling : null,
+    isPlaying: typeof body.isPlaying === "boolean" ? body.isPlaying : null,
+    godotVersion: typeof body.godotVersion === "string" ? body.godotVersion : null,
+    bridgeVersion: typeof body.bridgeVersion === "string" ? body.bridgeVersion : null,
+    mode: typeof body.mode === "string" ? body.mode : null,
+  };
+}
+
+function unreachableProbe(): PingProbe {
+  return {
+    reachable: false,
+    connected: null,
+    compiling: null,
+    isPlaying: null,
+    godotVersion: null,
+    bridgeVersion: null,
+    mode: null,
+  };
 }
