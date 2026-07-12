@@ -77,6 +77,19 @@
          HTTP integration test uses) so the warning paths never P/Invoke into native Godot. -->
     <Compile Include="..\Editor\Bridge\InstancePortResolver.cs" Link="Source\InstancePortResolver.cs" />
     <Compile Include="..\Editor\Bridge\BridgeInstanceLock.cs" Link="Source\BridgeInstanceLock.cs" />
+    <!-- P5.2 — bridge auth. The auth primitives (BridgeAuthToken Generate/ExtractBearer/
+         EqualsConstantTime, BridgeAuthCheck fail-closed decision, BridgeAuthPolicy constants) and
+         the settings reader (BridgeProjectSettings — authMode + bindAddress from
+         .godot-open-mcp/settings.json) are pure-managed (crypto RNG + file I/O + hand-rolled JSON
+         extraction, no Godot APIs) so they compile into the binary-less host for off-editor unit
+         testing. BridgeBindAddress gains the two-arg Decide(address, authMode); BridgeHttpServer
+         gains CheckAuth on every route. BridgeHttpResponse gains SendUnauthorized. The HTTP
+         integration test exercises the 401 path under authMode "required" with good/bad/missing
+         tokens. -->
+    <Compile Include="..\Editor\Bridge\BridgeAuthToken.cs" Link="Source\BridgeAuthToken.cs" />
+    <Compile Include="..\Editor\Bridge\BridgeAuthCheck.cs" Link="Source\BridgeAuthCheck.cs" />
+    <Compile Include="..\Editor\Bridge\BridgeAuthPolicy.cs" Link="Source\BridgeAuthPolicy.cs" />
+    <Compile Include="..\Editor\Bridge\BridgeProjectSettings.cs" Link="Source\BridgeProjectSettings.cs" />
     <!-- P2.1 — tool dispatch spine. BridgeRequestBody + BridgeEnvelope + ToolDispatchResult +
          BridgeToolRegistry are pure-managed (no Godot APIs) so they compile into the binary-less
          test host. BridgeHttpServer gains the POST /tools/{name} routing; the dispatch handler

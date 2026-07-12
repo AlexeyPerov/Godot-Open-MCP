@@ -60,6 +60,7 @@ These mean the request did not reach the dispatcher (routing/transport fault):
 
 | Code | HTTP | Meaning |
 |---|---|---|
+| `unauthorized` | 401 | Missing or invalid `Authorization` header under `authMode:"required"` (see §Auth). |
 | `tool_not_found` | 404 | The tool name is not registered. |
 | `method_not_allowed` | 405 | Wrong HTTP method for the route. |
 | `invalid_request` | 400 | The request body could not be read. |
@@ -149,13 +150,62 @@ Structured errors (all `ok:false` with a stable `error.code`): `missing_paramete
 
 The initial `Safe:true` provider is `remove_missing_script` — resolves `missing_scripts|missing_script` by removing the broken `script = ExtResource("id")` attachment from a `.tscn`/`.tres` (and dropping the orphaned `[ext_resource]` declaration when no node still uses it). More providers register through `FixProviderRegistry`.
 
-## Auth (deferred to P5.2)
+## Auth
 
-A per-session bearer token is minted into the instance lock on bridge start. The MCP server attaches `Authorization: Bearer <token>` to every request when present. Enforcement is opt-in via `authMode` in project settings (`"none"` default | `"required"`). In P2.1 the bridge does not enforce auth.
+The bridge mints a 256-bit per-session bearer token on start and writes it into the instance lock (`authToken` field). The MCP server auto-discovers the token from the lock file (`~/.godot-open-mcp/instances/<sha256(projectPath)>.json`) and attaches `Authorization: Bearer <token>` to every request when present; when the token is absent (older bridge, or an explicit `GODOT_OPEN_MCP_BRIDGE_PORT` override with no lock) no header is sent. The token is **always** minted — even when auth is off — so flipping the mode needs no restart.
+
+Enforcement is opt-in via `authMode` in project settings (`<project>/.godot-open-mcp/settings.json`):
+
+```json
+{ "authMode": "none", "bindAddress": "127.0.0.1" }
+```
+
+**Modes:**
+
+| `authMode` | Request `Authorization` | Outcome |
+|---|---|---|
+| `none` (default) | any / missing | **Allow** — preserves the localhost-trust behavior. |
+| `required` | `Bearer <correct token>` | **Allow**. |
+| `required` | missing / wrong / non-Bearer | **401 `unauthorized`** (see the failure table above). |
+| `<unknown>` (typo / corrupt file) | any | **401 — fail closed.** An unrecognized mode is never coerced to `none`. |
+
+The auth check runs **before routing**, so every endpoint (`/ping`, `/tools/*`, future `/instance` / `/events`) is gated equally — no exemption. Token comparison is constant-time. Under `none` the gate is a single pure-function call returning `true`, so the common path is unaffected.
+
+When a request is denied the bridge returns HTTP 401 with:
+
+```json
+{ "error": { "code": "unauthorized", "message": "Missing or invalid Authorization header. Set authMode to \"none\" in .godot-open-mcp/settings.json, or send Authorization: Bearer <token>." } }
+```
+
+The MCP client surfaces this verbatim as a structured `unauthorized` error on both `/ping` and `/tools/*`.
+
+### Remote bind
+
+By default the bridge binds `127.0.0.1` (loopback only). Remote bind (`0.0.0.0`) is opt-in and **requires `authMode:"required"`** — the bridge refuses to start on a non-loopback interface without token auth so an accidental remote bind on an open network never serves unauthenticated traffic:
+
+```json
+{ "authMode": "required", "bindAddress": "0.0.0.0" }
+```
+
+| `bindAddress` | `authMode` | Start |
+|---|---|---|
+| `127.0.0.1` (default) | any | Allow. |
+| `0.0.0.0` | `required` | Allow. |
+| `0.0.0.0` | `none` / missing / invalid | **Refuse** before listen (the bridge stays down with an actionable error). |
+
+TLS termination, SIEM audit logging, and request deny-lists are not in scope for this phase.
 
 ## Source of truth
 
 - HTTP routing + dispatch: `packages/bridge/Editor/Bridge/BridgeHttpServer.cs`
+- Auth gate (`CheckAuth`, runs before routing): `packages/bridge/Editor/Bridge/BridgeHttpServer.cs`
+- Auth primitives (token mint / Bearer parse / constant-time compare): `packages/bridge/Editor/Bridge/BridgeAuthToken.cs`
+- Auth decision (policy matrix, fail-closed): `packages/bridge/Editor/Bridge/BridgeAuthCheck.cs`
+- Auth mode constants: `packages/bridge/Editor/Bridge/BridgeAuthPolicy.cs`
+- Project settings (`authMode` / `bindAddress` reader for `.godot-open-mcp/settings.json`): `packages/bridge/Editor/Bridge/BridgeProjectSettings.cs`
+- Bind address decision (loopback always; remote requires `required`): `packages/bridge/Editor/Bridge/BridgeBindAddress.cs`
+- Token mint + lock serialization (`authToken` field): `packages/bridge/Editor/Bridge/BridgeInstanceLock.cs`
+- Response writers (incl. `SendUnauthorized`): `packages/bridge/Editor/Bridge/BridgeHttpResponse.cs`
 - Envelope builders: `packages/bridge/Editor/Bridge/BridgeEnvelope.cs`
 - Request-body parsing: `packages/bridge/Editor/Bridge/BridgeRequestBody.cs`
 - Gate policy (checkpoint → mutate → validate → delta): `packages/bridge/Editor/Gate/GatePolicy.cs`

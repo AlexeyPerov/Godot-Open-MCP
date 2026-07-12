@@ -29,9 +29,9 @@ namespace GodotOpenMcp.Bridge.Tests
     /// </para>
     ///
     /// <para>
-    /// Adapted from Unity's <c>BridgeInstanceLockTests</c>. P1.4 omits the auth-token tests
-    /// (<c>Acquire_WritesAuthToken_OfExpectedShape</c>, <c>Acquire_MintsFreshToken_OnEachAcquire</c>,
-    /// <c>Release_ClearsAuthToken</c>) — those land alongside the token in P5.2.
+    /// Adapted from Unity's <c>BridgeInstanceLockTests</c>. P5.2 adds the auth-token cases
+    /// (written into the lock JSON on Acquire, correct hex length, preserved across UpdateState
+    /// heartbeats, minted fresh on each Acquire, cleared on Release).
     /// </para>
     /// </summary>
     [Collection(nameof(BridgeInstanceLockTests))]
@@ -116,16 +116,103 @@ namespace GodotOpenMcp.Bridge.Tests
             Assert.Contains("\"port\":22029", second);
         }
 
-        // P1.4 omits the authToken field. The token is minted in P5.2 (BridgeAuthToken.Generate) and
-        // inserted between port and projectPath. This test pins the P1.4 absence so the field
-        // addition in P5.2 is a deliberate diff, not a silent drift.
+        // P5.2 — the lock now carries the per-session bearer token (authToken), minted on Acquire.
+        // These pin the field presence, hex length, position in the JSON (between port and
+        // projectPath — mirrors the TS-side InstanceLock.authToken field), preservation across
+        // heartbeat rewrites, fresh-mint-on-reacquire, and clear-on-Release.
         [Fact]
-        public void Acquire_DoesNotWriteAuthToken_BeforeP5_2()
+        public void Acquire_WritesAuthToken_OfExpectedHexLength()
         {
             BridgeInstanceLock.Acquire(TestProjectPath, 22028);
             var json = File.ReadAllText(InstancePortResolver.LockPath(TestProjectPath));
 
-            Assert.DoesNotContain("\"authToken\"", json);
+            // The authToken value is 64 lowercase hex chars (256-bit). Match the quoted value so we
+            // don't accidentally match a different field.
+            var idx = json.IndexOf("\"authToken\":\"", System.StringComparison.Ordinal);
+            Assert.True(idx >= 0, "lock JSON must include an authToken field");
+            var start = idx + "\"authToken\":\"".Length;
+            var end = json.IndexOf('"', start);
+            Assert.True(end > start, "authToken value must be a quoted string");
+            var token = json.Substring(start, end - start);
+            Assert.Equal(BridgeAuthToken.HexLength, token.Length);
+            foreach (var c in token)
+            {
+                Assert.True((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'),
+                    $"authToken contained non-lowercase-hex char '{c}'");
+            }
+        }
+
+        [Fact]
+        public void Acquire_AuthToken_PlacedBetweenPortAndProjectPath()
+        {
+            // The field order mirrors the lock JSON contract: port → authToken → projectPath.
+            // Pinning the order keeps the TS-side parser (which is field-name tolerant) stable and
+            // matches the P5.2 spec's contract diagram.
+            BridgeInstanceLock.Acquire(TestProjectPath, 22028);
+            var json = File.ReadAllText(InstancePortResolver.LockPath(TestProjectPath));
+
+            var portIdx = json.IndexOf("\"port\":", System.StringComparison.Ordinal);
+            var authIdx = json.IndexOf("\"authToken\":", System.StringComparison.Ordinal);
+            var pathIdx = json.IndexOf("\"projectPath\":", System.StringComparison.Ordinal);
+
+            Assert.True(portIdx >= 0 && authIdx > portIdx && pathIdx > authIdx,
+                "authToken must appear between port and projectPath");
+        }
+
+        [Fact]
+        public void AuthToken_PropertyReflects_MintedToken()
+        {
+            BridgeInstanceLock.Acquire(TestProjectPath, 22028);
+            Assert.NotNull(BridgeInstanceLock.AuthToken);
+            Assert.Equal(BridgeAuthToken.HexLength, BridgeInstanceLock.AuthToken!.Length);
+        }
+
+        [Fact]
+        public void Acquire_MintsFreshToken_OnEachAcquire()
+        {
+            // A bridge restart must invalidate any previously discovered token — a stale lock file
+            // with an old token should not let a recycled-port attacker in. Each Acquire mints anew.
+            BridgeInstanceLock.Acquire(TestProjectPath, 22028);
+            var first = BridgeInstanceLock.AuthToken;
+            Assert.NotNull(first);
+
+            ForceReleaseForTest();
+            BridgeInstanceLock.Acquire(TestProjectPath, 22029);
+            var second = BridgeInstanceLock.AuthToken;
+            Assert.NotNull(second);
+
+            Assert.NotEqual(first, second);
+        }
+
+        [Fact]
+        public void UpdateState_PreservesAuthToken_AcrossHeartbeats()
+        {
+            // UpdateState must NOT rotate the token — the MCP server discovers it once and reuses
+            // it for the session. A rotating token would break every in-flight request on each
+            // heartbeat tick.
+            BridgeInstanceLock.Acquire(TestProjectPath, 22028);
+            var minted = BridgeInstanceLock.AuthToken;
+            Assert.NotNull(minted);
+
+            BridgeInstanceLock.UpdateState(BridgeInstanceLock.StateCompiling, false, true);
+            Assert.Equal(minted, BridgeInstanceLock.AuthToken);
+
+            BridgeInstanceLock.UpdateState(BridgeInstanceLock.StatePlaying, true, false);
+            Assert.Equal(minted, BridgeInstanceLock.AuthToken);
+
+            // And the on-disk lock still carries the same token after the rewrites.
+            var json = File.ReadAllText(InstancePortResolver.LockPath(TestProjectPath));
+            Assert.Contains($"\"authToken\":\"{minted}\"", json);
+        }
+
+        [Fact]
+        public void Release_ClearsAuthToken()
+        {
+            BridgeInstanceLock.Acquire(TestProjectPath, 22028);
+            Assert.NotNull(BridgeInstanceLock.AuthToken);
+
+            BridgeInstanceLock.Release();
+            Assert.Null(BridgeInstanceLock.AuthToken);
         }
 
         [Fact]

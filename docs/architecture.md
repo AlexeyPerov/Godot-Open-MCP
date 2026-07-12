@@ -152,7 +152,8 @@ Every smoke failure surfaces a structured error whose first field names the **ow
 |---|---|---|---|
 | `{"error":{"code":"bridge_offline", ...}}` with a `~/.godot-open-mcp/instances/<hash>.json` hint | No listener at the resolved port. | instance discovery + lock | Port formula mismatch (TS ↔ C# drift), Godot not running, wrong project path, stale lock with a live PID. |
 | `{"error":{"code":"bridge_timeout", ...}}` "did not respond within Nms" | Listener is up but too slow to answer. | bridge HTTP / main thread | Editor stalled on a long main-thread op; bridge worker thread starved. |
-| `{"error":{"code":"bridge_http_error", ...}}` "unexpected HTTP NNN" | Listener returned an unexpected status (not 200 / 503). | bridge HTTP routing | Route handler change, missing `BridgeSession` init, auth gate (later phase) rejecting the probe. |
+| `{"error":{"code":"bridge_http_error", ...}}` "unexpected HTTP NNN" | Listener returned an unexpected status (not 200 / 503). | bridge HTTP routing | Route handler change, missing `BridgeSession` init. |
+| `{"error":{"code":"unauthorized", ...}}` (HTTP 401) | Missing/invalid `Authorization` header under `authMode:"required"`. | bridge auth gate | Token mismatch (stale lock, restarted bridge minted a new token) or the client is not sending the discovered Bearer. See `docs/api/bridge-http.md` §Auth. |
 | `isError:false` + `connected:false, compiling:true` (HTTP 503 fallback body) | Bridge listener up, session not ready yet. | bridge session lifecycle | Normal editor reload in flight — treat as reachable, not failed. |
 | `tools/list` does NOT include `godot_open_mcp_ping` | Tool registry drift. | MCP tool catalog | `tools/index.ts` no longer exports `ping`; `ALL_TOOLS` mutated incorrectly. |
 | `Unknown tool: godot_open_mcp_ping` from `tools/call` | Registry / dispatcher mismatch. | MCP tool catalog | Tool name spelling drifted, or `handleCallTool` registry check broken. |
@@ -206,7 +207,7 @@ Phase 2 must not start until the parity smoke is green on a clean checkout. The 
 - `packages/bridge/Editor/Tools/SceneSaveBody.cs` — pure-managed request-body parser for `scene_save` (P2.6); optional `path` (save-as) + `save_all` bool, with `IsSaveAll` / `IsSaveAs` mode flags for the handler.
 - `packages/bridge/Editor/Tools/SceneGetDataBody.cs` — pure-managed request-body parser for `scene_get_data` (P2.7); optional `path` + `hierarchy_depth` (default 1, positive capped at 5, -1 = unlimited → `EffectiveDepth` translates to `int.MaxValue` for the depth-counted walker).
 - `packages/bridge/Editor/Tools/SceneCreateBody.cs` — pure-managed request-body parser for `scene_create` (P2.7); `path` + optional `root_type` (default `Node2D`) + `root_name` + `overwrite` (default false) + `open` (default true), with `EffectiveRootType` fallback.
-- `packages/bridge/Editor/Bridge/BridgeBindAddress.cs` — loopback-only bind decision (P1.3); widens to remote+auth in P5.2.
+- `packages/bridge/Editor/Bridge/BridgeBindAddress.cs` — bind decision: loopback always allowed, remote (`0.0.0.0`) requires `authMode:"required"` (P5.2).
 - `packages/bridge/Editor/Bridge/InstancePortResolver.cs` — per-project deterministic port (`20000 + sha256(path) % 10000`) and `~/.godot-open-mcp/instances/<hash>.json` lock path (P1.4). Mirrors `mcp-server/src/instance-discovery.ts` byte-for-byte.
 - `packages/bridge/Editor/Bridge/BridgeInstanceLock.cs` — instance lock + heartbeat file lifecycle (Acquire/UpdateState/Release, stale-lock sweep by PID liveness) for multi-instance port discovery (P1.4).
 

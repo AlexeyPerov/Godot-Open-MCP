@@ -9,10 +9,12 @@ using GodotOpenMcp.Bridge.Runtime.MainThread;
 namespace GodotOpenMcp.Bridge.Editor
 {
     /// <summary>
-    /// The Godot-side HTTP bridge. P1.3 ships the listener lifecycle and <c>GET /ping</c> only —
-    /// no <c>/tools/{name}</c> dispatch (P2.1), no instance lock (P1.4), no auth (P5.2). The
-    /// listener binds loopback on a per-project port and routes readiness probes; later phases add
-    /// tool dispatch, the gate flow, SSE events, and auth atop the same transport.
+    /// The Godot-side HTTP bridge. P1.3 shipped the listener lifecycle and <c>GET /ping</c>;
+    /// later phases added <c>/tools/{name}</c> dispatch (P2.1), the instance lock (P1.4), the gate
+    /// flow (P3.5), and bearer-token auth (P5.2). The listener binds a per-project port
+    /// (loopback by default; remote bind is opt-in and requires <c>authMode:"required"</c>) and
+    /// runs a single <see cref="CheckAuth"/> gate before routing so every endpoint is auth-gated
+    /// equally when auth is enabled.
     ///
     /// <para>
     /// Adapted from Unity Open MCP's <c>BridgeHttpServer</c>. The transport + lifecycle shape is
@@ -82,11 +84,14 @@ namespace GodotOpenMcp.Bridge.Editor
             if (_running)
                 return;
 
-            // P1.3: resolve the bind address through the policy. Loopback is always allowed; remote
-            // is refused (P5.2 widens this to remote+auth). The decision is made BEFORE touching
-            // HttpListener so a misconfigured project fails fast with the actionable refusal
-            // message instead of a generic listener exception.
-            var bindDecision = BridgeBindAddress.Decide(BridgeBindAddress.Default);
+            // P5.2 — resolve the bind address + auth mode from project settings. Loopback is always
+            // allowed; remote (0.0.0.0) is allowed only when authMode is "required" so an accidental
+            // remote bind on an open network never serves unauthenticated traffic. The decision is
+            // made BEFORE touching HttpListener so a misconfigured project fails fast with the
+            // actionable refusal message instead of a generic listener exception.
+            var authMode = BridgeAuthPolicy.GetDefault();
+            var bindAddress = BridgeProjectSettings.BindAddress;
+            var bindDecision = BridgeBindAddress.Decide(bindAddress, authMode);
             if (!bindDecision.Allowed)
             {
                 BridgeLog.Error($"[{LogPrefix}] Refusing to start HTTP bridge: {bindDecision.RefusalReason}");
@@ -223,6 +228,17 @@ namespace GodotOpenMcp.Bridge.Editor
         {
             try
             {
+                // P5.2 — auth check runs before routing so every endpoint (/ping, /tools/*, and any
+                // future /instance, /events, ...) is gated equally when authMode is "required". The
+                // MCP client always carries the bearer from the instance lock; a hand-rolled curl
+                // without it gets a 401. No endpoint is exempt. Under authMode "none" (the default)
+                // this is a single pure-function call that returns true, so the cost on the common
+                // path is negligible.
+                if (!CheckAuth(context))
+                {
+                    return;
+                }
+
                 // Trim trailing slash so /ping and /ping/ route identically (mirrors Unity).
                 var path = context.Request.Url?.AbsolutePath.TrimEnd('/') ?? "/";
 
@@ -284,6 +300,36 @@ namespace GodotOpenMcp.Bridge.Editor
             {
                 try { context.Response.Close(); } catch { }
             }
+        }
+
+        /// <summary>
+        /// P5.2 — bridge auth gate. Returns true when the request may proceed, false when a 401 has
+        /// already been written. The pure decision lives in <see cref="BridgeAuthCheck.IsAuthorized"/>
+        /// (constant-time token compare, fail-closed on unknown policy) so it is unit-testable without
+        /// an <see cref="HttpListener"/>; this method is the thin I/O adapter that reads the
+        /// <c>Authorization</c> header, resolves the policy + expected token, and writes the 401 on
+        /// denial. Runs before routing so every endpoint is gated equally — no exemption for
+        /// <c>/ping</c> or any future SSE/resource endpoint. Adapted from Unity's
+        /// <c>BridgeHttpServer.CheckAuth</c>.
+        /// </summary>
+        static bool CheckAuth(HttpListenerContext context)
+        {
+            string? headerValue = null;
+            try { headerValue = context.Request.Headers["Authorization"]; }
+            catch { /* malformed header — treat as missing */ }
+
+            var policy = BridgeAuthPolicy.GetDefault();
+            var expected = BridgeInstanceLock.AuthToken;
+
+            if (BridgeAuthCheck.IsAuthorized(policy, headerValue, expected))
+                return true;
+
+            BridgeHttpResponse.SendUnauthorized(context,
+                "Missing or invalid Authorization header. Set authMode to \"none\" in " +
+                ".godot-open-mcp/settings.json, or send Authorization: Bearer <token>. " +
+                "The token is minted into the instance lock at " +
+                "~/.godot-open-mcp/instances/<sha256(projectPath)>.json on bridge start.");
+            return false;
         }
 
         /// <summary>

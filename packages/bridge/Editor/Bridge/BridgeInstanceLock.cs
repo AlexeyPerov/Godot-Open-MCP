@@ -11,10 +11,10 @@ namespace GodotOpenMcp.Bridge.Editor
     /// <summary>
     /// Instance lock + heartbeat file. P1.4 — copy of Unity Open MCP's <c>BridgeInstanceLock</c>,
     /// adapted to the Godot home-dir convention and the bridge's diagnostic surface
-    /// (<see cref="BridgeLog"/> instead of <c>UnityEngine.Debug</c>). The auth-token field is
-    /// deferred to P5.2 — it is minted there by <c>BridgeAuthToken.Generate</c> and mirrored into the
-    /// lock JSON; P1.4 writes the structural lock fields the MCP server needs to discover the port
-    /// and verify PID liveness.
+    /// (<see cref="BridgeLog"/> instead of <c>UnityEngine.Debug</c>). P5.2 mints the per-session
+    /// bearer token via <c>BridgeAuthToken.Generate</c> and mirrors it into the lock JSON as
+    /// <c>authToken</c>; the MCP server auto-discovers it (<c>mcp-server/src/instance-discovery.ts</c>
+    /// <c>resolveAuthToken</c>) and attaches <c>Authorization: Bearer</c> on every request.
     ///
     /// <para>
     /// Each running bridge instance owns a lock file at
@@ -68,6 +68,14 @@ namespace GodotOpenMcp.Bridge.Editor
         static int _pid;
         static DateTime _startedAt;
 
+        // P5.2 — per-session bearer token. Always minted on Acquire so the MCP server can send it
+        // regardless of the project's authMode; enforcement is decided by BridgeAuthCheck at request
+        // time. Read by the HTTP auth check (BridgeHttpServer.CheckAuth) and mirrored into the lock
+        // JSON below. Minted once per Acquire (a bridge restart invalidates any previously discovered
+        // token); preserved across heartbeat UpdateState rewrites so the token does not rotate under
+        // a running session.
+        static string? _authToken;
+
         /// <summary>True once <see cref="Acquire"/> has successfully written this instance's lock.</summary>
         public static bool IsAcquired => _acquired;
 
@@ -76,6 +84,13 @@ namespace GodotOpenMcp.Bridge.Editor
 
         /// <summary>The port the lock was acquired for, or 0 when not acquired.</summary>
         public static int CurrentPort => _acquiredPort;
+
+        /// <summary>
+        /// P5.2 — the per-session bearer token minted on <see cref="Acquire"/>. Null before Acquire
+        /// and after <see cref="Release"/>. Read by <see cref="BridgeHttpServer.CheckAuth"/> for the
+        /// constant-time compare against the request's Bearer header.
+        /// </summary>
+        public static string? AuthToken => _authToken;
 
         /// <summary>
         /// Write the initial lock and sweep stale locks. Safe to call on the listener worker thread
@@ -107,8 +122,10 @@ namespace GodotOpenMcp.Bridge.Editor
             _acquiredProjectHash = InstancePortResolver.ProjectHash(projectPath);
             _pid = Process.GetCurrentProcess().Id;
             _startedAt = DateTime.UtcNow;
-            // P5.2 will mint a per-session bearer token here (BridgeAuthToken.Generate) and store it
-            // for the HTTP auth check. P1.4 ships the structural lock without auth.
+            // P5.2 — mint a fresh token on every Acquire so a bridge restart invalidates any
+            // previously discovered token. UpdateState preserves the minted token across heartbeat
+            // rewrites (it reuses this static, not regenerated).
+            _authToken = BridgeAuthToken.Generate();
 
             try
             {
@@ -159,6 +176,7 @@ namespace GodotOpenMcp.Bridge.Editor
             finally
             {
                 _acquired = false;
+                _authToken = null;
             }
         }
 
@@ -265,8 +283,11 @@ namespace GodotOpenMcp.Bridge.Editor
             sb.Append('{');
             sb.Append("\"pid\":").Append(_pid).Append(',');
             sb.Append("\"port\":").Append(_acquiredPort).Append(',');
-            // P5.2 will insert the authToken field here, between port and projectPath, to mirror the
-            // TS-side InstanceLock.authToken field. P1.4 ships the structural lock without auth.
+            // P5.2 — authToken mirrors the TS-side InstanceLock.authToken field. Always minted on
+            // Acquire (even when authMode is "none") so the project can flip to "required" with no
+            // restart and the MCP server can always attach the header when present. Inserted between
+            // port and projectPath per the lock JSON contract.
+            sb.Append("\"authToken\":").Append(BridgeJson.EscapeString(_authToken)).Append(',');
             sb.Append("\"projectPath\":").Append(BridgeJson.EscapeString(_acquiredProjectPath)).Append(',');
             sb.Append("\"projectHash\":").Append(BridgeJson.EscapeString(NullToEmpty(_acquiredProjectHash))).Append(',');
             sb.Append("\"startedAt\":").Append(BridgeJson.EscapeString(IsoUtc(_startedAt))).Append(',');

@@ -3,31 +3,40 @@
 namespace GodotOpenMcp.Bridge.Editor
 {
     /// <summary>
-    /// Pure decision over the HTTP listener bind address. P1.3 ships loopback-only: the bridge
-    /// refuses any non-loopback address outright. Auth-gated remote bind (Unity's
-    /// <c>BridgeBindAddress</c> remote+<c>authMode:"required"</c> path) lands in P5.2 alongside the
-    /// auth token, at which point this type grows a <c>Decide(address, authMode)</c> overload and
-    /// a <c>Remote</c> constant mirroring Unity's.
+    /// Pure decision over the HTTP listener bind address. P1.3 shipped loopback-only; P5.2 widens
+    /// the surface to accept remote bind (<c>0.0.0.0</c>) but <b>only</b> when
+    /// <c>authMode:"required"</c> is set — copying Unity's
+    /// <c>BridgeBindAddress.Decide(address, authMode)</c> pattern. The decision is made BEFORE the
+    /// listener is constructed so a misconfigured project fails fast with an actionable message
+    /// instead of a generic listener exception (packages/bridge/AGENTS.md §Transport).
     ///
     /// <para>
     /// Kept as its own type — rather than inlined in <see cref="BridgeHttpServer.Start"/> — so the
-    /// verdict is unit-testable without a live <c>HttpListener</c>, mirroring the Unity reference's
-    /// <c>BridgeBindAddressTests</c>. The decision is made BEFORE the listener is constructed so a
-    /// misconfigured project fails fast with an actionable message instead of a generic listener
-    /// exception (packages/bridge/AGENTS.md §Transport: "binds 127.0.0.1 by default").
+    /// verdict is unit-testable without a live <see cref="System.Net.HttpListener"/>, mirroring the
+    /// Unity reference's <c>BridgeBindAddressTests</c>.
     /// </para>
     /// </summary>
     public static class BridgeBindAddress
     {
-        /// <summary>Loopback IPv4 — the only address the P1.3 bridge will bind.</summary>
+        /// <summary>Loopback IPv4 — always allowed regardless of auth mode.</summary>
         public const string Loopback = "127.0.0.1";
+
+        /// <summary>
+        /// Remote wildcard IPv4 — exposes the bridge beyond loopback. Allowed ONLY when
+        /// <c>authMode:"required"</c> (token auth gates every request); refused otherwise so an
+        /// accidental <c>0.0.0.0</c> on an open network never serves unauthenticated traffic.
+        /// </summary>
+        public const string Remote = "0.0.0.0";
 
         /// <summary>The default bind address when project settings do not override it.</summary>
         public const string Default = Loopback;
 
+        /// <summary>The full set of valid bind address strings.</summary>
+        public static readonly string[] ValidAddresses = { Loopback, Remote };
+
         /// <summary>
-        /// Decision for a start attempt. P1.3 has only the <c>Allow</c> outcome (loopback) and the
-        /// <c>Refuse</c> outcome (anything else); P5.2 will widen <c>Allow</c> to cover remote+auth.
+        /// Decision for a start attempt. <c>Allow</c> covers loopback (any auth mode) and
+        /// remote+required; <c>Refuse</c> covers remote without required auth.
         /// </summary>
         public readonly struct BindDecision
         {
@@ -57,30 +66,46 @@ namespace GodotOpenMcp.Bridge.Editor
         }
 
         /// <summary>
-        /// True only for the canonical loopback string. P5.2 will widen this to also accept
-        /// <c>0.0.0.0</c> once the auth gate that governs remote bind lands.
+        /// True for the two canonical bind strings (loopback + remote). Anything else coerces to the
+        /// loopback default in <see cref="Decide(string?, string?)"/> so a bogus value binds
+        /// loopback, never the bogus address.
         /// </summary>
-        public static bool IsValid(string? address) => address == Loopback;
+        public static bool IsValid(string? address) => address == Loopback || address == Remote;
 
-        /// <summary>Resolve and decide in one call. P1.3 refuses everything that is not loopback.</summary>
-        public static BindDecision Decide(string? bindAddress)
+        /// <summary>
+        /// Resolve and decide in one call. Loopback is always allowed; remote (<c>0.0.0.0</c>) is
+        /// allowed only when <paramref name="authMode"/> is <c>"required"</c>; otherwise refused
+        /// before the listener starts. An invalid/unknown <paramref name="bindAddress"/> coerces to
+        /// the loopback default. <paramref name="authMode"/> is the canonical policy string already
+        /// resolved from settings — the caller passes it explicitly so the decision is testable
+        /// without a settings reader.
+        /// </summary>
+        public static BindDecision Decide(string? bindAddress, string? authMode)
         {
             var resolved = IsValid(bindAddress) ? bindAddress! : Default;
-            // Loopback is always allowed; there is no remote path in P1.3. When remote bind is
-            // introduced (P5.2) this branch grows an auth check identical to Unity's Decide.
-            if (!IsRemote(resolved))
-                return BindDecision.Allow(resolved);
+            if (!IsRemote(resolved)) return BindDecision.Allow(resolved);
 
-            // Unreachable in P1.3 (IsValid would have coerced to Default first); kept so the
-            // P5.2 widening is a diff, not a rewrite, and so Decide never silently permits a
-            // non-loopback address if IsValid is extended ahead of the auth gate.
-            return BindDecision.Refuse(resolved,
-                "Remote bind is not supported in this bridge version. The bridge binds " +
-                "127.0.0.1 only — local-first loopback HTTP is the supported transport.");
+            if (authMode != BridgeAuthPolicy.Required)
+            {
+                return BindDecision.Refuse(resolved,
+                    "Remote bind (0.0.0.0) requires authMode \"required\". The bridge refuses to " +
+                    "start on a non-loopback interface without token auth — set authMode to " +
+                    "\"required\" in .godot-open-mcp/settings.json before enabling remote bind. " +
+                    "See docs/api/bridge-http.md §Remote bind for the threat model.");
+            }
+            return BindDecision.Allow(resolved);
         }
 
+        /// <summary>
+        /// Single-arg decide for callers that do not know the auth mode (legacy / loopback-only
+        /// paths). Treats the auth mode as <c>"none"</c>, which means remote bind is always refused
+        /// on this path — a caller that wants remote bind MUST use the two-arg overload. Kept so the
+        /// P1.3 call sites that always bind loopback stay a no-op diff.
+        /// </summary>
+        public static BindDecision Decide(string? bindAddress) => Decide(bindAddress, BridgeAuthPolicy.None);
+
         /// <summary>True when the address would expose the bridge beyond loopback.</summary>
-        public static bool IsRemote(string? address) => address != Loopback;
+        public static bool IsRemote(string? address) => address == Remote;
     }
 }
 #endif

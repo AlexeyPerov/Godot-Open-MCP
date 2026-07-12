@@ -43,8 +43,11 @@ Rules for `packages/bridge/` — the Godot Editor HTTP bridge (`addons/godot_ope
 ## Auth
 
 - A per-session bearer token is minted into the instance lock on bridge start and mirrored as `authToken` in the lock JSON. The TS-side `InstanceLock` interface must carry the same field.
-- Enforcement is opt-in via `authMode` in project settings (`"none"` default | `"required"`).
-- Token comparison must be constant-time.
+- Enforcement is opt-in via `authMode` in project settings (`"none"` default | `"required"`). The file lives at `<project>/.godot-open-mcp/settings.json`.
+- The auth check runs **before routing** on every endpoint (`/ping`, `/tools/*`, future routes) — no exemption. The pure decision lives in `BridgeAuthCheck.IsAuthorized`; the HTTP layer is a thin I/O adapter.
+- Token comparison must be constant-time (`BridgeAuthToken.EqualsConstantTime` only).
+- An invalid/unknown `authMode` in the settings file **fails closed** (deny) — it is NOT coerced to `none`. Only an absent key / missing file yields the `none` default. This is an intentional delta from Unity (which coerces at load).
+- Remote bind (`0.0.0.0`) is refused at start unless `authMode:"required"` (`BridgeBindAddress.Decide`). Loopback is always allowed.
 
 ## Multi-instance port + discovery
 

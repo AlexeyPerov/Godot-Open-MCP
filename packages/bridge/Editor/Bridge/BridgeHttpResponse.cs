@@ -92,6 +92,21 @@ namespace GodotOpenMcp.Bridge.Editor
                 + BridgeJson.EscapeStringContent(message) + "\"}}";
             SendJson(context, 400, json);
         }
+
+        /// <summary>
+        /// 401 envelope for a missing/invalid <c>Authorization</c> header under
+        /// <c>authMode:"required"</c> (P5.2). Written by <see cref="BridgeHttpServer.CheckAuth"/>
+        /// before routing so every endpoint is gated equally — no endpoint is exempt. The body shape
+        /// (<c>{"error":{"code":"unauthorized",...}}</c>) matches Unity's so an MCP client reading
+        /// the error sees a consistent contract. Adapted from Unity's
+        /// <c>SendJsonError(context, 401, "unauthorized", ...)</c>.
+        /// </summary>
+        internal static void SendUnauthorized(HttpListenerContext context, string message)
+        {
+            var json = "{\"error\":{\"code\":\"unauthorized\",\"message\":\""
+                + BridgeJson.EscapeStringContent(message) + "\"}}";
+            SendJson(context, 401, json);
+        }
     }
 }
 #endif

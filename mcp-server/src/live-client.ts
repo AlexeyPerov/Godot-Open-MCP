@@ -229,10 +229,16 @@ export class LiveClient {
       }
 
       if (!res.ok) {
-        return makeErrorResult({
-          code: "bridge_http_error",
-          message: `Bridge /ping returned unexpected HTTP ${res.status}. Endpoint: ${this.baseUrl}.`,
-        });
+        // Read the body so a structured error code the bridge emits (e.g. "unauthorized"
+        // under authMode "required" — P5.2) is surfaced verbatim rather than collapsed to a
+        // generic bridge_http_error. Falls back to bridge_http_error when the body is absent
+        // or not the { error: { code, message } } shape. Mirrors the postTool non-OK handling.
+        const errBody = (await res.json().catch(() => null)) as HttpErrorBody | null;
+        const code = errBody?.error?.code ?? "bridge_http_error";
+        const message =
+          errBody?.error?.message ??
+          `Bridge /ping returned unexpected HTTP ${res.status}. Endpoint: ${this.baseUrl}.`;
+        return makeErrorResult({ code, message });
       }
 
       const body = (await res.json()) as PingResponse;

@@ -674,6 +674,63 @@ test("ping: omits Authorization header when no token was provided", async () => 
   }
 });
 
+// ----- P5.2: 401 classification -----
+//
+// When the bridge runs under authMode "required" and a request arrives with a
+// missing/wrong/malformed Bearer, the bridge returns HTTP 401 with a body of
+// { "error": { "code": "unauthorized", "message": "..." } }. The postTool
+// generic 4xx handler reads body.error.code, so a 401 surfaces to the agent as
+// a structured error with code "unauthorized" — pin that mapping so a drift in
+// the generic handler does not silently swallow the bridge's auth code.
+
+function unauthorizedHandler(
+  _req: IncomingMessage,
+  res: ServerResponse,
+): void {
+  res.writeHead(401, { "Content-Type": "application/json" });
+  res.end(
+    JSON.stringify({
+      error: {
+        code: "unauthorized",
+        message:
+          "Missing or invalid Authorization header. Set authMode to \"none\" " +
+          "in .godot-open-mcp/settings.json, or send Authorization: Bearer <token>.",
+      },
+    }),
+  );
+}
+
+test("postTool: bridge 401 surfaces as a structured unauthorized error", async () => {
+  const bridge = await startBridgeStub(unauthorizedHandler);
+  try {
+    const client = new LiveClient(bridge.port, "wrongtoken".repeat(4));
+    const result = await client.route("godot_open_mcp_node_find", {});
+    assert.equal(result.isError, true);
+    const body = JSON.parse(textOf(result));
+    assert.equal(body.error.code, "unauthorized");
+    assert.match(body.error.message, /Authorization/i);
+  } finally {
+    await bridge.close();
+  }
+});
+
+test("ping: bridge 401 surfaces as bridge_http_error with the unauthorized code", async () => {
+  // /ping goes through the same generic non-OK handler in handlePing (it maps any
+  // non-503 non-200 to bridge_http_error). Pin that the 401 body's error code is
+  // surfaced so an agent probing a misconfigured (auth-required) bridge sees an
+  // actionable unauthorized hint rather than a generic HTTP error.
+  const bridge = await startBridgeStub(unauthorizedHandler);
+  try {
+    const client = new LiveClient(bridge.port);
+    const result = await client.route(PING_TOOL_NAME, {});
+    assert.equal(result.isError, true);
+    const body = JSON.parse(textOf(result));
+    assert.equal(body.error.code, "unauthorized");
+  } finally {
+    await bridge.close();
+  }
+});
+
 // ----- P2.2: godot_open_mcp_node_find result-shape round-trip -----
 //
 // The postTool envelope tests above use generic payloads. These tests pin the
