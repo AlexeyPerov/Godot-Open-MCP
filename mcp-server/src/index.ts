@@ -32,6 +32,7 @@ import {
   resolveAuthToken,
 } from "./instance-discovery.js";
 import { LiveClient } from "./live-client.js";
+import { BridgeEventStream } from "./event-stream.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 // Read the version from package.json at runtime so `npm version` and the
@@ -54,17 +55,20 @@ export async function handleListTools(): Promise<{ tools: typeof ALL_TOOLS }> {
  * unknown tools instead of throwing so a malformed client cannot kill the
  * server process. Routed tools dispatch through the supplied LiveClient.
  *
- * One tool is resolved LOCALLY (no bridge hop): `godot_open_mcp_capabilities`.
- * Its response is built in-process from ALL_TOOLS + the rule/fix catalog, mirroring Unity Open MCP's
- * tool-router `routeCapabilities` (local-only). It must NOT POST to the bridge.
+ * Three tools are resolved WITHOUT a POST /tools/{name} bridge hop:
+ *   - `godot_open_mcp_capabilities` — built locally from ALL_TOOLS + the rule/fix catalog.
+ *   - `godot_open_mcp_bridge_status` — local/live hybrid: composes the lock classifier with one
+ *     /ping probe via LiveClient.routeBridgeStatus.
+ *   - `godot_open_mcp_pull_events` — local-drains-live-stream: drains the shared
+ *     BridgeEventStream (its SSE reader connects to GET /events on the bridge). Needs an eventStream.
  *
- * `liveClient` is optional so the unit test for the unknown-tool path does
- * not need to spin up a client. The stdio `main()` always supplies one.
+ * `liveClient` / `eventStream` are optional so unit tests for the unknown-tool / capabilities paths
+ * do not need to spin them up. The stdio `main()` always supplies both.
  */
 export async function handleCallTool(params: {
   name: string;
   arguments?: unknown;
-}, liveClient?: LiveClient): Promise<CallToolResult> {
+}, liveClient?: LiveClient, eventStream?: BridgeEventStream): Promise<CallToolResult> {
   const toolName = params.name;
   const isRegistered = ALL_TOOLS.some((t) => t.name === toolName);
   if (!isRegistered) {
@@ -124,6 +128,34 @@ export async function handleCallTool(params: {
     return liveClient.routeBridgeStatus();
   }
 
+  // P5.4 — pull_events drains the per-process BridgeEventStream (a single SSE subscription to the
+  // bridge's GET /events endpoint). No POST /tools/pull_events endpoint on the bridge. The stream is
+  // constructed once in main() and shared across calls so every pull amortizes one connection.
+  // Read-only, gate-free, never throws on an offline bridge — it returns connected:false + lastError.
+  if (toolName === "godot_open_mcp_pull_events") {
+    if (!eventStream) {
+      return {
+        isError: true,
+        content: [
+          {
+            type: "text",
+            text: `Tool ${toolName} is registered but no event stream is wired (test harness omission).`,
+          },
+        ],
+      };
+    }
+    const rawMax = args.max_events;
+    const maxEvents =
+      typeof rawMax === "number" && rawMax > 0
+        ? Math.min(rawMax, 1000)
+        : 50;
+    const result = eventStream.pull(maxEvents);
+    return {
+      content: [{ type: "text", text: JSON.stringify(result) }],
+      isError: false,
+    };
+  }
+
   if (!liveClient) {
     return {
       isError: true,
@@ -145,10 +177,13 @@ export async function handleCallTool(params: {
  * @param serverName — base name reported in the MCP `initialize` response.
  * @param liveClient — routes registered tool calls to the bridge. Optional so
  *                     tests that only exercise handleListTools don't need one.
+ * @param eventStream — shared bridge event SSE reader for `godot_open_mcp_pull_events`.
+ *                      Optional for the same reason; the stdio `main()` always supplies one.
  */
 export function createServer(
   serverName = "godot-open-mcp",
   liveClient?: LiveClient,
+  eventStream?: BridgeEventStream,
 ): Server {
   const server = new Server(
     { name: serverName, version: PACKAGE_VERSION },
@@ -163,7 +198,7 @@ export function createServer(
   server.setRequestHandler(ListToolsRequestSchema, () => handleListTools());
 
   server.setRequestHandler(CallToolRequestSchema, (request) =>
-    handleCallTool(request.params, liveClient),
+    handleCallTool(request.params, liveClient, eventStream),
   );
 
   return server;
@@ -229,7 +264,16 @@ async function main(): Promise<void> {
     env.bridgeAuthToken,
     env.projectPath,
   );
-  const server = createServer("godot-open-mcp", liveClient);
+  // P5.4 — one SSE subscription per server process. The MCP server is the only long-lived hop
+  // between the bridge and the LLM; a per-process reader amortizes the connection and lets every
+  // `godot_open_mcp_pull_events` call share the same buffered queue. The same auth token as the
+  // live client (resolved from the instance lock) gates the SSE stream.
+  const eventStream = new BridgeEventStream(
+    `http://127.0.0.1:${env.bridgePort}`,
+    undefined,
+    env.bridgeAuthToken,
+  );
+  const server = createServer("godot-open-mcp", liveClient, eventStream);
   const transport = new StdioServerTransport();
 
   // Clean shutdown on disconnect. The SDK closes the transport when stdin
@@ -237,6 +281,7 @@ async function main(): Promise<void> {
   // supervisors do not log a crash and CI smoke tests can assert exit code 0.
   transport.onclose = () => {
     console.error("[godot-open-mcp] stdio transport closed; exiting.");
+    eventStream.stop();
     process.exit(0);
   };
 

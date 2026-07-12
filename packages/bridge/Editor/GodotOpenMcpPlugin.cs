@@ -134,6 +134,15 @@ namespace GodotOpenMcp.Bridge.Editor
                 BridgeLog.InstallCollectorSink();
                 ConsoleTools.RegisterConsoleTools();
 
+                // P5.4 — event stream. Initialize the ring buffer + collector fan-out sink AFTER the
+                // collector is installed (the sink resolves a live collector at arm time) and BEFORE the
+                // HTTP listener starts so /events and /events/poll are serving against an armed source
+                // from the first request. The sink is the single fan-in — no second raw Godot logger
+                // (dual-ingest risk). Editor-state transitions are emitted from the authoritative
+                // observed-transition points (EditorApplicationTools start/stop); a background observer
+                // for user-clicked play arrives in a later phase.
+                BridgeEventSource.Initialize();
+
                 // P4.8 — screenshot tools: screenshot_viewport (active editor 2D/3D viewport),
                 // screenshot_camera (off-screen capture from a Camera2D/Camera3D), and
                 // screenshot_isolated (render a Node3D in an isolated world from six views). All three
@@ -196,6 +205,11 @@ namespace GodotOpenMcp.Bridge.Editor
                 // dispatcher is freed last so any teardown work the later subsystems
                 // marshal still lands on a live pump).
                 BridgeHttpServer.Stop();
+                // P5.4 — stop the event source and detach the collector fan-out sink. The ring buffer
+                // stays drainable (no ResetForTests here) so a reconnecting MCP subscriber can read the
+                // tail of the previous session's events across a domain reload. Must run AFTER the HTTP
+                // listener stops so an in-flight /events drain completes against a live source.
+                BridgeEventSource.Stop();
                 // P4.7 — detach the BridgeLog → collector forward sink. The collector itself stays
                 // readable (see GodotLogCollector.Current remarks) so console_get_logs can still
                 // surface the most recent session's lines after a disable.

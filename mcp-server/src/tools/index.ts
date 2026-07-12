@@ -51,6 +51,7 @@ import { screenshotIsolated } from "./screenshot-isolated.js";
 import { reflectionMethodFind } from "./reflection-method-find.js";
 import { reflectionMethodCall } from "./reflection-method-call.js";
 import { bridgeStatus } from "./bridge-status.js";
+import { pullEvents } from "./pull-events.js";
 
 /** Ordered list of every tool exposed over stdio MCP. */
 export const ALL_TOOLS: Tool[] = [
@@ -150,4 +151,11 @@ export const ALL_TOOLS: Tool[] = [
   // LiveClient.routeBridgeStatus (no POST /tools/bridge_status endpoint on the bridge). Read-only,
   // gate-free, never spawns Godot. recoveryHint is non-null only for dead_bridge.
   bridgeStatus,
+  // P5.4 — pull_events: drain incremental bridge events (console logs + editor-state transitions)
+  // from the per-process BridgeEventStream SSE subscription. First call opens the subscription;
+  // later calls return only new events. Local-drains-live-stream route: the dispatcher special-cases
+  // the name and calls BridgeEventStream.pull directly (no POST /tools/pull_events endpoint). Read-
+  // only, gate-free, live (requires a connected bridge). Returns connected:false + lastError on an
+  // offline bridge instead of throwing.
+  pullEvents,
 ];

@@ -90,6 +90,13 @@
     <Compile Include="..\Editor\Bridge\BridgeAuthCheck.cs" Link="Source\BridgeAuthCheck.cs" />
     <Compile Include="..\Editor\Bridge\BridgeAuthPolicy.cs" Link="Source\BridgeAuthPolicy.cs" />
     <Compile Include="..\Editor\Bridge\BridgeProjectSettings.cs" Link="Source\BridgeProjectSettings.cs" />
+    <!-- P5.4 — event stream. BridgeEventSource is the ring buffer + subscriber cursors + drain math
+         (ConcurrentQueue/ConcurrentDictionary/Interlocked only — no Godot APIs), so it compiles into the
+         binary-less host for off-editor unit testing of eviction, multi-subscriber cursors, and the JSON
+         render. It references GodotLogCollector + GodotLogEntry + BridgeInstanceLock (state-string
+         constants only) — all already linked above (P4.7 + P1.4). The SSE/poll HTTP routes live in
+         BridgeHttpServer (linked above) and are exercised by the BridgeEventsHttpTests integration test. -->
+    <Compile Include="..\Editor\Bridge\BridgeEventSource.cs" Link="Source\BridgeEventSource.cs" />
     <!-- P2.1 — tool dispatch spine. BridgeRequestBody + BridgeEnvelope + ToolDispatchResult +
          BridgeToolRegistry are pure-managed (no Godot APIs) so they compile into the binary-less
          test host. BridgeHttpServer gains the POST /tools/{name} routing; the dispatch handler

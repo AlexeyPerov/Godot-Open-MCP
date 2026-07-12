@@ -282,6 +282,12 @@ namespace GodotOpenMcp.Bridge.Editor
                         timeoutMs: request.TimeoutMs, reason: "start_not_observed"));
             }
 
+            // P5.4 — emit the play-state transition into the event stream. The event is emitted only
+            // after the settle wait confirms the transition (authoritative), so a subscriber never sees
+            // a `playing` event for a play that did not start. This is the bridge-driven path; a future
+            // phase adds a main-thread observer for user-clicked plays.
+            BridgeEventSource.NotifyEditorState(BridgeInstanceLock.StatePlaying, isCompiling: false, isPlaying: true);
+
             return BuildSetStateResult(
                 action: "start",
                 selector: selector,
@@ -341,6 +347,9 @@ namespace GodotOpenMcp.Bridge.Editor
                         before, after, settled, elapsedMs,
                         timeoutMs: timeoutMs, reason: "stop_not_observed"));
             }
+
+            // P5.4 — emit the idle transition into the event stream after settle confirms the stop.
+            BridgeEventSource.NotifyEditorState(BridgeInstanceLock.StateIdle, isCompiling: false, isPlaying: false);
 
             return BuildSetStateResult(
                 action: "stop",

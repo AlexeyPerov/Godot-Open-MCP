@@ -50,6 +50,31 @@ namespace GodotOpenMcp.Bridge.Runtime.Logging
         readonly object _gate = new();
         readonly LinkedList<GodotLogEntry> _entries = new();
 
+        /// <summary>
+        /// Optional sink invoked AFTER an entry is appended (P5.4 event-source fan-out). The sink
+        /// receives a copy of the appended entry (with its assigned sequence) so an event-stream
+        /// subscriber sees the same sequence number as a <c>console_get_logs</c> caller — the two
+        /// surfaces share a cursor vocabulary. Captured as a plain field (Volatile read on invoke)
+        /// so <see cref="Append"/> never blocks on the sink. The sink is invoked OUTSIDE the lock
+        /// (after the entry is committed) so a slow sink cannot stall the collector, and a sink that
+        /// re-enters Append would simply append a second entry (no deadlock under the collector
+        /// lock). Null when no event source is armed (the common case in tests).
+        /// </summary>
+        Action<GodotLogEntry>? _entryAppended;
+
+        /// <summary>
+        /// The P5.4 event-source fan-out sink. Set by <c>BridgeEventSource.ArmCollectorSink</c> on
+        /// plugin enable; cleared on disable. The delegate is invoked on the thread that called
+        /// <see cref="Append"/> (the HTTP listener worker or the editor main thread), so a sink must
+        /// be thread-safe. The event source's sink is (it enqueues onto a lock-free
+        /// ConcurrentQueue).
+        /// </summary>
+        public Action<GodotLogEntry>? EntryAppended
+        {
+            get => Volatile.Read(ref _entryAppended);
+            set => Volatile.Write(ref _entryAppended, value);
+        }
+
         /// <summary>Backing field for <see cref="Current"/>; accessed only through Volatile
         /// read/write.</summary>
         static GodotLogCollector? _current;
@@ -104,12 +129,31 @@ namespace GodotOpenMcp.Bridge.Runtime.Logging
         {
             if (entry == null) return;
 
+            GodotLogEntry? committed = null;
             lock (_gate)
             {
                 if (_entries.Count >= Capacity)
                     _entries.RemoveFirst();
                 entry.Sequence = _nextSequence++;
                 _entries.AddLast(entry);
+                // Snapshot the committed entry (with its assigned sequence) so the P5.4 fan-out sink
+                // sees the same sequence as a console_get_logs caller. The copy is made under the
+                // lock so the sequence is stable; the sink fires OUTSIDE the lock below so a slow
+                // sink cannot stall concurrent Appenders and a sink that re-enters Append cannot
+                // deadlock under the collector lock.
+                committed = new GodotLogEntry(entry.Sequence, entry.LogType, entry.Message,
+                    entry.TimestampUtc, entry.StackTrace, entry.Source);
+            }
+
+            var sink = EntryAppended;
+            if (sink != null && committed != null)
+            {
+                try { sink(committed); }
+                catch
+                {
+                    // The fan-out sink must never break the caller's append path. Swallow — the
+                    // entry is already committed to the ring.
+                }
             }
         }
 
@@ -121,14 +165,16 @@ namespace GodotOpenMcp.Bridge.Runtime.Logging
             Append(new GodotLogEntry(sequence: 0, logType, message, DateTime.UtcNow, stackTrace, source));
         }
 
-        /// <summary>Drop all retained log lines. Returns the number removed. Thread-safe.</summary>
+        /// <summary>Drop all retained log lines. Returns the number removed. Thread-safe. The
+        /// P5.4 fan-out sink (<see cref="EntryAppended"/>) is NOT cleared — only the buffer is.
+        /// Sequence is NOT reset (monotonic across a clear).</summary>
         public int Clear()
         {
             lock (_gate)
             {
                 int removed = _entries.Count;
                 _entries.Clear();
-                // Sequence is NOT reset — a future P5.4 event-stream cursor stays monotonic across a
+                // Sequence is NOT reset — the P5.4 event-stream cursor stays monotonic across a
                 // clear so a consumer can tell "I have seen everything up to N" without ambiguity.
                 return removed;
             }

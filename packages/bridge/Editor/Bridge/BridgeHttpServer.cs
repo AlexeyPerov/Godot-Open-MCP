@@ -3,6 +3,7 @@
 using System;
 using System.Net;
 using System.Net.Sockets;
+using System.Text;
 using System.Threading;
 using GodotOpenMcp.Bridge.Runtime.MainThread;
 
@@ -58,6 +59,16 @@ namespace GodotOpenMcp.Bridge.Editor
         static Thread? _listenerThread;
         static volatile bool _running;
         static int _port;
+
+        /// <summary>
+        /// P5.4 — per-request flag set by the <c>/events</c> SSE handler so the <see cref="HandleRequest"/>
+        /// finally does NOT <see cref="HttpListenerResponse.Close"/> a long-lived stream the moment the
+        /// handler returns. The SSE handler owns its own response lifecycle (it streams for minutes on a
+        /// ThreadPool worker and closes the OutputStream itself). Only ever set on the SSE branch; every
+        /// other handler lets the finally close as usual.
+        /// </summary>
+        [ThreadStatic]
+        static bool _streamingResponse;
 
         /// <summary>The port the listener is bound to, or 0 when stopped.</summary>
         public static int Port => _port;
@@ -278,6 +289,36 @@ namespace GodotOpenMcp.Bridge.Editor
                     return;
                 }
 
+                // P5.4 — event stream. GET /events opens a long-lived SSE connection that drains the
+                // BridgeEventSource ring buffer for one subscriber; GET /events/poll returns the same
+                // drain as a single JSON envelope (the fallback the MCP server's stdio transport
+                // uses). Both are GET-only and behind the same CheckAuth gate as every other route.
+                // The SSE handler takes ownership of the response lifecycle (it streams for minutes)
+                // and signals via _streamingResponse so the HandleRequest finally does NOT Close() it
+                // mid-stream.
+                if (path == "/events")
+                {
+                    if (context.Request.HttpMethod != "GET")
+                    {
+                        BridgeHttpResponse.SendMethodNotAllowed(context, "GET required for /events");
+                        return;
+                    }
+                    _streamingResponse = true;
+                    HandleEventsSse(context);
+                    return;
+                }
+
+                if (path == "/events/poll")
+                {
+                    if (context.Request.HttpMethod != "GET")
+                    {
+                        BridgeHttpResponse.SendMethodNotAllowed(context, "GET required for /events/poll");
+                        return;
+                    }
+                    HandleEventsPoll(context);
+                    return;
+                }
+
                 BridgeHttpResponse.SendNotFound(context, path);
             }
             catch
@@ -298,7 +339,16 @@ namespace GodotOpenMcp.Bridge.Editor
             }
             finally
             {
-                try { context.Response.Close(); } catch { }
+                // P5.4 — the /events SSE handler streams for minutes on a ThreadPool worker and closes
+                // the OutputStream itself. Closing here would abort the stream the moment HandleRequest
+                // returned, so the SSE branch sets _streamingResponse and takes ownership of the
+                // response lifecycle. Every other handler lets the finally close as usual.
+                if (!_streamingResponse)
+                {
+                    try { context.Response.Close(); } catch { }
+                }
+                // Reset for the next request on this worker thread (ThreadStatic reuses the slot).
+                _streamingResponse = false;
             }
         }
 
@@ -348,6 +398,148 @@ namespace GodotOpenMcp.Bridge.Editor
             }
             BridgeHttpResponse.SendJson(context, 200, BridgeJson.BuildPingJson());
         }
+
+    // --- P5.4 — GET /events (SSE) + GET /events/poll (JSON) ---------------------------
+    //
+    // BridgeEventSource is the producer (collector fan-out + editor-state observer); these two
+    // handlers are the drain surface. /events opens a long-lived SSE stream that keeps the
+    // subscriber's cursor and pushes incremental events; /events/poll does one drain and returns a
+    // single JSON envelope (the MCP server's BridgeEventStream uses SSE, but the poll route is the
+    // deterministic, test-friendly fallback).
+    //
+    // Both are GET-only and behind the same CheckAuth gate as every other route (P5.2 — no SSE
+    // exemption). Drain is pure memory: it iterates the ConcurrentQueue ring and never touches Godot
+    // APIs, so it is safe on the ThreadPool worker thread (packages/bridge/AGENTS.md §Transport).
+
+    /// <summary>
+    /// SSE streaming endpoint (P5.4). Subscribes to <see cref="BridgeEventSource"/>, flushes the
+    /// current backlog, then keeps the connection open and pushes incremental events as they arrive.
+    /// Long-lived on a ThreadPool worker thread; the connection closes when the client disconnects,
+    /// the bridge stops, or the SSE timeout (10 min default) elapses.
+    ///
+    /// <para>
+    /// Query params:
+    /// <list type="bullet">
+    ///   <item><c>subscriber</c>=&lt;id&gt; — opaque id so a reconnecting client keeps its cursor and
+    ///       doesn't replay events it already saw. A new id is minted when omitted.</item>
+    ///   <item><c>max_per_poll</c>=&lt;n&gt; — cap events per drain tick (default 100, clamped to
+    ///       [1, 1000]). Bounds burst replay after a reconnect.</item>
+    /// </list>
+    /// </para>
+    ///
+    /// <para>
+    /// Adapted from Unity Open MCP's <c>HandleEventsSse</c> (copy fidelity): same wire shape
+    /// (<c>event:</c> + <c>data:</c> lines + blank-line terminator), same control events
+    /// (<c>ready</c> on connect, <c>missed</c> on ring-gap, <c>close</c> on shutdown/timeout).
+    /// </para>
+    /// </summary>
+    static void HandleEventsSse(HttpListenerContext context)
+    {
+        const int SseTimeoutMs = 10 * 60 * 1000;
+        const int PollIntervalMs = 100;
+
+        var query = context.Request.QueryString;
+        var subscriber = query["subscriber"];
+        var maxPerPollRaw = query["max_per_poll"];
+        int maxPerPoll = 100;
+        if (int.TryParse(maxPerPollRaw, out var parsed) && parsed > 0 && parsed <= 1000)
+            maxPerPoll = parsed;
+
+        if (string.IsNullOrEmpty(subscriber))
+            subscriber = Guid.NewGuid().ToString("N");
+
+        try
+        {
+            context.Response.StatusCode = 200;
+            context.Response.ContentType = "text/event-stream; charset=utf-8";
+            context.Response.SendChunked = true;
+
+            // Initial hello so the client immediately knows the subscriber id and that the stream is
+            // live (without waiting for the first event). Carries the subscriber id so a client that
+            // omitted it can persist it for reconnect.
+            WriteSseEvent(context, "ready", "{\"subscriber\":\""
+                + BridgeJson.EscapeStringContent(subscriber) + "\"}");
+
+            var deadline = DateTime.UtcNow.AddMilliseconds(SseTimeoutMs);
+            while (_running && BridgeSession.Connected && DateTime.UtcNow < deadline)
+            {
+                var drain = BridgeEventSource.Drain(subscriber, maxPerPoll);
+                if (drain.Events != null)
+                {
+                    foreach (var evt in drain.Events)
+                        WriteSseEvent(context, evt.Type, BridgeEventSource.RenderEvent(evt));
+                }
+                if (drain.Missed > 0)
+                {
+                    // Surface the gap as its own control event so the agent sees the loss rather than
+                    // a silent hole in the sequence.
+                    WriteSseEvent(context, "missed", "{\"missed\":" + drain.Missed + "}");
+                }
+                // If we flushed anything, drain again immediately; otherwise pace the loop so we
+                // don't spin the worker thread.
+                if (drain.Events == null || drain.Events.Count == 0)
+                    Thread.Sleep(PollIntervalMs);
+                try { context.Response.OutputStream.Flush(); } catch { break; }
+            }
+
+            try { WriteSseEvent(context, "close", "{\"reason\":\"timeout_or_shutdown\"}"); } catch { }
+        }
+        catch
+        {
+            // Client disconnect or write failure — exit silently. The finally closes the response.
+        }
+        finally
+        {
+            try { context.Response.Close(); } catch { }
+        }
+    }
+
+    /// <summary>
+    /// Write one SSE block to the response stream. Frame: <c>event: &lt;name&gt;\n</c> then one
+    /// <c>data: &lt;line&gt;\n</c> per <c>\n</c>-split data line, then a trailing <c>\n</c> (the
+    /// blank-line terminator that delimits SSE events). Multi-line data (e.g. a log stack) is split
+    /// across multiple <c>data:</c> prefixes so the SSE parser reassembles it with embedded
+    /// newlines.
+    /// </summary>
+    static void WriteSseEvent(HttpListenerContext context, string eventName, string data)
+    {
+        var sb = new StringBuilder(64 + data.Length);
+        sb.Append("event: ").Append(eventName).Append('\n');
+        // SSE data lines can't contain raw newlines; split multi-line data across multiple data:
+        // prefixes.
+        var lines = data.Split('\n');
+        foreach (var line in lines)
+            sb.Append("data: ").Append(line).Append('\n');
+        sb.Append('\n');
+        var bytes = Encoding.UTF8.GetBytes(sb.ToString());
+        context.Response.OutputStream.Write(bytes, 0, bytes.Length);
+    }
+
+    /// <summary>
+    /// Non-SSE drain (P5.4). Returns the events buffered since the caller's last poll as a single
+    /// JSON envelope. The MCP server uses the SSE surface (its BridgeEventStream holds a long-lived
+    /// subscription); this poll route is the deterministic, test-friendly fallback and a debugging
+    /// surface for curl.
+    ///
+    /// <para>
+    /// Query params: <c>subscriber</c> (optional — minted when omitted), <c>max_events</c> (optional,
+    /// default 100, clamped to [1, 1000]).
+    /// </para>
+    /// </summary>
+    static void HandleEventsPoll(HttpListenerContext context)
+    {
+        var query = context.Request.QueryString;
+        var subscriber = query["subscriber"];
+        if (string.IsNullOrEmpty(subscriber))
+            subscriber = Guid.NewGuid().ToString("N");
+
+        int maxEvents = 100;
+        if (int.TryParse(query["max_events"], out var parsed) && parsed > 0 && parsed <= 1000)
+            maxEvents = parsed;
+
+        var drain = BridgeEventSource.Drain(subscriber, maxEvents);
+        BridgeHttpResponse.SendJson(context, 200, BridgeEventSource.RenderDrain(drain));
+    }
 
     // --- POST /tools/{name} dispatch (P2.1 + P3.5) -----------------------------------
     //

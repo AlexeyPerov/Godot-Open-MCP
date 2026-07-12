@@ -12,7 +12,7 @@ Tool names follow the `godot_open_mcp_*` convention (ADR-003).
 
 | Family | Tools | Mutating | Notes |
 |---|---|---|---|
-| core | `ping`, `validate_edit`, `checkpoint_create`, `delta`, `apply_fix`, `capabilities`, `bridge_status` | `apply_fix` only | Always visible in `ListTools`. |
+| core | `ping`, `validate_edit`, `checkpoint_create`, `delta`, `apply_fix`, `capabilities`, `bridge_status`, `pull_events` | `apply_fix` only | Always visible in `ListTools`. |
 | node | `node_find`, `node_create`, `node_modify`, `node_set_parent`, `node_duplicate`, `node_delete` | create/modify/set-parent/duplicate/delete | Scene-tree operations. |
 | scene | `scene_open`, `scene_save`, `scene_list_opened`, `scene_get_data`, `scene_create` | open/save/create | Scene lifecycle + read. |
 | resource | `resource_find`, `resource_get_data`, `resource_create`, `resource_modify`, `resource_move`, `resource_delete` | create/modify/move/delete | `.tres`/`.res` discovery + bounded property inspection (read-only) + gated create/modify (P4.2) + file lifecycle move/delete (P4.3). |
@@ -28,10 +28,13 @@ Tool names follow the `godot_open_mcp_*` convention (ADR-003).
 | **live** | The CallTool handler POSTs to the bridge; the bridge handler runs on the editor main thread. | Most tools (node, scene, gate meta-tools, `apply_fix`). |
 | **local** | The CallTool handler resolves the response in-process — no bridge hop. | `godot_open_mcp_capabilities`. |
 | **local/live hybrid** | The CallTool handler composes a response in-process but runs one `/ping` probe through the live client (auth header + 503 fallback match `ping`). No `POST /tools/{name}` endpoint on the bridge. | `godot_open_mcp_bridge_status`. |
+| **local-drains-live-stream** | The CallTool handler drains a per-process SSE subscription the MCP server keeps open to the bridge's `GET /events`. No `POST /tools/{name}` endpoint on the bridge. | `godot_open_mcp_pull_events`. |
 
 `capabilities` is the one local-only tool: its response is built in-process from `ALL_TOOLS` + the rule/fix catalog via `buildCapabilities`. It never POSTs to the bridge (mirroring Unity Open MCP's tool-router `routeCapabilities`).
 
 `bridge_status` is a local/live hybrid: it reads the instance lock from disk, classifies it (`classifyInstance`), runs one `/ping` probe via the live client, and derives a coarse `status` token server-side. The bridge has no `POST /tools/bridge_status` endpoint — the CallTool handler special-cases the name and calls `LiveClient.routeBridgeStatus` directly.
+
+`pull_events` is a local-drains-live-stream tool: the MCP server holds one `BridgeEventStream` (a single SSE reader against `GET /events`) per process, and the CallTool handler drains its buffered queue via `pull()`. The bridge has no `POST /tools/pull_events` endpoint — the handler special-cases the name. Read-only, gate-free. When the bridge is offline the tool returns `connected:false` + `lastError` rather than throwing.
 
 ## `godot_open_mcp_capabilities`
 
@@ -153,6 +156,44 @@ This is **not** a general agent health check — use `godot_open_mcp_ping` for a
 | any | reachable + connected | any | `running` |
 | any | unreachable | true | `unreachable` (transient reload window) |
 | any | unreachable | false | `stopped` |
+
+## `godot_open_mcp_pull_events`
+
+Drain incremental bridge events (console logs + editor-state transitions) since the previous call. **Local-drains-live-stream** route — read-only, gate-free, live (requires a connected bridge). The MCP server holds one `BridgeEventStream` (a single SSE reader against the bridge's `GET /events`) per process; the first `pull_events` call opens the subscription, later calls return only new events buffered since the previous drain. Use this after mutations to stream console output without polling `/ping` or re-reading the full console (`console_get_logs`).
+
+Why poll instead of push? The MCP server runs over a stdio transport and has no native way to forward bridge SSE → MCP notifications. Polling per call keeps the model in the loop and lets an agent decide when to drain.
+
+**Input:** `max_events` (integer, default 50, clamped to [1, 1000]), `subscriber` (optional string — defaults to a server-scoped id; pass an explicit id to resume a cursor across MCP server restarts).
+
+**Result:**
+
+```json
+{
+  "subscriberId": "<server-scoped-or-caller-id>",
+  "events": [
+    { "seq": 1, "ts": "2026-07-12T00:00:01.234Z", "type": "log", "logType": "warning", "message": "..." },
+    { "seq": 2, "ts": "2026-07-12T00:00:02.000Z", "type": "editor_state", "state": "playing", "isCompiling": false, "isPlaying": true }
+  ],
+  "dropped": 0,
+  "connected": true,
+  "started": false,
+  "lastError": null
+}
+```
+
+**Field notes:**
+
+- `subscriberId` — the id used across reconnects; the SSE reader keeps its cursor on the bridge across a 10-minute SSE timeout or a Godot reload.
+- `events[].seq` — monotonic sequence. For `log` events it matches the `console_get_logs` sequence (single fan-in from the P4.7 collector), so the two surfaces share a cursor vocabulary. `editor_state` events use the bridge's own sequence space.
+- `events[].type` — `log` (carries `logType`/`message`/optional `stack`), `editor_state` (carries `state`/`isCompiling`/`isPlaying`), plus control events `ready` / `missed` / `close` from the SSE wire.
+- `dropped` — events evicted from the client-side queue (capacity 500) before this pull. Non-zero only under sustained burst.
+- `connected` — whether the SSE reader is currently connected to the bridge.
+- `started` — `true` only on the call that opened the subscription; `false` on subsequent calls.
+- `lastError` — the last reconnect failure reason; non-null only when `connected` is false.
+
+**Never throws on an offline bridge.** When the bridge is unreachable the tool returns `connected:false` + `lastError` (and `events:[]`) with `isError:false` so an agent can branch on the connection state. The reader reconnects automatically (2 s backoff) once the bridge is back.
+
+**Capture scope.** `log` events come from the P4.7 collector — the addon's captured activity (bridge lifecycle, tool-handler errors, routed game/script output when a supported hook is active), NOT the entire Godot editor Output panel. `editor_state` events fire at authoritative observed transitions (the bridge-driven play start/stop settle); a background observer for user-clicked play arrives in a later phase.
 
 ## `godot_open_mcp_resource_find`
 

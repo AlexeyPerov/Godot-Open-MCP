@@ -26,6 +26,46 @@ The handler runs on the Godot editor main thread via `MainThreadDispatcher`. Eve
 - **400** — the request body could not be read. Body: `{ "error": { "code": "invalid_request", "message": "..." } }`.
 - **500** — unhandled bridge exception. Body: `{ "error": { "code": "bridge_internal_error", "message": "Unhandled bridge exception" } }`.
 
+### `GET /events`
+
+Long-lived SSE event stream (P5.4). Subscribes to the `BridgeEventSource` ring buffer, flushes the current backlog, then keeps the connection open and pushes incremental events as they arrive. The MCP server holds one such subscription per process (`BridgeEventStream`) and drains it through `godot_open_mcp_pull_events`; this endpoint is also a debugging surface for `curl -N`.
+
+- **200** — `text/event-stream` (chunked). Frames: `event: <name>\ndata: <json>\n\n`. Wire-event names: `ready` (initial hello, carries `subscriber`), `log`, `editor_state`, `missed` (ring-gap marker), `close` (shutdown/timeout).
+- **405** — any method other than `GET`.
+- **401** — when `authMode:"required"` and the bearer token is missing/invalid (see §Auth).
+
+Query params:
+
+- `subscriber=<id>` — opaque id so a reconnecting client keeps its cursor and doesn't replay events it already saw. A new id is minted when omitted.
+- `max_per_poll=<n>` — cap events per drain tick (default 100, clamped to [1, 1000]). Bounds burst replay after a reconnect.
+
+The connection closes after the 10-minute SSE timeout or when the bridge stops (a final `close` event is emitted). Behind the same `CheckAuth` gate as every other route — no exemption.
+
+### `GET /events/poll`
+
+Non-SSE drain (P5.4). Returns the events buffered since the caller's last poll as a single JSON envelope. Same drain semantics as `/events` but a one-shot response (no long-lived connection) — the deterministic, test-friendly fallback and a `curl`-friendly debugging surface.
+
+- **200** — JSON envelope (see below).
+- **405** — any method other than `GET`.
+
+Query params: `subscriber` (optional — minted when omitted), `max_events` (optional, default 100, clamped to [1, 1000]).
+
+Envelope shape:
+
+```json
+{
+  "subscriberId": "<id>",
+  "events": [ { "seq": 1, "ts": "...", "type": "log", "logType": "warning", "message": "..." } ],
+  "count": 1,
+  "missed": 0,
+  "totalEmitted": 1
+}
+```
+
+`missed` reports events evicted from the ring before the subscriber could read them (ring capacity 1024). `totalEmitted` is the high-water mark of every event ever emitted. Events are oldest-first within a drain batch.
+
+**Event types.** `log` events carry `seq`, `ts`, `type`, `logType` (`log`/`warning`/`error`), `message`, optional `stack`; their `seq` matches the `console_get_logs` sequence so the two surfaces share a cursor vocabulary (single fan-in from the P4.7 collector). `editor_state` events carry `state` (the `BridgeInstanceLock` vocabulary: `idle`/`compiling`/`playing`/…), `isCompiling`, `isPlaying`.
+
 ## Canonical envelope (P2.1)
 
 Every tool dispatch outcome (HTTP 200) is wrapped into one of two envelope shapes so the MCP-side client parses a single contract:
@@ -206,6 +246,8 @@ TLS termination, SIEM audit logging, and request deny-lists are not in scope for
 - Bind address decision (loopback always; remote requires `required`): `packages/bridge/Editor/Bridge/BridgeBindAddress.cs`
 - Token mint + lock serialization (`authToken` field): `packages/bridge/Editor/Bridge/BridgeInstanceLock.cs`
 - Response writers (incl. `SendUnauthorized`): `packages/bridge/Editor/Bridge/BridgeHttpResponse.cs`
+- Event ring buffer + subscriber cursors (`/events` + `/events/poll` drain): `packages/bridge/Editor/Bridge/BridgeEventSource.cs`
+- Log fan-in (collector → event source sink): `packages/bridge/Runtime/Logging/GodotLogCollector.cs`
 - Envelope builders: `packages/bridge/Editor/Bridge/BridgeEnvelope.cs`
 - Request-body parsing: `packages/bridge/Editor/Bridge/BridgeRequestBody.cs`
 - Gate policy (checkpoint → mutate → validate → delta): `packages/bridge/Editor/Gate/GatePolicy.cs`
