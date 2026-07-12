@@ -48,6 +48,8 @@ import { consoleClearLogs } from "./console-clear-logs.js";
 import { screenshotViewport } from "./screenshot-viewport.js";
 import { screenshotCamera } from "./screenshot-camera.js";
 import { screenshotIsolated } from "./screenshot-isolated.js";
+import { reflectionMethodFind } from "./reflection-method-find.js";
+import { reflectionMethodCall } from "./reflection-method-call.js";
 
 /** Ordered list of every tool exposed over stdio MCP. */
 export const ALL_TOOLS: Tool[] = [
@@ -130,4 +132,14 @@ export const ALL_TOOLS: Tool[] = [
   screenshotViewport,
   screenshotCamera,
   screenshotIsolated,
+  // P5.1 — reflection tools: reflection_method_find (read-only member discovery across loaded
+  // Godot/.NET assemblies) and reflection_method_call (gated method invoke). Find is gate-free and
+  // returns bounded, structured member entries (returnType/parameters[]/isStatic/isGeneric/
+  // genericParameters[] for methods) so an agent can plan an invoke without hallucinating signatures;
+  // call resolves a method by type+name (overload + generic disambiguation), targets an instance via
+  // node_path from the edited scene (Godot-native; replaces Unity's object_id-first targeting), and
+  // serializes the return value with depth/cycle guards. Godot.Object subclasses require an explicit
+  // node_path — Activator is used only for pure POCOs.
+  reflectionMethodFind,
+  reflectionMethodCall,
 ];

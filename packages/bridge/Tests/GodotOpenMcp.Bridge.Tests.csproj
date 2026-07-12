@@ -194,6 +194,14 @@
     <Compile Include="..\Runtime\Screenshot\ScreenshotMath.cs" Link="Source\Screenshot\ScreenshotMath.cs" />
     <Compile Include="..\Editor\Screenshot\ScreenshotBodies.cs" Link="Source\Screenshot\ScreenshotBodies.cs" />
     <Compile Include="..\Editor\Screenshot\ScreenshotResult.cs" Link="Source\Screenshot\ScreenshotResult.cs" />
+    <!-- P5.1 — reflection tools. The pure-managed body parsers (ReflectionMethodFindBody +
+         ReflectionMethodCallBody) are linked for unit testing (same hand-rolled scalar + array
+         extraction style as the other *Body parsers; ReflectionMethodCallBody additionally parses
+         the mixed-type args array into raw CLR values). The editor-only handler (ReflectionTools.Find
+         / Call — AppDomain/EditorInterface/Godot.Object-coupled) is #if TOOLS and verified via the
+         headless Godot smoke / gate integration tests. -->
+    <Compile Include="..\Editor\Reflection\ReflectionMethodFindBody.cs" Link="Source\Reflection\ReflectionMethodFindBody.cs" />
+    <Compile Include="..\Editor\Reflection\ReflectionMethodCallBody.cs" Link="Source\Reflection\ReflectionMethodCallBody.cs" />
     <!-- P3.5 — gate on mutators. The gate types (GateMode/GateOutcome/DeltaData/GateDispatchResult/
          GatePolicy/GateDefaultPolicy) and the VerifyGateAdapter are pure-managed for the parts the unit
          tests exercise (decision matrix, next-step hints, delta math, gate-mode parsing). GatePolicy

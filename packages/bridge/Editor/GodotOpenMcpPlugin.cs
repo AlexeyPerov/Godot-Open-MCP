@@ -142,6 +142,14 @@ namespace GodotOpenMcp.Bridge.Editor
                 // refreshes the handler references after a domain reload.
                 ScreenshotTools.RegisterScreenshotTools();
 
+                // P5.1 — reflection tools: godot_open_mcp_reflection_method_find (read-only member
+                // discovery across loaded assemblies) and godot_open_mcp_reflection_method_call (gated
+                // method invoke with node_path instance targeting). Registered alongside the other
+                // families so an agent can discover + invoke C# members against the actually-installed
+                // Godot/.NET assemblies. Idempotent re-register refreshes the handler references after a
+                // domain reload.
+                ReflectionTools.RegisterReflectionTools();
+
                 // Start the HTTP listener serving /ping and POST /tools/{name}. Stays down
                 // (and connected:false) if the bind fails — the editor remains usable, the
                 // bridge is just unreachable. The listener thread is the only off-thread path;

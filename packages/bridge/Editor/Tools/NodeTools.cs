@@ -732,7 +732,13 @@ namespace GodotOpenMcp.Bridge.Editor
         /// <see cref="NodePathNormalizer"/> vocabulary as the find/create handlers. Returns null when
         /// the path does not resolve (the caller surfaces this as a warning, not a hard error).
         /// </summary>
-        static Node? ResolvePath(Node editedRoot, string path)
+        /// <summary>
+        /// Resolve a scene-tree path (relative to the edited scene root, <c>/root/...</c>-absolute,
+        /// or <c>.</c> for the root) to a live <see cref="Node"/>. Returns null when the path does not
+        /// resolve. Internal so the P5.1 reflection family can reuse the same targeting helper for
+        /// <c>node_path</c> instance targets (<c>ReflectionTools.Call</c>).
+        /// </summary>
+        internal static Node? ResolvePath(Node editedRoot, string path)
         {
             var normalized = NodePathNormalizer.Normalize(path, editedRoot.Name.ToString());
             if (string.IsNullOrEmpty(normalized) || normalized == ".")
