@@ -1,0 +1,225 @@
+// Tests for the CLI dispatcher (src/cli.ts).
+//
+// runCli writes to process.stdout / process.stderr and returns an exit code
+// without calling process.exit — so tests can capture the streams and assert
+// on the outcome. We swap process.stdout/stderr for an in-memory fake during
+// each run and restore them afterwards.
+//
+// Built + run via the project test config (see package.json `test`):
+//   tsc -p tsconfig.test.json  &&  node --test 'dist-test/**/*.test.js'
+
+import { test } from "node:test";
+import assert from "node:assert/strict";
+
+import { runCli, writeAndDrain, type DrainableWritable } from "./cli.js";
+import { helpText, versionText, unknownCommandResult } from "./commands.js";
+
+// ---------------------------------------------------------------------------
+// fake stream helpers
+// ---------------------------------------------------------------------------
+
+function makeFakeStream(): DrainableWritable & { chunks: string[] } {
+  const chunks: string[] = [];
+  // A single write impl that accepts the optional callback (the overload
+  // union collapses to this signature at runtime).
+  const stream: DrainableWritable & { chunks: string[] } = {
+    chunks,
+    write(chunk: string, cb?: (err?: Error | null) => void) {
+      chunks.push(chunk);
+      cb?.();
+      return true;
+    },
+    once(_event: "drain", _listener: () => void) {
+      return undefined;
+    },
+  };
+  return stream;
+}
+
+interface Captured {
+  stdout: string;
+  stderr: string;
+  outcome: { handled: boolean; exitCode: number };
+}
+
+async function runWithCaptured(
+  argv: string[],
+  opts: { version?: string; json?: boolean } = {},
+): Promise<Captured> {
+  const fakeOut = makeFakeStream();
+  const fakeErr = makeFakeStream();
+  const realOut = process.stdout;
+  const realErr = process.stderr;
+  // Replace the write streams. process.stdout/stderr are read-only getters on
+  // Node, so assign via Object.defineProperty (works under --test).
+  Object.defineProperty(process, "stdout", { value: fakeOut, configurable: true });
+  Object.defineProperty(process, "stderr", { value: fakeErr, configurable: true });
+  try {
+    const outcome = await runCli({
+      version: opts.version ?? "0.0.1",
+      binName: "godot-open-mcp-cli",
+      argv,
+    });
+    return {
+      stdout: fakeOut.chunks.join(""),
+      stderr: fakeErr.chunks.join(""),
+      outcome,
+    };
+  } finally {
+    Object.defineProperty(process, "stdout", { value: realOut, configurable: true });
+    Object.defineProperty(process, "stderr", { value: realErr, configurable: true });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// --help / -h
+// ---------------------------------------------------------------------------
+
+test("runCli: --help prints usage to stdout and exits 0", async () => {
+  const c = await runWithCaptured(["--help"]);
+  assert.equal(c.outcome.handled, true);
+  assert.equal(c.outcome.exitCode, 0);
+  assert.match(c.stdout, /Usage: godot-open-mcp-cli/);
+  assert.equal(c.stderr, "");
+});
+
+test("runCli: -h is an alias for --help", async () => {
+  const c = await runWithCaptured(["-h"]);
+  assert.equal(c.outcome.exitCode, 0);
+  assert.match(c.stdout, /Usage: godot-open-mcp-cli/);
+});
+
+test("runCli: bare invocation (no args) prints help and exits 0", async () => {
+  // No MCP-server fallthrough — the Godot CLI prints help when invoked bare.
+  const c = await runWithCaptured([]);
+  assert.equal(c.outcome.handled, true);
+  assert.equal(c.outcome.exitCode, 0);
+  assert.match(c.stdout, /Usage: godot-open-mcp-cli/);
+});
+
+// ---------------------------------------------------------------------------
+// --version / -V
+// ---------------------------------------------------------------------------
+
+test("runCli: --version prints version to stdout and exits 0", async () => {
+  const c = await runWithCaptured(["--version"], { version: "1.2.3" });
+  assert.equal(c.outcome.handled, true);
+  assert.equal(c.outcome.exitCode, 0);
+  assert.match(c.stdout, /godot-open-mcp-cli 1\.2\.3/);
+  assert.equal(c.stderr, "");
+});
+
+test("runCli: -V is an alias for --version", async () => {
+  const c = await runWithCaptured(["-V"], { version: "0.4.0" });
+  assert.equal(c.outcome.exitCode, 0);
+  assert.match(c.stdout, /0\.4\.0/);
+});
+
+// ---------------------------------------------------------------------------
+// unknown command
+// ---------------------------------------------------------------------------
+
+test("runCli: unknown command exits non-zero with structured error", async () => {
+  const c = await runWithCaptured(["bogus"]);
+  assert.equal(c.outcome.handled, true);
+  assert.notEqual(c.outcome.exitCode, 0);
+  assert.match(c.stderr, /Unknown command 'bogus'/);
+});
+
+test("runCli: unknown command with --json emits JSON on stdout", async () => {
+  const c = await runWithCaptured(["--json", "bogus"]);
+  assert.notEqual(c.outcome.exitCode, 0);
+  // --json routes the structured payload to stdout.
+  const parsed = JSON.parse(c.stdout) as {
+    error: { code: string; message: string };
+  };
+  assert.equal(parsed.error.code, "parse_error");
+  assert.match(parsed.error.message, /Unknown command 'bogus'/);
+});
+
+// ---------------------------------------------------------------------------
+// parse error (bad flag value)
+// ---------------------------------------------------------------------------
+
+test("runCli: --port with non-numeric value exits non-zero", async () => {
+  // The bad flag value errors before any --help short-circuit fires.
+  const c = await runWithCaptured(["--port", "abc"]);
+  assert.notEqual(c.outcome.exitCode, 0);
+  assert.match(c.stderr, /--port/);
+});
+
+test("runCli: --port with non-numeric value + --json emits structured error", async () => {
+  const c = await runWithCaptured(["--json", "--port", "abc"]);
+  assert.notEqual(c.outcome.exitCode, 0);
+  const parsed = JSON.parse(c.stdout) as {
+    error: { code: string };
+  };
+  assert.equal(parsed.error.code, "parse_error");
+});
+
+test("runCli: unknown flag exits non-zero", async () => {
+  const c = await runWithCaptured(["--nonsense"]);
+  assert.notEqual(c.outcome.exitCode, 0);
+  assert.match(c.stderr, /Unknown option/);
+});
+
+// ---------------------------------------------------------------------------
+// handled is always true (no MCP fallthrough)
+// ---------------------------------------------------------------------------
+
+test("runCli: every invocation is handled (no stdio fallthrough)", async () => {
+  for (const argv of [[], ["--help"], ["--version"], ["bogus"], ["--port", "x"]]) {
+    const c = await runWithCaptured(argv);
+    assert.equal(c.outcome.handled, true, `argv=${JSON.stringify(argv)}`);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// writeAndDrain
+// ---------------------------------------------------------------------------
+
+test("writeAndDrain: resolves after the callback fires", async () => {
+  const fake = makeFakeStream();
+  await writeAndDrain(fake, "hello");
+  assert.deepEqual(fake.chunks, ["hello"]);
+});
+
+test("writeAndDrain: rejects on write error", async () => {
+  const failing: DrainableWritable = {
+    write(_chunk: string, cb?: (err?: Error | null) => void) {
+      cb?.(new Error("broken pipe"));
+      return false;
+    },
+    once() {
+      return undefined;
+    },
+  };
+  await assert.rejects(writeAndDrain(failing, "x"), /broken pipe/);
+});
+
+// ---------------------------------------------------------------------------
+// helpText / versionText / unknownCommandResult
+// ---------------------------------------------------------------------------
+
+test("helpText: mentions key sections and options", () => {
+  const text = helpText("godot-open-mcp-cli");
+  for (const opt of ["--json", "--project", "--port", "--timeout-ms", "--interval-ms"]) {
+    assert.ok(text.includes(opt), `help missing ${opt}`);
+  }
+  assert.ok(text.includes("GODOT_PROJECT_PATH"));
+  assert.ok(text.includes("GODOT_OPEN_MCP_BRIDGE_PORT"));
+  assert.ok(text.includes("Exit codes"));
+});
+
+test("versionText: prints package + version", () => {
+  assert.equal(versionText("0.1.0"), "godot-open-mcp-cli 0.1.0");
+});
+
+test("unknownCommandResult: structured error shape", () => {
+  const r = unknownCommandResult("bogus", [], false);
+  assert.equal(r.exitCode, 1);
+  assert.equal(r.errorLabel, "unknown_command");
+  const json = r.json as { error: { code: string; message: string } };
+  assert.equal(json.error.code, "unknown_command");
+  assert.match(json.error.message, /Unknown command 'bogus'/);
+});

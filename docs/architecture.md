@@ -48,6 +48,16 @@ flowchart LR
 
 Godot has no headless editor batch mode — there is no `batch` route.
 
+## CLI package (`cli/`)
+
+`cli/` is a separate TypeScript ESM package (`godot-open-mcp-cli`) with its own bin. It is the developer-facing entry point for install, setup, open, wait-for-ready, status, and configure — wrapping the MCP server and bridge for scripting and CI.
+
+**Package boundary:** the CLI is intentionally separate from `mcp-server/`. Unlike Unity Open MCP (where a single bin falls through to a stdio MCP server when argv has no recognized command), the Godot CLI never starts an MCP server. Every invocation is a CLI command (or `--help` / `--version`), and the process always exits with the dispatcher's exit code. The MCP server lives in `mcp-server/` and has its own bin (`godot-open-mcp`).
+
+**Exit codes:** `0` success, `1` errors (unknown command, bad args, command failed), `3` timeout (bridge unreachable or call timed out).
+
+**Version sync:** `cli/package.json` is wired into `scripts/sync-version.mjs` alongside the MCP server and addon packages; the CLI reads its version at runtime via `readPackageVersion()` so `--version` never lies after a bump.
+
 ## Godot-specific constraints
 
 - Single C# assembly — use `#if TOOLS` for editor-only code. Runtime must not leak editor APIs.

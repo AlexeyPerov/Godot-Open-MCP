@@ -1,0 +1,9 @@
+node_modules/
+dist/
+dist-test/
+*.tsbuildinfo
+
+# The root .gitignore excludes `bin/` for .NET build output. The CLI ships a
+# bin/ shim that MUST be tracked — un-ignore it here.
+!bin/
+!bin/**

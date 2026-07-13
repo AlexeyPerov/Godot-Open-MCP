@@ -1,0 +1,104 @@
+// CLI command result + help/version text.
+//
+// Adapted from Unity Open MCP's `mcp-server/src/cli/commands.ts`. Each command
+// (once implemented) is a plain async function returning a CliCommandResult;
+// the dispatcher (cli.ts) owns stdout/stderr/exit-code so commands stay pure
+// and unit-testable.
+//
+// P6.1 ships only the help/version text and the CliCommandResult contract — no
+// command handlers yet. Later P6 plans append handlers and register their
+// names in args.ts KNOWN_COMMANDS.
+
+import { EXIT } from "./exit-codes.js";
+import {
+  PROJECT_PATH_ENV_VAR,
+  PORT_OVERRIDE_ENV_VAR,
+  DEFAULT_BIN_NAME,
+} from "./env.js";
+
+export interface CliCommandResult {
+  /** Process exit code. 0 = success, non-zero = failure. */
+  exitCode: number;
+  /** JSON-serializable payload. Always populated — `--json` prints it verbatim. */
+  json: unknown;
+  /** Human-readable multi-line summary; printed when --json is NOT set. */
+  human: string;
+  /** Optional structured error label (e.g. "unknown_command") surfaced in JSON. */
+  errorLabel?: string;
+}
+
+/**
+ * Build an unknown-command CliCommandResult. Centralized so the dispatcher and
+ * the parser agree on the JSON shape.
+ */
+export function unknownCommandResult(
+  command: string,
+  known: readonly string[],
+  json: boolean,
+): CliCommandResult {
+  const available =
+    known.length > 0 ? known.join(", ") : "(none yet — see --help)";
+  const payload = {
+    command: null,
+    error: {
+      code: "unknown_command",
+      message: `Unknown command '${command}'.`,
+      available: known,
+    },
+  };
+  return {
+    exitCode: EXIT.ERRORS,
+    json: payload,
+    human:
+      `Unknown command '${command}'.\n` +
+      `Available commands: ${available}\n` +
+      (json ? "" : `Run '${DEFAULT_BIN_NAME} --help' for usage.\n`),
+    errorLabel: "unknown_command",
+  };
+}
+
+export function helpText(binName: string): string {
+  return [
+    `Usage: ${binName} <command> [options]`,
+    "",
+    "Command-line tooling for Godot Open MCP — install the addon, configure",
+    "MCP clients, launch the editor, and probe bridge readiness.",
+    "",
+    "Commands:",
+    "  --help, -h                    Show this help.",
+    "  --version, -V                 Print the package version.",
+    "",
+    "  install-plugin [path]         Install the Godot Open MCP addon into a project.   (coming soon)",
+    "  setup-mcp <agent-id> [path]   Configure an MCP client (Cursor, Claude, …).       (coming soon)",
+    "  open [path]                   Launch the Godot editor for a project.             (coming soon)",
+    "  wait-for-ready [path]         Poll until the bridge is ready; exit 0/non-zero.   (coming soon)",
+    "  status [path]                 Show resolved bridge port, instance lock, readiness. (coming soon)",
+    "  configure [path]              Read/write Godot Open MCP project settings.         (coming soon)",
+    "",
+    "Exit codes:",
+    "  0  success        command completed.",
+    "  1  errors         unknown command, bad arguments, or command failed.",
+    "  3  timeout        the bridge never became reachable, or a call timed out.",
+    "",
+    "Options:",
+    "  --json                        Emit JSON instead of human-readable output (all commands).",
+    `  --project <path>, -P <path>   Godot project path (default: ${PROJECT_PATH_ENV_VAR}).`,
+    `  --port <n>, -p <n>            Bridge port override (default: ${PORT_OVERRIDE_ENV_VAR}).`,
+    "  --timeout-ms <n>              wait-for-ready overall timeout in ms.",
+    "  --interval-ms <n>             wait-for-ready poll interval in ms.",
+    "",
+    "Environment:",
+    `  ${PROJECT_PATH_ENV_VAR.padEnd(30)}Project root the bridge / MCP server operate on.`,
+    `  ${PORT_OVERRIDE_ENV_VAR.padEnd(30)}Optional bridge port override.`,
+    "",
+    "Examples:",
+    `  ${binName} --help`,
+    `  ${binName} --version`,
+    `  ${binName} install-plugin --json   (once implemented)`,
+    `  ${binName} wait-for-ready --timeout-ms 30000   (once implemented)`,
+  ].join("\n");
+}
+
+export function versionText(version: string): string {
+  return `godot-open-mcp-cli ${version}`;
+}

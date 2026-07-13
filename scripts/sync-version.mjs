@@ -15,6 +15,8 @@
 //   - packages/bridge/package.json
 //   - packages/verify/package.json
 //   - packages/bridge/Editor/Bridge/BridgeSession.cs (BridgeVersion constant)
+//   - cli/package.json (godot-open-mcp-cli; reads version at runtime via
+//     readPackageVersion, so a drift here would make `--version` lie)
 //
 // Usage:
 //   node scripts/sync-version.mjs                # rewrite all trio targets from version.json
@@ -59,6 +61,12 @@ const TRIO_TARGETS = [
     file: "packages/verify/package.json",
     kind: "json",
     description: "verify Godot addon package.json",
+    replace: (b, v) => setJsonVersion(b, v),
+  },
+  {
+    file: "cli/package.json",
+    kind: "json",
+    description: "godot-open-mcp-cli npm package.json",
     replace: (b, v) => setJsonVersion(b, v),
   },
   {
