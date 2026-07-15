@@ -50,7 +50,7 @@ Godot has no headless editor batch mode — there is no `batch` route.
 
 ## CLI package (`cli/`)
 
-`cli/` is a separate TypeScript ESM package (`godot-open-mcp-cli`) with its own bin. It is the developer-facing entry point for install, setup, open, wait-for-ready, status, and configure — wrapping the MCP server and bridge for scripting and CI.
+`cli/` is a separate TypeScript ESM package (`godot-open-mcp-cli`) with its own bin. It is the developer-facing entry point for install, setup-mcp, open, wait-for-ready, ping, status, and configure — wrapping the MCP server and bridge for scripting and CI.
 
 **Package boundary:** the CLI is intentionally separate from `mcp-server/`. Unlike Unity Open MCP (where a single bin falls through to a stdio MCP server when argv has no recognized command), the Godot CLI never starts an MCP server. Every invocation is a CLI command (or `--help` / `--version`), and the process always exits with the dispatcher's exit code. The MCP server lives in `mcp-server/` and has its own bin (`godot-open-mcp`).
 
@@ -85,6 +85,31 @@ Godot has no headless editor batch mode — there is no `batch` route.
 **Spawn descriptor:** `npx -y godot-open-mcp@<version>` by default (version pinned from the CLI's own package version); `--use-local` switches to `node <monorepo>/mcp-server/dist/index.js` for contributors / CI running from a checkout. `--config-path <file>` overrides the agent's default location; `--list` prints the registry and exits 0.
 
 **Output:** human-readable summary by default; `--json` emits `{ command, changed, agentId, configPath, serverName, transport:"stdio", stdio:{command,args,env}, warnings }`. Exit `0` on success (including `changed: false`), `1` on failure (`unknown_agent`, `not_godot_project`, `relative_project_path`, `config_write_failed`, `invalid_existing_config`).
+
+### `open` + `wait-for-ready` + `ping` — the developer launch loop
+
+The CLI delivers a one-command developer loop from "project on disk" to "bridge accepting tools". Three commands compose it:
+
+```
+godot-open-mcp-cli install-plugin ./MyGame --source ../Godot-Open-MCP/packages/bridge
+godot-open-mcp-cli setup-mcp cursor ./MyGame --use-local
+godot-open-mcp-cli open ./MyGame --wait
+# bridge ready; Cursor can call godot_open_mcp_ping
+```
+
+**`open [path] [--editor-path <bin>] [--no-build] [--build-configuration <cfg>] [--wait] [--json]`** launches the Godot editor on a project. Flow: validate `project.godot` → optional pre-open `dotnet build` (skipped for GDScript-only projects or with `--no-build`; a failed build aborts before launch so the editor never hits the disable-addon failure) → resolve the editor binary → spawn `<godot> --editor --path <project>` detached + unref'd so the CLI exits immediately. No cloud / connection env vars are injected — the bridge discovers its project from the editor and the MCP client reads `GODOT_PROJECT_PATH` from `setup-mcp`. `--editor-path` overrides discovery; otherwise the CLI checks `GODOT` / `GODOT_EDITOR` (and `GODOT_BIN` / `GODOT4_BIN`) env vars, `PATH`, and per-OS common install roots (`/Applications`, `/opt`, Program Files, Downloads, …) including version-stamped release names (`Godot_v<ver>-stable_mono_win64.exe`), preferring the mono `_console` build and the newest version. `--wait` chains into `wait-for-ready` after a successful launch.
+
+**Editor discovery (`cli/src/utils/godot-editor.ts`):** adapted from the Godot-MCP behavior reference. Pure filesystem scan (no spawn) for `findGodotBinary`; the spawn lives in `launchEditor` so discovery is unit-testable. Binaries are ranked `mono _console (3) > mono (2) > _console (1) > plain (0)`, then by newest version, then by path.
+
+**`wait-for-ready [path] [--timeout-ms N] [--interval-ms N] [--port N] [--json]`** polls the bridge `/ping` endpoint until ready (connected AND not compiling) or the deadline passes. The poller is adapted from Unity Open MCP's `ping-poller.ts` (copy fidelity for the state machine + outcome shape): a 503 or `compiling: true` keeps the wait alive; transient offline during an editor reload keeps polling; a **dead-bridge** signature (live PID + stale heartbeat from the instance lock) fails fast with a "fix the C# errors" hint. The probe target is the resolved bridge port (env override > live instance lock > deterministic hash) with the Bearer token from the lock attached when present. Defaults: 120 s timeout, 1 s interval. Exit `0` ready; `3` timeout; `1` dead_bridge (fatal-but-distinct so the operator sees the compile-errors hint rather than a generic timeout).
+
+**`ping [path] [--port N] [--json]`** is a one-shot `/ping` probe (no loop) — useful for scripts that want a single readiness check. Shares the poller's `singlePing` + the same probe-target resolution. Exit `0` ready; `1` otherwise (compiling / offline / error).
+
+**Readiness definition:** the bridge is `ready` when `/ping` is HTTP-reachable, its JSON reports `connected: true` and `compiling: false`, and the instance lock is not classified `dead_bridge`. A 503 (listener up, `BridgeSession` not initialized) is treated as compiling (reachable-but-not-ready), NOT offline.
+
+**Auth:** when the instance lock carries an `authToken` (P5.2), probes send `Authorization: Bearer <token>`. When the lock has no token, no header is sent and the bridge must be in `authMode: "none"`. An explicit `--port` override skips the lock read (no token to discover).
+
+**Intentional deltas from Unity / Godot-MCP:** (1) the probe target is the loopback bridge `/ping` directly, not the MCP server's LiveClient (the CLI has no MCP client in process); (2) no cloud / SignalR connect flags (`--url` / `--token` / `--mode` from Godot-MCP are stripped); (3) `--wait` is an explicit chain flag for one-command UX; (4) editor discovery is Godot-specific (no Unity Hub deep link).
 
 ## Godot-specific constraints
 

@@ -22,6 +22,9 @@ import {
 } from "./commands.js";
 import { installPluginCommand } from "./commands/install-plugin.js";
 import { setupMcpCommand } from "./commands/setup-mcp.js";
+import { openCommand } from "./commands/open.js";
+import { waitForReadyCommand } from "./commands/wait-for-ready.js";
+import { pingCommand } from "./commands/ping.js";
 import { EXIT } from "./exit-codes.js";
 import { DEFAULT_BIN_NAME, PROJECT_PATH_ENV_VAR } from "./env.js";
 import { readPackageVersion } from "./package-version.js";
@@ -110,6 +113,44 @@ export async function runCli(opts: CliRunOptions): Promise<CliRunOutcome> {
       list: parsed.list,
       configPath: parsed.configPath,
       packageVersion: readPackageVersion(),
+    });
+    await emitResult(result, parsed.json);
+    return { handled: true, exitCode: result.exitCode };
+  }
+
+  if (parsed.command === "open") {
+    const projectPath = resolveProjectPath(parsed);
+    const result = await openCommand({
+      projectPath,
+      editorPath: parsed.editorPath,
+      build: parsed.noBuild ? false : undefined,
+      buildConfiguration: parsed.buildConfiguration,
+      wait: parsed.wait,
+      port: parsed.port,
+      timeoutMs: parsed.timeoutMs,
+      intervalMs: parsed.intervalMs,
+    });
+    await emitResult(result, parsed.json);
+    return { handled: true, exitCode: result.exitCode };
+  }
+
+  if (parsed.command === "wait-for-ready") {
+    const projectPath = resolveProjectPath(parsed);
+    const result = await waitForReadyCommand({
+      projectPath,
+      port: parsed.port,
+      timeoutMs: parsed.timeoutMs,
+      intervalMs: parsed.intervalMs,
+    });
+    await emitResult(result, parsed.json);
+    return { handled: true, exitCode: result.exitCode };
+  }
+
+  if (parsed.command === "ping") {
+    const projectPath = resolveProjectPath(parsed);
+    const result = await pingCommand({
+      projectPath,
+      port: parsed.port,
     });
     await emitResult(result, parsed.json);
     return { handled: true, exitCode: result.exitCode };

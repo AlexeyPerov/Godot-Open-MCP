@@ -374,6 +374,179 @@ test("runCli: setup-mcp with no agent-id and no --list exits non-zero", async ()
 });
 
 // ---------------------------------------------------------------------------
+// open / wait-for-ready / ping dispatch (P6.4)
+// ---------------------------------------------------------------------------
+
+/** Build a temp Godot project for the open/wait/ping dispatch tests. */
+function buildOpenFixture(): { dir: string; project: string } {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "godot-open-mcp-cli-"));
+  const project = path.join(dir, "proj");
+  fs.mkdirSync(project, { recursive: true });
+  fs.writeFileSync(
+    path.join(project, "project.godot"),
+    '[application]\n\nname="T"\nconfig_version=5\n',
+  );
+  return { dir, project };
+}
+
+test("runCli: open on a non-project exits non-zero (project_not_found)", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "godot-open-mcp-cli-"));
+  try {
+    const notAProject = path.join(dir, "empty");
+    fs.mkdirSync(notAProject, { recursive: true });
+    const c = await runWithCaptured(["open", notAProject]);
+    assert.notEqual(c.outcome.exitCode, 0);
+    assert.match(c.stderr, /project\.godot/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runCli: open --json on a valid project without an editor resolves editor_not_found", async () => {
+  // No Godot on the host → editor discovery fails. We assert the structured
+  // error label rather than a launch; this is skipped when Godot IS installed.
+  const fx = buildOpenFixture();
+  // Clear Godot env vars + empty PATH so discovery misses (best-effort).
+  const savedGodot = process.env.GODOT;
+  const savedEditor = process.env.GODOT_EDITOR;
+  const savedBin = process.env.GODOT_BIN;
+  const savedPath = process.env.PATH;
+  delete process.env.GODOT;
+  delete process.env.GODOT_EDITOR;
+  delete process.env.GODOT_BIN;
+  process.env.PATH = "";
+  try {
+    const c = await runWithCaptured(["--json", "open", fx.project]);
+    const parsed = JSON.parse(c.stdout) as {
+      command: string;
+      launched: boolean;
+      error?: { code: string };
+    };
+    assert.equal(parsed.command, "open");
+    // If Godot is installed on the host, the open may succeed — only assert the
+    // editor_not_found path when discovery genuinely missed.
+    if (parsed.error?.code === "editor_not_found") {
+      assert.equal(parsed.launched, false);
+      assert.notEqual(c.outcome.exitCode, 0);
+    } else {
+      // Godot was found and launched — success path.
+      assert.equal(c.outcome.exitCode, 0);
+    }
+  } finally {
+    if (savedGodot === undefined) delete process.env.GODOT;
+    else process.env.GODOT = savedGodot;
+    if (savedEditor === undefined) delete process.env.GODOT_EDITOR;
+    else process.env.GODOT_EDITOR = savedEditor;
+    if (savedBin === undefined) delete process.env.GODOT_BIN;
+    else process.env.GODOT_BIN = savedBin;
+    process.env.PATH = savedPath;
+    fs.rmSync(fx.dir, { recursive: true, force: true });
+  }
+});
+
+test("runCli: open --editor-path requires a value", async () => {
+  const c = await runWithCaptured(["open", "--editor-path"]);
+  assert.notEqual(c.outcome.exitCode, 0);
+  assert.match(c.stderr, /--editor-path/);
+});
+
+test("runCli: open --build-configuration requires a value", async () => {
+  const c = await runWithCaptured(["open", "--build-configuration"]);
+  assert.notEqual(c.outcome.exitCode, 0);
+  assert.match(c.stderr, /--build-configuration/);
+});
+
+test("runCli: wait-for-ready on a project with no bridge exits non-zero (timeout)", async () => {
+  // No bridge running → poll exhausts the timeout. Use a short timeout so the
+  // test is fast. exitCode is TIMEOUT (3) when the bridge never answers.
+  const fx = buildOpenFixture();
+  try {
+    const c = await runWithCaptured([
+      "--json",
+      "wait-for-ready",
+      fx.project,
+      "--timeout-ms",
+      "200",
+      "--interval-ms",
+      "100",
+    ]);
+    assert.notEqual(c.outcome.exitCode, 0);
+    assert.equal(c.outcome.exitCode, 3);
+    const parsed = JSON.parse(c.stdout) as {
+      command: string;
+      ready: boolean;
+      status: string;
+    };
+    assert.equal(parsed.command, "wait-for-ready");
+    assert.equal(parsed.ready, false);
+    // No bridge → either timeout (never reachable) or dead_bridge; both are
+    // non-ready. The common case is timeout.
+    assert.notEqual(parsed.ready, true);
+  } finally {
+    fs.rmSync(fx.dir, { recursive: true, force: true });
+  }
+});
+
+test("runCli: wait-for-ready --json emits structured payload on stdout", async () => {
+  const fx = buildOpenFixture();
+  try {
+    const c = await runWithCaptured([
+      "--json",
+      "wait-for-ready",
+      fx.project,
+      "--timeout-ms",
+      "200",
+    ]);
+    const parsed = JSON.parse(c.stdout) as {
+      command: string;
+      port: number;
+      baseUrl: string;
+    };
+    assert.equal(parsed.command, "wait-for-ready");
+    assert.ok(parsed.port >= 20000 && parsed.port <= 29999);
+    assert.match(parsed.baseUrl, /http:\/\/127\.0\.0\.1:\d+/);
+  } finally {
+    fs.rmSync(fx.dir, { recursive: true, force: true });
+  }
+});
+
+test("runCli: ping on a project with no bridge exits non-zero (offline)", async () => {
+  const fx = buildOpenFixture();
+  try {
+    const c = await runWithCaptured(["--json", "ping", fx.project]);
+    assert.notEqual(c.outcome.exitCode, 0);
+    const parsed = JSON.parse(c.stdout) as {
+      command: string;
+      status: string;
+      ready: boolean;
+    };
+    assert.equal(parsed.command, "ping");
+    assert.equal(parsed.ready, false);
+    // No bridge → offline (or error on a slow host); never ready.
+    assert.notEqual(parsed.status, "ready");
+  } finally {
+    fs.rmSync(fx.dir, { recursive: true, force: true });
+  }
+});
+
+test("runCli: ping --json emits the resolved port + baseUrl", async () => {
+  const fx = buildOpenFixture();
+  try {
+    const c = await runWithCaptured(["--json", "ping", fx.project, "--port", "23456"]);
+    const parsed = JSON.parse(c.stdout) as {
+      command: string;
+      port: number;
+      baseUrl: string;
+    };
+    assert.equal(parsed.command, "ping");
+    assert.equal(parsed.port, 23456);
+    assert.equal(parsed.baseUrl, "http://127.0.0.1:23456");
+  } finally {
+    fs.rmSync(fx.dir, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // writeAndDrain
 // ---------------------------------------------------------------------------
 
@@ -409,6 +582,14 @@ test("helpText: mentions key sections and options", () => {
   assert.ok(text.includes("--list"));
   assert.ok(text.includes("--use-local"));
   assert.ok(text.includes("--config-path"));
+  // P6.4 open / wait-for-ready / ping flags + commands are advertised.
+  assert.ok(text.includes("--editor-path"));
+  assert.ok(text.includes("--no-build"));
+  assert.ok(text.includes("--build-configuration"));
+  assert.ok(text.includes("--wait"));
+  assert.ok(text.includes("  open [path]"));
+  assert.ok(text.includes("  wait-for-ready [path]"));
+  assert.ok(text.includes("  ping [path]"));
   assert.ok(text.includes("GODOT_PROJECT_PATH"));
   assert.ok(text.includes("GODOT_OPEN_MCP_BRIDGE_PORT"));
   assert.ok(text.includes("Exit codes"));

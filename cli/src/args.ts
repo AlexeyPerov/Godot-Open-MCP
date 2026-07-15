@@ -29,15 +29,20 @@ export type CliCommand =
   | "help"
   | "version"
   | "install-plugin"
-  | "setup-mcp";
+  | "setup-mcp"
+  | "open"
+  | "wait-for-ready"
+  | "ping";
 
 /** Commands recognized by the dispatcher (excludes help/version). */
 export const KNOWN_COMMANDS: readonly string[] = [
   // Commands register as their plans land:
   "install-plugin", // P6.2
   "setup-mcp", // P6.3
-  // open / wait-for-ready (P6.4), status / configure (P6.5)
-  // append here as they land.
+  "open", // P6.4
+  "wait-for-ready", // P6.4
+  "ping", // P6.4
+  // status / configure (P6.5) append here as they land.
 ];
 
 export interface ParsedCli {
@@ -60,6 +65,14 @@ export interface ParsedCli {
   list: boolean;
   /** setup-mcp `--config-path <path>` — override the agent's default config path. */
   configPath: string | undefined;
+  /** open `--editor-path <bin>` — explicit Godot editor binary (skips discovery). */
+  editorPath: string | undefined;
+  /** open `--no-build` — skip the pre-open `dotnet build` for C# projects. */
+  noBuild: boolean;
+  /** open `--build-configuration <cfg>` — MSBuild configuration (default Debug). */
+  buildConfiguration: string | undefined;
+  /** open `--wait` — chain into wait-for-ready after a successful launch. */
+  wait: boolean;
   /** Positional path argument ([path] in the usage strings). */
   positionalPath: string | undefined;
   /**
@@ -88,6 +101,10 @@ export function emptyParsed(): ParsedCli {
     useLocal: false,
     list: false,
     configPath: undefined,
+    editorPath: undefined,
+    noBuild: false,
+    buildConfiguration: undefined,
+    wait: false,
     positionalPath: undefined,
     agentId: undefined,
     error: undefined,
@@ -201,6 +218,36 @@ export function parseCliArgs(argv: string[]): ParsedCli {
       }
       parsed.configPath = v;
       i += 2;
+      continue;
+    }
+    if (tok === "--editor-path") {
+      const v = args[i + 1];
+      if (!v || v.startsWith("-")) {
+        parsed.error = `${tok} requires a path to the Godot editor binary.`;
+        return parsed;
+      }
+      parsed.editorPath = v;
+      i += 2;
+      continue;
+    }
+    if (tok === "--no-build") {
+      parsed.noBuild = true;
+      i++;
+      continue;
+    }
+    if (tok === "--build-configuration") {
+      const v = args[i + 1];
+      if (!v || v.startsWith("-")) {
+        parsed.error = `${tok} requires a configuration name (e.g. Debug, Release).`;
+        return parsed;
+      }
+      parsed.buildConfiguration = v;
+      i += 2;
+      continue;
+    }
+    if (tok === "--wait") {
+      parsed.wait = true;
+      i++;
       continue;
     }
 

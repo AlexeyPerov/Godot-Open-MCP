@@ -160,3 +160,99 @@ export type SetupMcpErrorLabel =
   | "invalid_existing_config";
 
 export type SetupMcpResult = SetupMcpSuccess | SetupMcpFailure;
+
+// ---------------------------------------------------------------------------
+// open
+// ---------------------------------------------------------------------------
+
+export interface OpenProjectOptions {
+  /** Absolute or relative path to the Godot project root. */
+  projectPath: string;
+  /**
+   * Explicit path to the Godot editor binary (skips discovery). When omitted,
+   * the opener resolves via env / PATH / common install roots.
+   */
+  editorPath?: string;
+  /**
+   * When true (default), run `dotnet build` before launching IF a `.csproj`
+   * exists at the project root. `--no-build` sets this false. GDScript-only
+   * projects skip the build automatically (no .csproj).
+   */
+  build?: boolean;
+  /** MSBuild configuration for the pre-open build (default: Debug). */
+  buildConfiguration?: string;
+  /**
+   * Optional path to the `dotnet` executable. Defaults to `dotnet` on PATH.
+   * Injected so tests can stub the build step.
+   */
+  dotnetPath?: string;
+  /**
+   * Spawn implementation injected for tests. Defaults to the real
+   * `child_process.spawn` via the editor-discovery launch helper. When set,
+   * `dotnetPath` is also routed through it.
+   */
+  buildSpawnImpl?: (cmd: string, args: string[], opts: {
+    cwd: string;
+    stdio: "ignore" | "pipe";
+  }) => SpawnLike;
+}
+
+/** Minimal spawn-like handle the build step needs (a ChildProcess subset). */
+export interface SpawnLike {
+  on(event: "error", listener: (err: Error) => void): unknown;
+  on(event: "close", listener: (code: number | null) => void): unknown;
+}
+
+export interface OpenProjectSuccess {
+  kind: "success";
+  success: true;
+  /** True when the editor was newly launched; false when one was already running. */
+  launched: boolean;
+  /** Absolute path to the resolved Godot editor binary. */
+  editorPath: string;
+  /** PID of the launched (or already-running) editor, when known. */
+  editorPid?: number;
+  /** Absolute path to the Godot project root. */
+  projectPath: string;
+  /** True when a `dotnet build` ran and succeeded; false when skipped. */
+  built: boolean;
+  warnings: string[];
+}
+
+export interface OpenProjectFailure {
+  kind: "failure";
+  success: false;
+  /** Structured error label (see the table in P6.4.md). */
+  errorLabel: OpenProjectErrorLabel;
+  /** Absolute project path when it was resolved, else undefined. */
+  projectPath?: string;
+  /** Absolute editor path when it was resolved, else undefined. */
+  editorPath?: string;
+  warnings: string[];
+  error: Error;
+}
+
+/**
+ * Error labels surfaced in JSON failure payloads. Stable strings so CI and
+ * scripts can branch without parsing prose.
+ */
+export type OpenProjectErrorLabel =
+  | "project_not_found"
+  | "not_godot_project"
+  | "editor_not_found"
+  | "build_failed"
+  | "launch_failed";
+
+export type OpenProjectResult = OpenProjectSuccess | OpenProjectFailure;
+
+// ---------------------------------------------------------------------------
+// wait-for-ready / ping (shared outcome shape)
+// ---------------------------------------------------------------------------
+
+/** Status token returned by the poller; see src/ping-poller.ts PollOutcome. */
+export type ReadinessStatus =
+  | "ready"
+  | "compiling"
+  | "offline"
+  | "dead_bridge"
+  | "timeout";

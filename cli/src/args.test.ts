@@ -59,6 +59,12 @@ test("parseCliArgs: KNOWN_COMMANDS includes setup-mcp (P6.3)", () => {
   assert.ok([...KNOWN_COMMANDS].includes("setup-mcp"));
 });
 
+test("parseCliArgs: KNOWN_COMMANDS includes open / wait-for-ready / ping (P6.4)", () => {
+  assert.ok([...KNOWN_COMMANDS].includes("open"));
+  assert.ok([...KNOWN_COMMANDS].includes("wait-for-ready"));
+  assert.ok([...KNOWN_COMMANDS].includes("ping"));
+});
+
 // ---------------------------------------------------------------------------
 // shared flags (placed before --help so the parser sees them before the
 // short-circuit returns)
@@ -253,4 +259,102 @@ test("parseCliArgs: unknown command error is not overridden by help default", ()
   const p = parse(["bogus"]);
   assert.equal(p.command, null);
   assert.ok(p.error);
+});
+
+// ---------------------------------------------------------------------------
+// open / wait-for-ready / ping commands + flags (P6.4)
+// ---------------------------------------------------------------------------
+
+test("parseCliArgs: open [path] is recognized and captures the positional", () => {
+  const p = parse(["open", "/p"]);
+  assert.equal(p.command, "open");
+  assert.equal(p.error, undefined);
+  assert.equal(p.positionalPath, "/p");
+});
+
+test("parseCliArgs: open with no positional is valid", () => {
+  const p = parse(["open"]);
+  assert.equal(p.command, "open");
+  assert.equal(p.error, undefined);
+  assert.equal(p.positionalPath, undefined);
+});
+
+test("parseCliArgs: open --editor-path requires a value", () => {
+  assert.match(parse(["open", "--editor-path"]).error ?? "", /--editor-path/);
+  assert.match(
+    parse(["open", "--editor-path", "--json"]).error ?? "",
+    /--editor-path/,
+  );
+});
+
+test("parseCliArgs: open --editor-path captures the value", () => {
+  const p = parse(["open", "/p", "--editor-path", "/usr/local/bin/godot"]);
+  assert.equal(p.editorPath, "/usr/local/bin/godot");
+});
+
+test("parseCliArgs: open --no-build sets the flag", () => {
+  const p = parse(["open", "/p", "--no-build"]);
+  assert.equal(p.noBuild, true);
+});
+
+test("parseCliArgs: open --build-configuration captures the value", () => {
+  const p = parse(["open", "/p", "--build-configuration", "Release"]);
+  assert.equal(p.buildConfiguration, "Release");
+});
+
+test("parseCliArgs: open --build-configuration requires a value", () => {
+  assert.match(
+    parse(["open", "--build-configuration"]).error ?? "",
+    /--build-configuration/,
+  );
+});
+
+test("parseCliArgs: open --wait sets the flag", () => {
+  const p = parse(["open", "/p", "--wait"]);
+  assert.equal(p.wait, true);
+});
+
+test("parseCliArgs: open flags may interleave", () => {
+  const p = parse([
+    "--json",
+    "open",
+    "/p",
+    "--editor-path",
+    "/g",
+    "--no-build",
+    "--wait",
+  ]);
+  assert.equal(p.command, "open");
+  assert.equal(p.json, true);
+  assert.equal(p.positionalPath, "/p");
+  assert.equal(p.editorPath, "/g");
+  assert.equal(p.noBuild, true);
+  assert.equal(p.wait, true);
+});
+
+test("parseCliArgs: wait-for-ready [path] is recognized", () => {
+  const p = parse(["wait-for-ready", "/p", "--timeout-ms", "5000"]);
+  assert.equal(p.command, "wait-for-ready");
+  assert.equal(p.error, undefined);
+  assert.equal(p.positionalPath, "/p");
+  assert.equal(p.timeoutMs, 5000);
+});
+
+test("parseCliArgs: wait-for-ready --interval-ms captures the value", () => {
+  const p = parse(["wait-for-ready", "--interval-ms", "750"]);
+  assert.equal(p.intervalMs, 750);
+});
+
+test("parseCliArgs: ping [path] is recognized", () => {
+  const p = parse(["ping", "/p", "--port", "23456"]);
+  assert.equal(p.command, "ping");
+  assert.equal(p.error, undefined);
+  assert.equal(p.positionalPath, "/p");
+  assert.equal(p.port, 23456);
+});
+
+test("parseCliArgs: ping with no positional is valid", () => {
+  const p = parse(["ping"]);
+  assert.equal(p.command, "ping");
+  assert.equal(p.error, undefined);
 });
