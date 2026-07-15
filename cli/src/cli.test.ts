@@ -10,6 +10,9 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 
 import { runCli, writeAndDrain, type DrainableWritable } from "./cli.js";
 import { helpText, versionText, unknownCommandResult } from "./commands.js";
@@ -172,6 +175,97 @@ test("runCli: every invocation is handled (no stdio fallthrough)", async () => {
     const c = await runWithCaptured(argv);
     assert.equal(c.outcome.handled, true, `argv=${JSON.stringify(argv)}`);
   }
+});
+
+// ---------------------------------------------------------------------------
+// install-plugin dispatch (P6.2)
+// ---------------------------------------------------------------------------
+
+/** Build a temp Godot project + addon source for the dispatch tests. */
+function buildInstallFixture(): { dir: string; project: string; source: string } {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "godot-open-mcp-cli-"));
+  const project = path.join(dir, "proj");
+  fs.mkdirSync(project, { recursive: true });
+  fs.writeFileSync(
+    path.join(project, "project.godot"),
+    '[application]\n\nname="T"\nconfig_version=5\n',
+  );
+  const source = path.join(dir, "addon-src");
+  fs.mkdirSync(path.join(source, "Editor"), { recursive: true });
+  fs.writeFileSync(
+    path.join(source, "plugin.cfg"),
+    '[plugin]\n\nname="Godot Open MCP"\n',
+  );
+  return { dir, project, source };
+}
+
+test("runCli: install-plugin <path> --source <dir> succeeds with human output", async () => {
+  const fx = buildInstallFixture();
+  try {
+    const c = await runWithCaptured([
+      "install-plugin",
+      fx.project,
+      "--source",
+      fx.source,
+    ]);
+    assert.equal(c.outcome.exitCode, 0);
+    assert.match(c.stdout, /installed and enabled/);
+    assert.ok(
+      fs.existsSync(
+        path.join(fx.project, "addons", "godot_open_mcp", "plugin.cfg"),
+      ),
+    );
+  } finally {
+    fs.rmSync(fx.dir, { recursive: true, force: true });
+  }
+});
+
+test("runCli: install-plugin --json emits structured success on stdout", async () => {
+  const fx = buildInstallFixture();
+  try {
+    const c = await runWithCaptured([
+      "--json",
+      "install-plugin",
+      fx.project,
+      "--source",
+      fx.source,
+    ]);
+    assert.equal(c.outcome.exitCode, 0);
+    const parsed = JSON.parse(c.stdout) as {
+      command: string;
+      changed: boolean;
+      pluginPath: string;
+    };
+    assert.equal(parsed.command, "install-plugin");
+    assert.equal(parsed.changed, true);
+    assert.equal(parsed.pluginPath, "res://addons/godot_open_mcp/plugin.cfg");
+  } finally {
+    fs.rmSync(fx.dir, { recursive: true, force: true });
+  }
+});
+
+test("runCli: install-plugin on a non-project exits non-zero", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "godot-open-mcp-cli-"));
+  try {
+    const notAProject = path.join(dir, "empty");
+    fs.mkdirSync(notAProject, { recursive: true });
+    const c = await runWithCaptured([
+      "install-plugin",
+      notAProject,
+      "--source",
+      notAProject, // also has no plugin.cfg, but not_godot_project fires first
+    ]);
+    assert.notEqual(c.outcome.exitCode, 0);
+    assert.match(c.stderr, /project\.godot/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runCli: install-plugin --source requires a value", async () => {
+  const c = await runWithCaptured(["install-plugin", "--source"]);
+  assert.notEqual(c.outcome.exitCode, 0);
+  assert.match(c.stderr, /--source/);
 });
 
 // ---------------------------------------------------------------------------

@@ -27,11 +27,13 @@
 
 export type CliCommand =
   | "help"
-  | "version";
+  | "version"
+  | "install-plugin";
 
 /** Commands recognized by the dispatcher (excludes help/version). */
 export const KNOWN_COMMANDS: readonly string[] = [
-  // P6.1 ships with no implemented commands — install-plugin (P6.2),
+  // Commands register as their plans land:
+  "install-plugin", // P6.2
   // setup-mcp (P6.3), open / wait-for-ready (P6.4), status / configure (P6.5)
   // append here as they land.
 ];
@@ -48,6 +50,8 @@ export interface ParsedCli {
   timeoutMs: number | undefined;
   /** wait-for-ready poll interval (ms). */
   intervalMs: number | undefined;
+  /** install-plugin `--source <dir>` (local addon root). */
+  source: string | undefined;
   /** Positional path argument ([path] in the usage strings). */
   positionalPath: string | undefined;
   /** Parse error message; when set, the dispatcher prints it and exits non-zero. */
@@ -64,6 +68,7 @@ export function emptyParsed(): ParsedCli {
     port: undefined,
     timeoutMs: undefined,
     intervalMs: undefined,
+    source: undefined,
     positionalPath: undefined,
     error: undefined,
     unknown: [],
@@ -148,6 +153,16 @@ export function parseCliArgs(argv: string[]): ParsedCli {
       i += 2;
       continue;
     }
+    if (tok === "--source") {
+      const v = args[i + 1];
+      if (!v || v.startsWith("-")) {
+        parsed.error = `${tok} requires a directory path.`;
+        return parsed;
+      }
+      parsed.source = v;
+      i += 2;
+      continue;
+    }
 
     // --- positionals ---
     if (!tok.startsWith("-")) {
@@ -161,15 +176,17 @@ export function parseCliArgs(argv: string[]): ParsedCli {
           }.`;
           return parsed;
         }
-        // KNOWN_COMMANDS is empty in P6.1, so this branch is unreachable until
-        // a command registers. Kept for forward-compat.
-        parsed.error = `Command '${tok}' is recognized but not yet implemented.`;
-        return parsed;
+        parsed.command = tok as CliCommand;
+        positionalCount++;
+        i++;
+        continue;
       } else if (positionalCount === 1) {
         // Second positional is the optional [path] argument for commands that
-        // take one. Until commands land, this is an unexpected positional.
-        parsed.error = `Unexpected positional '${tok}'.`;
-        return parsed;
+        // take one.
+        parsed.positionalPath = tok;
+        positionalCount++;
+        i++;
+        continue;
       } else {
         parsed.error = `Unexpected positional '${tok}'.`;
         return parsed;

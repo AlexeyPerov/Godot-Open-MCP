@@ -48,10 +48,11 @@ test("parseCliArgs: no argv → defaults to help (no MCP fallthrough)", () => {
   assert.equal(p.error, undefined);
 });
 
-test("parseCliArgs: KNOWN_COMMANDS is empty in P6.1", () => {
-  // Commands register as their plans land (install-plugin P6.2, etc.).
-  // P6.1 ships help/version only.
-  assert.deepEqual([...KNOWN_COMMANDS], []);
+test("parseCliArgs: KNOWN_COMMANDS includes install-plugin (P6.2)", () => {
+  // Commands register as their plans land. P6.2 adds install-plugin;
+  // setup-mcp (P6.3), open / wait-for-ready (P6.4), status / configure (P6.5)
+  // append later.
+  assert.ok([...KNOWN_COMMANDS].includes("install-plugin"));
 });
 
 // ---------------------------------------------------------------------------
@@ -109,6 +110,48 @@ test("parseCliArgs: unknown flag is an error", () => {
   const p = parse(["--nonsense"]);
   assert.deepEqual(p.unknown, ["--nonsense"]);
   assert.match(p.error ?? "", /Unknown option/);
+});
+
+// ---------------------------------------------------------------------------
+// install-plugin command + --source (P6.2)
+// ---------------------------------------------------------------------------
+
+test("parseCliArgs: install-plugin is a recognized command", () => {
+  const p = parse(["install-plugin", "/p", "--source", "/s"]);
+  assert.equal(p.command, "install-plugin");
+  assert.equal(p.error, undefined);
+  assert.equal(p.positionalPath, "/p");
+  assert.equal(p.source, "/s");
+});
+
+test("parseCliArgs: install-plugin without a positional is valid", () => {
+  // [path] is optional — the dispatcher falls back to --project / env / cwd.
+  const p = parse(["install-plugin"]);
+  assert.equal(p.command, "install-plugin");
+  assert.equal(p.error, undefined);
+  assert.equal(p.positionalPath, undefined);
+});
+
+test("parseCliArgs: --source requires a value", () => {
+  assert.match(parse(["install-plugin", "--source"]).error ?? "", /--source/);
+  assert.match(
+    parse(["install-plugin", "--source", "--json"]).error ?? "",
+    /--source/,
+  );
+});
+
+test("parseCliArgs: --source value may start with a path char", () => {
+  // Relative paths like ./addon are valid source values.
+  const p = parse(["install-plugin", "--source", "./addon"]);
+  assert.equal(p.source, "./addon");
+});
+
+test("parseCliArgs: flags may interleave with install-plugin args", () => {
+  const p = parse(["--json", "install-plugin", "/p", "--source", "/s"]);
+  assert.equal(p.command, "install-plugin");
+  assert.equal(p.json, true);
+  assert.equal(p.positionalPath, "/p");
+  assert.equal(p.source, "/s");
 });
 
 // ---------------------------------------------------------------------------

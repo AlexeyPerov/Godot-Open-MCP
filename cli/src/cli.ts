@@ -20,8 +20,9 @@ import {
   unknownCommandResult,
   type CliCommandResult,
 } from "./commands.js";
+import { installPluginCommand } from "./commands/install-plugin.js";
 import { EXIT } from "./exit-codes.js";
-import { DEFAULT_BIN_NAME } from "./env.js";
+import { DEFAULT_BIN_NAME, PROJECT_PATH_ENV_VAR } from "./env.js";
 
 export interface CliRunOptions {
   /** Package version, used by --version. */
@@ -70,7 +71,8 @@ export async function runCli(opts: CliRunOptions): Promise<CliRunOutcome> {
 
   // Parse error (unknown command, bad flag value, unexpected positional).
   // The error message already carries the why; append help so the user sees
-  // usage without a second invocation.
+  // usage without a second invocation. Checked before command dispatch so a bad
+  // flag value on a recognized command still surfaces the parse error.
   if (parsed.error) {
     const result: CliCommandResult = {
       exitCode: EXIT.ERRORS,
@@ -85,10 +87,35 @@ export async function runCli(opts: CliRunOptions): Promise<CliRunOutcome> {
     return { handled: true, exitCode: result.exitCode };
   }
 
+  // Command dispatch. Each implemented command maps parsed argv → a library
+  // call → a CliCommandResult, which the dispatcher prints + exits on.
+  if (parsed.command === "install-plugin") {
+    const projectPath = resolveProjectPath(parsed);
+    const result = await installPluginCommand({
+      projectPath,
+      source: parsed.source,
+    });
+    await emitResult(result, parsed.json);
+    return { handled: true, exitCode: result.exitCode };
+  }
+
   // No command and no error — shouldn't happen (parseCliArgs defaults to
   // "help"), but guard so we never exit silently.
   await writeAndDrain(process.stdout, helpText(binName) + "\n");
   return { handled: true, exitCode: EXIT.SUCCESS };
+}
+
+/**
+ * Resolve the Godot project path for a command: explicit `--project` flag wins,
+ * else the positional `[path]`, else the `GODOT_PROJECT_PATH` env var, else cwd.
+ * Centralized so every command applies the same precedence.
+ */
+function resolveProjectPath(parsed: { projectPath?: string; positionalPath?: string }): string {
+  if (parsed.projectPath) return parsed.projectPath;
+  if (parsed.positionalPath) return parsed.positionalPath;
+  const env = process.env[PROJECT_PATH_ENV_VAR];
+  if (env && env.length > 0) return env;
+  return process.cwd();
 }
 
 /**

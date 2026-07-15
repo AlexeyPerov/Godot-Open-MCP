@@ -58,6 +58,20 @@ Godot has no headless editor batch mode — there is no `batch` route.
 
 **Version sync:** `cli/package.json` is wired into `scripts/sync-version.mjs` alongside the MCP server and addon packages; the CLI reads its version at runtime via `readPackageVersion()` so `--version` never lies after a bump.
 
+### `install-plugin` — addon install layout
+
+`godot-open-mcp-cli install-plugin [path] [--source <dir>] [--json]` materializes the bridge addon into a Godot project and enables it in `project.godot`. It is idempotent: a re-run that finds the addon present and the plugin already enabled reports `changed: false` and writes nothing.
+
+**Addon tree:** files land at `res://addons/godot_open_mcp/` — `plugin.cfg`, `Editor/**`, and `Runtime/**` from the source root. The bridge's `Tests/`, `obj/`, `bin/`, `.godot/` subtrees and repo-dev files (`.gitkeep`, `AGENTS.md`) are excluded so a consumer project never receives test code or build artifacts. Materialization is staged in a temp sibling and swapped atomically, so a mid-copy failure leaves the existing addon untouched.
+
+**`project.godot` enable:** the installer toggles the plugin into the `[editor_plugins] enabled=PackedStringArray(...)` entry via a pure text transform that preserves unrelated sections, comments, and ordering. The canonical plugin path is `res://addons/godot_open_mcp/plugin.cfg`.
+
+**Source resolution:** `--source <dir>` wins (a path that either IS the addon root or CONTAINS `addons/godot_open_mcp/`); otherwise the installer falls back to the monorepo default (`packages/bridge`) when running from a checkout. There is no release-zip download path in v1 — release packaging is deferred.
+
+**Verify co-install:** the bridge depends on verify, but verify does not yet ship a `plugin.cfg` addon. `install-plugin` installs the bridge addon only; the verify addon will be co-installed (as a sibling tree or bundled into the bridge addon) once it has a shippable layout.
+
+**Output:** human-readable summary by default; `--json` emits `{ command, changed, projectPath, addonDir, pluginPath, enabledPlugins, source, warnings }`. Exit `0` on success (including `changed: false`), `1` on failure (`not_godot_project`, `source_missing`, `materialize_failed`, `project_godot_write_failed`).
+
 ## Godot-specific constraints
 
 - Single C# assembly — use `#if TOOLS` for editor-only code. Runtime must not leak editor APIs.
