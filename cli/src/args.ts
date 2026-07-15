@@ -13,8 +13,8 @@
 //   godot-open-mcp-cli setup-mcp [<agent-id> [path]] [--list] [--use-local] [--config-path <file>] [--json]
 //   godot-open-mcp-cli open [path] [--editor-path <bin>] [--json]
 //   godot-open-mcp-cli wait-for-ready [path] [--timeout-ms N] [--interval-ms N] [--json]
-//   godot-open-mcp-cli status [path] [--json]
-//   godot-open-mcp-cli configure [path] [--list] [--set authMode=none|required] [--json]
+//   godot-open-mcp-cli status [path] [--port N] [--json]
+//   godot-open-mcp-cli configure [path] [--list] [--get <key>] [--set <key=value> ...] [--json]
 //   godot-open-mcp-cli --help | -h
 //   godot-open-mcp-cli --version | -V
 //
@@ -32,7 +32,9 @@ export type CliCommand =
   | "setup-mcp"
   | "open"
   | "wait-for-ready"
-  | "ping";
+  | "ping"
+  | "status"
+  | "configure";
 
 /** Commands recognized by the dispatcher (excludes help/version). */
 export const KNOWN_COMMANDS: readonly string[] = [
@@ -42,7 +44,8 @@ export const KNOWN_COMMANDS: readonly string[] = [
   "open", // P6.4
   "wait-for-ready", // P6.4
   "ping", // P6.4
-  // status / configure (P6.5) append here as they land.
+  "status", // P6.5
+  "configure", // P6.5
 ];
 
 export interface ParsedCli {
@@ -73,6 +76,10 @@ export interface ParsedCli {
   buildConfiguration: string | undefined;
   /** open `--wait` — chain into wait-for-ready after a successful launch. */
   wait: boolean;
+  /** configure `--get <key>` — read one setting value. */
+  getKey: string | undefined;
+  /** configure `--set key=value` — write one or more setting assignments. */
+  setAssignments: string[];
   /** Positional path argument ([path] in the usage strings). */
   positionalPath: string | undefined;
   /**
@@ -105,6 +112,8 @@ export function emptyParsed(): ParsedCli {
     noBuild: false,
     buildConfiguration: undefined,
     wait: false,
+    getKey: undefined,
+    setAssignments: [],
     positionalPath: undefined,
     agentId: undefined,
     error: undefined,
@@ -248,6 +257,29 @@ export function parseCliArgs(argv: string[]): ParsedCli {
     if (tok === "--wait") {
       parsed.wait = true;
       i++;
+      continue;
+    }
+    if (tok === "--get") {
+      const v = args[i + 1];
+      if (!v || v.startsWith("-")) {
+        parsed.error = `${tok} requires a setting key (authMode or bindAddress).`;
+        return parsed;
+      }
+      // A second --get overwrites the first; the command surfaces the last one
+      // (consistent with the single-value flag semantics of --port/--source).
+      parsed.getKey = v;
+      i += 2;
+      continue;
+    }
+    if (tok === "--set") {
+      const v = args[i + 1];
+      // `key=value` always contains `=`; reject a missing value or a bare flag.
+      if (!v || v.startsWith("-") || !v.includes("=")) {
+        parsed.error = `${tok} requires a key=value assignment (e.g. authMode=required).`;
+        return parsed;
+      }
+      parsed.setAssignments.push(v);
+      i += 2;
       continue;
     }
 

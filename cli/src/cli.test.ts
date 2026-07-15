@@ -547,6 +547,267 @@ test("runCli: ping --json emits the resolved port + baseUrl", async () => {
 });
 
 // ---------------------------------------------------------------------------
+// status / configure dispatch (P6.5)
+// ---------------------------------------------------------------------------
+
+test("runCli: status on a project with no bridge emits stopped (non-ready)", async () => {
+  // No bridge running → the probe is offline, no lock → stopped.
+  const fx = buildOpenFixture();
+  try {
+    const c = await runWithCaptured(["--json", "status", fx.project]);
+    assert.notEqual(c.outcome.exitCode, 0); // not running → non-zero
+    const parsed = JSON.parse(c.stdout) as {
+      command: string;
+      status: string;
+      ready: boolean;
+      isGodotProject: boolean;
+      addon: { present: boolean; enabled: boolean };
+      instance: unknown;
+    };
+    assert.equal(parsed.command, "status");
+    assert.equal(parsed.ready, false);
+    assert.ok(parsed.isGodotProject, "the fixture has a project.godot");
+    assert.equal(parsed.addon.present, false); // never installed
+    // No bridge → stopped (most common) or unreachable; never running.
+    assert.notEqual(parsed.status, "running");
+    assert.equal(parsed.instance, null); // no lock
+  } finally {
+    fs.rmSync(fx.dir, { recursive: true, force: true });
+  }
+});
+
+test("runCli: status --json emits the resolved port + addon check", async () => {
+  const fx = buildOpenFixture();
+  try {
+    const c = await runWithCaptured(["--json", "status", fx.project, "--port", "23456"]);
+    const parsed = JSON.parse(c.stdout) as {
+      command: string;
+      port: number;
+      baseUrl: string;
+      addon: { present: boolean; enabled: boolean; pluginPath: string };
+    };
+    assert.equal(parsed.command, "status");
+    assert.equal(parsed.port, 23456);
+    assert.equal(parsed.baseUrl, "http://127.0.0.1:23456");
+    assert.equal(parsed.addon.pluginPath, "res://addons/godot_open_mcp/plugin.cfg");
+  } finally {
+    fs.rmSync(fx.dir, { recursive: true, force: true });
+  }
+});
+
+test("runCli: status on a non-Godot dir reports isGodotProject false", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "godot-open-mcp-cli-"));
+  try {
+    const notAProject = path.join(dir, "empty");
+    fs.mkdirSync(notAProject, { recursive: true });
+    const c = await runWithCaptured(["--json", "status", notAProject]);
+    const parsed = JSON.parse(c.stdout) as { isGodotProject: boolean };
+    assert.equal(parsed.isGodotProject, false);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runCli: configure --list on a fresh project shows defaults", async () => {
+  const fx = buildOpenFixture();
+  try {
+    const c = await runWithCaptured(["--json", "configure", fx.project, "--list"]);
+    assert.equal(c.outcome.exitCode, 0);
+    const parsed = JSON.parse(c.stdout) as {
+      command: string;
+      mode: string;
+      settings: { authMode: string; bindAddress: string };
+    };
+    assert.equal(parsed.command, "configure");
+    assert.equal(parsed.mode, "list");
+    assert.equal(parsed.settings.authMode, "none");
+    assert.equal(parsed.settings.bindAddress, "127.0.0.1");
+  } finally {
+    fs.rmSync(fx.dir, { recursive: true, force: true });
+  }
+});
+
+test("runCli: configure with no mode defaults to --list", async () => {
+  // A bare `configure <path>` is informative — shows current settings.
+  const fx = buildOpenFixture();
+  try {
+    const c = await runWithCaptured(["--json", "configure", fx.project]);
+    assert.equal(c.outcome.exitCode, 0);
+    const parsed = JSON.parse(c.stdout) as { mode: string };
+    assert.equal(parsed.mode, "list");
+  } finally {
+    fs.rmSync(fx.dir, { recursive: true, force: true });
+  }
+});
+
+test("runCli: configure --set authMode=required writes and round-trips", async () => {
+  const fx = buildOpenFixture();
+  try {
+    const set = await runWithCaptured([
+      "--json",
+      "configure",
+      fx.project,
+      "--set",
+      "authMode=required",
+    ]);
+    assert.equal(set.outcome.exitCode, 0);
+    const setParsed = JSON.parse(set.stdout) as {
+      command: string;
+      mode: string;
+      changed: boolean;
+      settings: { authMode: string };
+    };
+    assert.equal(setParsed.changed, true);
+    assert.equal(setParsed.settings.authMode, "required");
+
+    // Round-trip via --list.
+    const list = await runWithCaptured([
+      "--json",
+      "configure",
+      fx.project,
+      "--list",
+    ]);
+    const listParsed = JSON.parse(list.stdout) as {
+      settings: { authMode: string };
+    };
+    assert.equal(listParsed.settings.authMode, "required");
+  } finally {
+    fs.rmSync(fx.dir, { recursive: true, force: true });
+  }
+});
+
+test("runCli: configure --get authMode prints the value", async () => {
+  const fx = buildOpenFixture();
+  try {
+    await runWithCaptured([
+      "configure",
+      fx.project,
+      "--set",
+      "authMode=required",
+    ]);
+    const c = await runWithCaptured([
+      "--json",
+      "configure",
+      fx.project,
+      "--get",
+      "authMode",
+    ]);
+    assert.equal(c.outcome.exitCode, 0);
+    const parsed = JSON.parse(c.stdout) as {
+      mode: string;
+      key: string;
+      value: string;
+    };
+    assert.equal(parsed.mode, "get");
+    assert.equal(parsed.key, "authMode");
+    assert.equal(parsed.value, "required");
+  } finally {
+    fs.rmSync(fx.dir, { recursive: true, force: true });
+  }
+});
+
+test("runCli: configure --get <unknown> exits non-zero", async () => {
+  const fx = buildOpenFixture();
+  try {
+    const c = await runWithCaptured([
+      "--json",
+      "configure",
+      fx.project,
+      "--get",
+      "bogus",
+    ]);
+    assert.notEqual(c.outcome.exitCode, 0);
+    const parsed = JSON.parse(c.stdout) as {
+      error: { code: string };
+    };
+    assert.equal(parsed.error.code, "unknown_key");
+  } finally {
+    fs.rmSync(fx.dir, { recursive: true, force: true });
+  }
+});
+
+test("runCli: configure --set with invalid authMode exits non-zero", async () => {
+  const fx = buildOpenFixture();
+  try {
+    const c = await runWithCaptured([
+      "--json",
+      "configure",
+      fx.project,
+      "--set",
+      "authMode=bogus",
+    ]);
+    assert.notEqual(c.outcome.exitCode, 0);
+    const parsed = JSON.parse(c.stdout) as {
+      error: { code: string; message: string };
+    };
+    assert.equal(parsed.error.code, "invalid_auth_mode");
+  } finally {
+    fs.rmSync(fx.dir, { recursive: true, force: true });
+  }
+});
+
+test("runCli: configure --set bindAddress=0.0.0.0 without required auth is refused", async () => {
+  const fx = buildOpenFixture();
+  try {
+    const c = await runWithCaptured([
+      "--json",
+      "configure",
+      fx.project,
+      "--set",
+      "bindAddress=0.0.0.0",
+    ]);
+    assert.notEqual(c.outcome.exitCode, 0);
+    const parsed = JSON.parse(c.stdout) as {
+      error: { code: string };
+    };
+    assert.equal(parsed.error.code, "bind_address_requires_auth");
+  } finally {
+    fs.rmSync(fx.dir, { recursive: true, force: true });
+  }
+});
+
+test("runCli: configure --set both keys in one invocation succeeds", async () => {
+  const fx = buildOpenFixture();
+  try {
+    const c = await runWithCaptured([
+      "--json",
+      "configure",
+      fx.project,
+      "--set",
+      "authMode=required",
+      "--set",
+      "bindAddress=0.0.0.0",
+    ]);
+    assert.equal(c.outcome.exitCode, 0);
+    const parsed = JSON.parse(c.stdout) as {
+      changed: boolean;
+      settings: { authMode: string; bindAddress: string };
+    };
+    assert.equal(parsed.changed, true);
+    assert.equal(parsed.settings.authMode, "required");
+    assert.equal(parsed.settings.bindAddress, "0.0.0.0");
+  } finally {
+    fs.rmSync(fx.dir, { recursive: true, force: true });
+  }
+});
+
+test("runCli: configure --set with a missing '=' is a parse error", async () => {
+  const fx = buildOpenFixture();
+  try {
+    const c = await runWithCaptured([
+      "configure",
+      fx.project,
+      "--set",
+      "authMode",
+    ]);
+    assert.notEqual(c.outcome.exitCode, 0);
+    assert.match(c.stderr, /--set/);
+  } finally {
+    fs.rmSync(fx.dir, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // writeAndDrain
 // ---------------------------------------------------------------------------
 
@@ -590,6 +851,12 @@ test("helpText: mentions key sections and options", () => {
   assert.ok(text.includes("  open [path]"));
   assert.ok(text.includes("  wait-for-ready [path]"));
   assert.ok(text.includes("  ping [path]"));
+  // P6.5 status / configure commands + flags are advertised (no coming-soon).
+  assert.ok(text.includes("  status [path]"));
+  assert.ok(text.includes("  configure [path]"));
+  assert.ok(text.includes("--get <key>"));
+  assert.ok(text.includes("--set <key=value>"));
+  assert.ok(!text.includes("coming soon"), "no command should still be tagged coming soon");
   assert.ok(text.includes("GODOT_PROJECT_PATH"));
   assert.ok(text.includes("GODOT_OPEN_MCP_BRIDGE_PORT"));
   assert.ok(text.includes("Exit codes"));

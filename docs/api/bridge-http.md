@@ -243,6 +243,7 @@ TLS termination, SIEM audit logging, and request deny-lists are not in scope for
 - Auth decision (policy matrix, fail-closed): `packages/bridge/Editor/Bridge/BridgeAuthCheck.cs`
 - Auth mode constants: `packages/bridge/Editor/Bridge/BridgeAuthPolicy.cs`
 - Project settings (`authMode` / `bindAddress` reader for `.godot-open-mcp/settings.json`): `packages/bridge/Editor/Bridge/BridgeProjectSettings.cs`
+- CLI settings writer (the `configure` command that writes that file, validating keys/values against the bridge's valid sets): `cli/src/utils/settings.ts`, `cli/src/commands/configure.ts`
 - Bind address decision (loopback always; remote requires `required`): `packages/bridge/Editor/Bridge/BridgeBindAddress.cs`
 - Token mint + lock serialization (`authToken` field): `packages/bridge/Editor/Bridge/BridgeInstanceLock.cs`
 - Response writers (incl. `SendUnauthorized`): `packages/bridge/Editor/Bridge/BridgeHttpResponse.cs`

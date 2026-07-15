@@ -25,6 +25,8 @@ import { setupMcpCommand } from "./commands/setup-mcp.js";
 import { openCommand } from "./commands/open.js";
 import { waitForReadyCommand } from "./commands/wait-for-ready.js";
 import { pingCommand } from "./commands/ping.js";
+import { statusCommand } from "./commands/status.js";
+import { configureCommand } from "./commands/configure.js";
 import { EXIT } from "./exit-codes.js";
 import { DEFAULT_BIN_NAME, PROJECT_PATH_ENV_VAR } from "./env.js";
 import { readPackageVersion } from "./package-version.js";
@@ -151,6 +153,28 @@ export async function runCli(opts: CliRunOptions): Promise<CliRunOutcome> {
     const result = await pingCommand({
       projectPath,
       port: parsed.port,
+    });
+    await emitResult(result, parsed.json);
+    return { handled: true, exitCode: result.exitCode };
+  }
+
+  if (parsed.command === "status") {
+    const projectPath = resolveProjectPath(parsed);
+    const result = await statusCommand({
+      projectPath,
+      port: parsed.port,
+    });
+    await emitResult(result, parsed.json);
+    return { handled: true, exitCode: result.exitCode };
+  }
+
+  if (parsed.command === "configure") {
+    const projectPath = resolveProjectPath(parsed);
+    const result = await configureCommand({
+      projectPath,
+      list: parsed.list,
+      getKey: parsed.getKey,
+      setAssignments: parsed.setAssignments,
     });
     await emitResult(result, parsed.json);
     return { handled: true, exitCode: result.exitCode };

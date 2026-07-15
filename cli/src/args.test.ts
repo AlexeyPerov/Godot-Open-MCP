@@ -65,6 +65,11 @@ test("parseCliArgs: KNOWN_COMMANDS includes open / wait-for-ready / ping (P6.4)"
   assert.ok([...KNOWN_COMMANDS].includes("ping"));
 });
 
+test("parseCliArgs: KNOWN_COMMANDS includes status / configure (P6.5)", () => {
+  assert.ok([...KNOWN_COMMANDS].includes("status"));
+  assert.ok([...KNOWN_COMMANDS].includes("configure"));
+});
+
 // ---------------------------------------------------------------------------
 // shared flags (placed before --help so the parser sees them before the
 // short-circuit returns)
@@ -357,4 +362,65 @@ test("parseCliArgs: ping with no positional is valid", () => {
   const p = parse(["ping"]);
   assert.equal(p.command, "ping");
   assert.equal(p.error, undefined);
+});
+
+// ---------------------------------------------------------------------------
+// status / configure (P6.5)
+// ---------------------------------------------------------------------------
+
+test("parseCliArgs: status [path] is recognized", () => {
+  const p = parse(["status", "/p", "--port", "23456"]);
+  assert.equal(p.command, "status");
+  assert.equal(p.error, undefined);
+  assert.equal(p.positionalPath, "/p");
+  assert.equal(p.port, 23456);
+});
+
+test("parseCliArgs: configure [path] is recognized", () => {
+  const p = parse(["configure", "/p"]);
+  assert.equal(p.command, "configure");
+  assert.equal(p.error, undefined);
+  assert.equal(p.positionalPath, "/p");
+});
+
+test("parseCliArgs: configure --list sets the flag", () => {
+  const p = parse(["configure", "/p", "--list"]);
+  assert.equal(p.list, true);
+});
+
+test("parseCliArgs: configure --get <key> captures the value", () => {
+  const p = parse(["configure", "/p", "--get", "authMode"]);
+  assert.equal(p.getKey, "authMode");
+});
+
+test("parseCliArgs: configure --get requires a value", () => {
+  assert.match(parse(["configure", "/p", "--get"]).error ?? "", /--get/);
+});
+
+test("parseCliArgs: configure --set key=value captures the assignment", () => {
+  const p = parse(["configure", "/p", "--set", "authMode=required"]);
+  assert.deepEqual(p.setAssignments, ["authMode=required"]);
+});
+
+test("parseCliArgs: configure --set is repeatable", () => {
+  const p = parse([
+    "configure",
+    "/p",
+    "--set",
+    "authMode=required",
+    "--set",
+    "bindAddress=0.0.0.0",
+  ]);
+  assert.deepEqual(p.setAssignments, [
+    "authMode=required",
+    "bindAddress=0.0.0.0",
+  ]);
+});
+
+test("parseCliArgs: configure --set without '=' is an error", () => {
+  assert.match(parse(["configure", "/p", "--set", "authMode"]).error ?? "", /key=value/);
+});
+
+test("parseCliArgs: configure --set with no value is an error", () => {
+  assert.match(parse(["configure", "/p", "--set"]).error ?? "", /--set/);
 });

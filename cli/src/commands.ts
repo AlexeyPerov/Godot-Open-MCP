@@ -73,8 +73,8 @@ export function helpText(binName: string): string {
     "  open [path]                   Launch the Godot editor for a project.",
     "  wait-for-ready [path]         Poll until the bridge is ready; exit 0/non-zero.",
     "  ping [path]                   One-shot bridge /ping probe (no wait loop).",
-    "  status [path]                 Show resolved bridge port, instance lock, readiness. (coming soon)",
-    "  configure [path]              Read/write Godot Open MCP project settings.         (coming soon)",
+    "  status [path]                 Show resolved bridge port, instance lock, readiness.",
+    "  configure [path]              Read/write Godot Open MCP project settings (.godot-open-mcp/settings.json).",
     "",
     "Exit codes:",
     "  0  success        command completed.",
@@ -95,6 +95,9 @@ export function helpText(binName: string): string {
     "  --wait                        open: chain into wait-for-ready after launch.",
     "  --timeout-ms <n>              wait-for-ready overall timeout in ms.",
     "  --interval-ms <n>             wait-for-ready poll interval in ms.",
+    "  --list                        configure: list current project settings and exit.",
+    "  --get <key>                   configure: print one setting value (authMode, bindAddress).",
+    "  --set <key=value>             configure: write a setting (repeatable: --set authMode=required --set bindAddress=0.0.0.0).",
     "",
     "Environment:",
     `  ${PROJECT_PATH_ENV_VAR.padEnd(30)}Project root the bridge / MCP server operate on.`,
@@ -110,6 +113,9 @@ export function helpText(binName: string): string {
     `  ${binName} open /path/to/project --wait   # launch then wait for ready`,
     `  ${binName} wait-for-ready /path/to/project --timeout-ms 30000`,
     `  ${binName} ping /path/to/project --json`,
+    `  ${binName} status /path/to/project --json`,
+    `  ${binName} configure /path/to/project --list`,
+    `  ${binName} configure /path/to/project --set authMode=required`,
   ].join("\n");
 }
 

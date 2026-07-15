@@ -5,7 +5,7 @@ Godot Open MCP has four runtime parts:
 - **Godot project** with bridge and verify addons installed (`addons/godot_open_mcp/`).
 - **Bridge** — C# EditorPlugin, loopback HTTP, main-thread dispatch.
 - **MCP server** — TypeScript stdio server, tool registry, routing.
-- **CLI** — install, setup-mcp, open, wait-for-ready.
+- **CLI** — install, setup-mcp, open, wait-for-ready, ping, status, configure.
 
 A desktop **Hub** app for guided setup is planned but deferred.
 
@@ -110,6 +110,20 @@ godot-open-mcp-cli open ./MyGame --wait
 **Auth:** when the instance lock carries an `authToken` (P5.2), probes send `Authorization: Bearer <token>`. When the lock has no token, no header is sent and the bridge must be in `authMode: "none"`. An explicit `--port` override skips the lock read (no token to discover).
 
 **Intentional deltas from Unity / Godot-MCP:** (1) the probe target is the loopback bridge `/ping` directly, not the MCP server's LiveClient (the CLI has no MCP client in process); (2) no cloud / SignalR connect flags (`--url` / `--token` / `--mode` from Godot-MCP are stripped); (3) `--wait` is an explicit chain flag for one-command UX; (4) editor discovery is Godot-specific (no Unity Hub deep link).
+
+### `status` + `configure` — health probe + project settings
+
+**`status [path] [--port N] [--json]`** is a one-shot health probe that folds four signals into a coarse `status` token aligned with the MCP `godot_open_mcp_bridge_status` tool (P5.3): `running | compiling | stopped | unreachable | dead_bridge`. The signals are: whether the dir is a Godot project; whether the addon is installed and enabled in `project.godot`; the instance-lock classification (healthy / reloading / dead_bridge / gone); and a single `/ping` probe (no loop). The CLI cannot import the MCP tool's pure mapper (`deriveBridgeStatus` in `mcp-server/src/tools/bridge-status-derive.ts`) — the CLI package has zero runtime dependencies — so `cli/src/lib/status.ts` duplicates the mapping table with a comment pinning the MCP source of truth; the two MUST stay in lockstep. Exit `0` when `running`; `1` otherwise (the short status probe does not distinguish a timeout from a hard failure — that is `wait-for-ready`'s exit 3).
+
+**`configure [path] [--list] [--get <key>] [--set <key=value> ...] [--json]`** reads and writes the project-local settings file the bridge reads (`<project>/.godot-open-mcp/settings.json`, the same file `BridgeProjectSettings.cs` consumes). The CLI only writes keys the bridge honors — `authMode` (`none` | `required`) and `bindAddress` (`127.0.0.1` | `0.0.0.0`) — and validates them against the bridge's valid-value sets, so it never writes garbage the bridge would fail-closed on. The cross-field invariant is enforced at configure time: `bindAddress:"0.0.0.0"` requires `authMode:"required"` (the bridge refuses to start on a non-loopback interface without token auth; refusing here gives an actionable error instead of a silent listen-time refusal). `--set` is repeatable so both keys can be flipped in one invocation. Mode precedence: `--list` wins, then `--get`, then `--set`; a bare `configure <path>` behaves as `--list`. Tool enable/disable is NOT here — that is Phase 8 `manage_tools`. Exit `0` on success (including a no-op write with `changed: false`); `1` on a validation failure (`unknown_key`, `invalid_auth_mode`, `invalid_bind_address`, `bind_address_requires_auth`) or a `--get` of an unknown key.
+
+**Settings file shape** (the single source of truth is `packages/bridge/Editor/Bridge/BridgeProjectSettings.cs`):
+
+```json
+{ "authMode": "none", "bindAddress": "127.0.0.1" }
+```
+
+Both keys are optional — the defaults are `authMode:"none"` and `bindAddress:"127.0.0.1"` (loopback). The CLI `readSettings` coerces invalid values to the defaults (it never propagates an out-of-set value the bridge would deny), and `writeSettings` is idempotent (a patch that matches the current file reports `changed: false` and writes nothing; atomic temp + rename). See `docs/api/bridge-http.md` §Auth for the bridge's fail-closed behavior on an unrecognized `authMode`.
 
 ## Godot-specific constraints
 
