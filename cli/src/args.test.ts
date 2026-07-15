@@ -55,6 +55,10 @@ test("parseCliArgs: KNOWN_COMMANDS includes install-plugin (P6.2)", () => {
   assert.ok([...KNOWN_COMMANDS].includes("install-plugin"));
 });
 
+test("parseCliArgs: KNOWN_COMMANDS includes setup-mcp (P6.3)", () => {
+  assert.ok([...KNOWN_COMMANDS].includes("setup-mcp"));
+});
+
 // ---------------------------------------------------------------------------
 // shared flags (placed before --help so the parser sees them before the
 // short-circuit returns)
@@ -166,6 +170,76 @@ test("parseCliArgs: flags may appear before --help", () => {
 test("parseCliArgs: flags may appear before --version", () => {
   assert.equal(parse(["--json", "--version"]).command, "version");
   assert.equal(parse(["--json", "--version"]).json, true);
+});
+
+// ---------------------------------------------------------------------------
+// setup-mcp command + agent-id positional + flags (P6.3)
+// ---------------------------------------------------------------------------
+
+test("parseCliArgs: setup-mcp <agent-id> [path] — two positionals parsed", () => {
+  const p = parse(["setup-mcp", "cursor", "/p"]);
+  assert.equal(p.command, "setup-mcp");
+  assert.equal(p.error, undefined);
+  assert.equal(p.agentId, "cursor");
+  assert.equal(p.positionalPath, "/p");
+});
+
+test("parseCliArgs: setup-mcp with only an agent-id is valid", () => {
+  // [path] is optional — the dispatcher falls back to --project / env / cwd.
+  const p = parse(["setup-mcp", "claude-desktop"]);
+  assert.equal(p.command, "setup-mcp");
+  assert.equal(p.error, undefined);
+  assert.equal(p.agentId, "claude-desktop");
+  assert.equal(p.positionalPath, undefined);
+});
+
+test("parseCliArgs: setup-mcp with no agent-id is valid (dispatcher decides --list vs missing)", () => {
+  // Bare `setup-mcp` is either `--list` or a missing-agent error — the
+  // dispatcher handles that branch; the parser must accept it.
+  const p = parse(["setup-mcp"]);
+  assert.equal(p.command, "setup-mcp");
+  assert.equal(p.error, undefined);
+  assert.equal(p.agentId, undefined);
+});
+
+test("parseCliArgs: setup-mcp --list short-circuits without an agent-id", () => {
+  const p = parse(["setup-mcp", "--list"]);
+  assert.equal(p.command, "setup-mcp");
+  assert.equal(p.list, true);
+  assert.equal(p.agentId, undefined);
+});
+
+test("parseCliArgs: setup-mcp --use-local is captured", () => {
+  const p = parse(["setup-mcp", "cursor", "/p", "--use-local"]);
+  assert.equal(p.useLocal, true);
+  assert.equal(p.agentId, "cursor");
+});
+
+test("parseCliArgs: setup-mcp --config-path requires a value", () => {
+  assert.match(parse(["setup-mcp", "--config-path"]).error ?? "", /--config-path/);
+  assert.match(
+    parse(["setup-mcp", "--config-path", "--json"]).error ?? "",
+    /--config-path/,
+  );
+});
+
+test("parseCliArgs: setup-mcp --config-path captures the value", () => {
+  const p = parse(["setup-mcp", "cursor", "--config-path", "/tmp/x.json"]);
+  assert.equal(p.configPath, "/tmp/x.json");
+});
+
+test("parseCliArgs: setup-mcp with too many positionals is an error", () => {
+  const p = parse(["setup-mcp", "cursor", "/p", "extra"]);
+  assert.match(p.error ?? "", /Unexpected positional/);
+});
+
+test("parseCliArgs: setup-mcp flags may interleave with positionals", () => {
+  const p = parse(["--json", "setup-mcp", "cursor", "--use-local", "/p"]);
+  assert.equal(p.command, "setup-mcp");
+  assert.equal(p.json, true);
+  assert.equal(p.useLocal, true);
+  assert.equal(p.agentId, "cursor");
+  assert.equal(p.positionalPath, "/p");
 });
 
 // ---------------------------------------------------------------------------

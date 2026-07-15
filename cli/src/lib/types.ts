@@ -89,3 +89,74 @@ export type InstallPluginErrorLabel =
   | "project_godot_write_failed";
 
 export type InstallPluginResult = InstallPluginSuccess | InstallPluginFailure;
+
+// ---------------------------------------------------------------------------
+// setup-mcp
+// ---------------------------------------------------------------------------
+
+export interface SetupMcpOptions {
+  /** Agent id to configure (e.g. `cursor`, `claude-desktop`). */
+  agentId: string;
+  /** Absolute or relative path to the Godot project root. */
+  godotProjectPath: string;
+  /**
+   * Write a `node <monorepo>/mcp-server/dist/index.js` entry instead of the
+   * `npx`-based default. Used by contributors / CI running from a checkout so
+   * they don't depend on a published npm package.
+   */
+  useLocal?: boolean;
+  /** Optional explicit config-file path (overrides the agent's default). */
+  configPath?: string;
+  /** Package version, used to pin the npx args (`godot-open-mcp@<version>`). */
+  packageVersion?: string;
+}
+
+/**
+ * The stdio spawn descriptor written under the server entry. Mirrors the
+ * `stdio` field of the success JSON so the wire shape is consistent.
+ */
+export interface SetupMcpStdio {
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+}
+
+export interface SetupMcpSuccess {
+  kind: "success";
+  success: true;
+  /** True when the config file was newly written or changed. */
+  changed: boolean;
+  /** The agent id that was configured. */
+  agentId: string;
+  /** Absolute config-file path written. */
+  configPath: string;
+  /** MCP server key (always `godot-open-mcp`). */
+  serverName: string;
+  /** Always `"stdio"` — the transport we write. */
+  transport: "stdio";
+  /** The stdio spawn descriptor. */
+  stdio: SetupMcpStdio;
+  warnings: string[];
+}
+
+export interface SetupMcpFailure {
+  kind: "failure";
+  success: false;
+  /** Structured error label (see the table in P6.3.md). */
+  errorLabel: SetupMcpErrorLabel;
+  warnings: string[];
+  error: Error;
+}
+
+/**
+ * Error labels surfaced in JSON failure payloads. Stable strings so CI and
+ * scripts can branch without parsing prose.
+ */
+export type SetupMcpErrorLabel =
+  | "unknown_agent"
+  | "not_godot_project"
+  | "relative_project_path"
+  | "config_write_failed"
+  | "invalid_existing_config";
+
+export type SetupMcpResult = SetupMcpSuccess | SetupMcpFailure;

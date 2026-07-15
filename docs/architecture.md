@@ -72,6 +72,20 @@ Godot has no headless editor batch mode — there is no `batch` route.
 
 **Output:** human-readable summary by default; `--json` emits `{ command, changed, projectPath, addonDir, pluginPath, enabledPlugins, source, warnings }`. Exit `0` on success (including `changed: false`), `1` on failure (`not_godot_project`, `source_missing`, `materialize_failed`, `project_godot_write_failed`).
 
+### `setup-mcp` — MCP client config writer
+
+`godot-open-mcp-cli setup-mcp <agent-id> [path] [--list] [--use-local] [--config-path <file>] [--json]` writes a **stdio** MCP client config so an AI client (Cursor, Claude, VS Code Copilot, …) can spawn the local `godot-open-mcp` server. It is the bridge between the CLI and the AI side: without it, agents cannot reach the local stdio server.
+
+**Transport is stdio-only (ADR-001).** The writer never emits a `url` / `type:"http"` entry — it writes the Unity `manual-setup` canonical `{ command, args, env }` spawn shape. `GODOT_PROJECT_PATH` is always absolute (relative inputs are rejected up-front). The server key is `godot-open-mcp` (the npm package + bin name).
+
+**Agent registry** (`cli/src/utils/agents.ts`): each agent knows where its config file lives and what envelope shape to write. The Phase 6.3 Done-when set is `cursor` (`.cursor/mcp.json`), `claude-desktop` (global `claude_desktop_config.json`), and `claude-code` (`.mcp.json`); the roster also covers `vscode-copilot` / `vs-copilot` (`servers` + `type:"stdio"`), `opencode` (`mcp` + `command` array + `environment`), `gemini`, `cline`, `kilo-code`, `github-copilot-cli`, and a generic `custom` target — all ported from Unity's per-client envelopes.
+
+**Idempotent merge:** the writer reads the existing config (or `{}`), upserts the `godot-open-mcp` entry under the agent's `bodyPath` (`mcpServers` / `servers` / `mcp`), and strips foreign HTTP/transport keys (`url`, `headers`, `type:"http"`, …) from our entry so a prior Godot-MCP HTTP config can never linger. Sibling servers and unrelated top-level keys are preserved. A re-run whose entry already matches the computed stdio descriptor reports `changed: false` and writes nothing (atomic temp + rename).
+
+**Spawn descriptor:** `npx -y godot-open-mcp@<version>` by default (version pinned from the CLI's own package version); `--use-local` switches to `node <monorepo>/mcp-server/dist/index.js` for contributors / CI running from a checkout. `--config-path <file>` overrides the agent's default location; `--list` prints the registry and exits 0.
+
+**Output:** human-readable summary by default; `--json` emits `{ command, changed, agentId, configPath, serverName, transport:"stdio", stdio:{command,args,env}, warnings }`. Exit `0` on success (including `changed: false`), `1` on failure (`unknown_agent`, `not_godot_project`, `relative_project_path`, `config_write_failed`, `invalid_existing_config`).
+
 ## Godot-specific constraints
 
 - Single C# assembly — use `#if TOOLS` for editor-only code. Runtime must not leak editor APIs.

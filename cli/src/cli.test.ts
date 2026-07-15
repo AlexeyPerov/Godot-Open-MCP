@@ -269,6 +269,111 @@ test("runCli: install-plugin --source requires a value", async () => {
 });
 
 // ---------------------------------------------------------------------------
+// setup-mcp dispatch (P6.3)
+// ---------------------------------------------------------------------------
+
+/** Build a temp Godot project for the setup-mcp dispatch tests. */
+function buildSetupMcpFixture(): { dir: string; project: string } {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "godot-open-mcp-cli-"));
+  const project = path.join(dir, "proj");
+  fs.mkdirSync(project, { recursive: true });
+  fs.writeFileSync(
+    path.join(project, "project.godot"),
+    '[application]\n\nname="T"\nconfig_version=5\n',
+  );
+  return { dir, project };
+}
+
+test("runCli: setup-mcp --list prints agent ids and exits 0", async () => {
+  const c = await runWithCaptured(["setup-mcp", "--list"]);
+  assert.equal(c.outcome.exitCode, 0);
+  assert.match(c.stdout, /cursor/);
+  assert.match(c.stdout, /claude-desktop/);
+  assert.match(c.stdout, /claude-code/);
+});
+
+test("runCli: setup-mcp --list --json emits structured agent list on stdout", async () => {
+  const c = await runWithCaptured(["--json", "setup-mcp", "--list"]);
+  assert.equal(c.outcome.exitCode, 0);
+  const parsed = JSON.parse(c.stdout) as { command: string; agents: string[] };
+  assert.equal(parsed.command, "setup-mcp");
+  assert.ok(parsed.agents.includes("cursor"));
+});
+
+test("runCli: setup-mcp <agent> <path> succeeds with human output", async () => {
+  const fx = buildSetupMcpFixture();
+  try {
+    const c = await runWithCaptured(["setup-mcp", "cursor", fx.project]);
+    assert.equal(c.outcome.exitCode, 0);
+    assert.match(c.stdout, /cursor/);
+    assert.match(c.stdout, /stdio/);
+    assert.ok(
+      fs.existsSync(path.join(fx.project, ".cursor", "mcp.json")),
+    );
+  } finally {
+    fs.rmSync(fx.dir, { recursive: true, force: true });
+  }
+});
+
+test("runCli: setup-mcp --json emits structured success on stdout", async () => {
+  const fx = buildSetupMcpFixture();
+  try {
+    const c = await runWithCaptured(["--json", "setup-mcp", "cursor", fx.project]);
+    assert.equal(c.outcome.exitCode, 0);
+    const parsed = JSON.parse(c.stdout) as {
+      command: string;
+      changed: boolean;
+      agentId: string;
+      transport: string;
+      stdio: { command: string; args: string[]; env: Record<string, string> };
+    };
+    assert.equal(parsed.command, "setup-mcp");
+    assert.equal(parsed.agentId, "cursor");
+    assert.equal(parsed.transport, "stdio");
+    assert.equal(parsed.stdio.command, "npx");
+    assert.ok(parsed.stdio.env.GODOT_PROJECT_PATH);
+  } finally {
+    fs.rmSync(fx.dir, { recursive: true, force: true });
+  }
+});
+
+test("runCli: setup-mcp on a non-project exits non-zero (project-scoped agent)", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "godot-open-mcp-cli-"));
+  try {
+    const notAProject = path.join(dir, "empty");
+    fs.mkdirSync(notAProject, { recursive: true });
+    const c = await runWithCaptured(["setup-mcp", "cursor", notAProject]);
+    assert.notEqual(c.outcome.exitCode, 0);
+    assert.match(c.stderr, /project\.godot/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runCli: setup-mcp unknown agent exits non-zero", async () => {
+  const fx = buildSetupMcpFixture();
+  try {
+    const c = await runWithCaptured(["setup-mcp", "bogus", fx.project]);
+    assert.notEqual(c.outcome.exitCode, 0);
+    assert.match(c.stderr, /bogus/);
+  } finally {
+    fs.rmSync(fx.dir, { recursive: true, force: true });
+  }
+});
+
+test("runCli: setup-mcp with no agent-id and no --list exits non-zero", async () => {
+  const fx = buildSetupMcpFixture();
+  try {
+    const c = await runWithCaptured(["setup-mcp", fx.project]);
+    // With one positional, the parser treats it as the agent id → unknown agent.
+    // (The user must pass `--list` or an explicit agent id.)
+    assert.notEqual(c.outcome.exitCode, 0);
+  } finally {
+    fs.rmSync(fx.dir, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // writeAndDrain
 // ---------------------------------------------------------------------------
 
@@ -300,6 +405,10 @@ test("helpText: mentions key sections and options", () => {
   for (const opt of ["--json", "--project", "--port", "--timeout-ms", "--interval-ms"]) {
     assert.ok(text.includes(opt), `help missing ${opt}`);
   }
+  // P6.3 setup-mcp flags are advertised.
+  assert.ok(text.includes("--list"));
+  assert.ok(text.includes("--use-local"));
+  assert.ok(text.includes("--config-path"));
   assert.ok(text.includes("GODOT_PROJECT_PATH"));
   assert.ok(text.includes("GODOT_OPEN_MCP_BRIDGE_PORT"));
   assert.ok(text.includes("Exit codes"));

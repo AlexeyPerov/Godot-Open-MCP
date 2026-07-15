@@ -21,8 +21,10 @@ import {
   type CliCommandResult,
 } from "./commands.js";
 import { installPluginCommand } from "./commands/install-plugin.js";
+import { setupMcpCommand } from "./commands/setup-mcp.js";
 import { EXIT } from "./exit-codes.js";
 import { DEFAULT_BIN_NAME, PROJECT_PATH_ENV_VAR } from "./env.js";
+import { readPackageVersion } from "./package-version.js";
 
 export interface CliRunOptions {
   /** Package version, used by --version. */
@@ -94,6 +96,20 @@ export async function runCli(opts: CliRunOptions): Promise<CliRunOutcome> {
     const result = await installPluginCommand({
       projectPath,
       source: parsed.source,
+    });
+    await emitResult(result, parsed.json);
+    return { handled: true, exitCode: result.exitCode };
+  }
+
+  if (parsed.command === "setup-mcp") {
+    const projectPath = resolveProjectPath(parsed);
+    const result = await setupMcpCommand({
+      agentId: parsed.agentId,
+      projectPath,
+      useLocal: parsed.useLocal,
+      list: parsed.list,
+      configPath: parsed.configPath,
+      packageVersion: readPackageVersion(),
     });
     await emitResult(result, parsed.json);
     return { handled: true, exitCode: result.exitCode };

@@ -22,6 +22,7 @@ Rules for `cli/` — the `godot-open-mcp-cli` package. Inherits root `AGENTS.md`
   - `setup-mcp` (P6.3)
   - `open` + `wait-for-ready` (P6.4)
   - `status` + `configure` (P6.5)
+- `setup-mcp` is stdio-only (ADR-001). The agent registry (`src/utils/agents.ts`) writes `{ command, args, env }` spawn entries — never `url` / `type:"http"`. The merge helper strips foreign HTTP keys from our server entry so a prior Godot-MCP HTTP config cannot linger.
 - Shipped help text only advertises implemented commands. Unimplemented commands listed in help carry a `(coming soon)` tag.
 - Each command is a plain async function returning `CliCommandResult` (`exitCode` / `json` / `human` / `errorLabel`). The dispatcher owns stdout/stderr/exit-code; commands stay pure and unit-testable.
 

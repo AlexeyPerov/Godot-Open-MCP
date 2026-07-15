@@ -10,7 +10,7 @@
 //
 // Command shapes (declared in help once implemented):
 //   godot-open-mcp-cli install-plugin [path] [--source <dir>] [--json]
-//   godot-open-mcp-cli setup-mcp <agent-id> [path] [--list] [--json]
+//   godot-open-mcp-cli setup-mcp [<agent-id> [path]] [--list] [--use-local] [--config-path <file>] [--json]
 //   godot-open-mcp-cli open [path] [--editor-path <bin>] [--json]
 //   godot-open-mcp-cli wait-for-ready [path] [--timeout-ms N] [--interval-ms N] [--json]
 //   godot-open-mcp-cli status [path] [--json]
@@ -28,13 +28,15 @@
 export type CliCommand =
   | "help"
   | "version"
-  | "install-plugin";
+  | "install-plugin"
+  | "setup-mcp";
 
 /** Commands recognized by the dispatcher (excludes help/version). */
 export const KNOWN_COMMANDS: readonly string[] = [
   // Commands register as their plans land:
   "install-plugin", // P6.2
-  // setup-mcp (P6.3), open / wait-for-ready (P6.4), status / configure (P6.5)
+  "setup-mcp", // P6.3
+  // open / wait-for-ready (P6.4), status / configure (P6.5)
   // append here as they land.
 ];
 
@@ -52,8 +54,22 @@ export interface ParsedCli {
   intervalMs: number | undefined;
   /** install-plugin `--source <dir>` (local addon root). */
   source: string | undefined;
+  /** setup-mcp `--use-local` — spawn the monorepo build instead of `npx`. */
+  useLocal: boolean;
+  /** setup-mcp `--list` — print the agent registry and exit. */
+  list: boolean;
+  /** setup-mcp `--config-path <path>` — override the agent's default config path. */
+  configPath: string | undefined;
   /** Positional path argument ([path] in the usage strings). */
   positionalPath: string | undefined;
+  /**
+   * setup-mcp second positional (the agent id when invoked as
+   * `setup-mcp <agent-id> [path]`). The first positional is always the command
+   * name; for setup-mcp the second positional is the agent id and the third is
+   * the path. We keep the original positionalPath slot for the path so the
+   * dispatcher's `resolveProjectPath` keeps working uniformly.
+   */
+  agentId: string | undefined;
   /** Parse error message; when set, the dispatcher prints it and exits non-zero. */
   error: string | undefined;
   /** Unknown / unparsed leftovers (currently an error condition). */
@@ -69,7 +85,11 @@ export function emptyParsed(): ParsedCli {
     timeoutMs: undefined,
     intervalMs: undefined,
     source: undefined,
+    useLocal: false,
+    list: false,
+    configPath: undefined,
     positionalPath: undefined,
+    agentId: undefined,
     error: undefined,
     unknown: [],
   };
@@ -163,6 +183,26 @@ export function parseCliArgs(argv: string[]): ParsedCli {
       i += 2;
       continue;
     }
+    if (tok === "--use-local") {
+      parsed.useLocal = true;
+      i++;
+      continue;
+    }
+    if (tok === "--list") {
+      parsed.list = true;
+      i++;
+      continue;
+    }
+    if (tok === "--config-path") {
+      const v = args[i + 1];
+      if (!v || v.startsWith("-")) {
+        parsed.error = `${tok} requires a file path.`;
+        return parsed;
+      }
+      parsed.configPath = v;
+      i += 2;
+      continue;
+    }
 
     // --- positionals ---
     if (!tok.startsWith("-")) {
@@ -181,8 +221,19 @@ export function parseCliArgs(argv: string[]): ParsedCli {
         i++;
         continue;
       } else if (positionalCount === 1) {
-        // Second positional is the optional [path] argument for commands that
-        // take one.
+        // Second positional. For most commands this is the optional [path];
+        // `setup-mcp` is the exception — it takes `<agent-id> [path]`, so the
+        // second positional is the agent id and the third is the path.
+        if (parsed.command === "setup-mcp") {
+          parsed.agentId = tok;
+        } else {
+          parsed.positionalPath = tok;
+        }
+        positionalCount++;
+        i++;
+        continue;
+      } else if (positionalCount === 2 && parsed.command === "setup-mcp") {
+        // setup-mcp's third positional is the project path.
         parsed.positionalPath = tok;
         positionalCount++;
         i++;
