@@ -39,22 +39,21 @@ export const bridgeStatus: Tool = {
     "alive but the listener did not respond — usually a transient " +
     "editor-reload window; retry shortly), or `dead_bridge` (Godot process " +
     "alive but the bridge heartbeat is stale — the addon is not running its " +
-    "HTTP listener, so /ping will not recover on its own; check the Godot " +
-    "editor Output panel for compile/plugin-load errors and re-enable the " +
-    "addon). Also surfaces a top-level `classification` field " +
+    "HTTP listener, so /ping will not recover on its own; the recovery hint " +
+    "points at godot_open_mcp_read_compile_errors to read the failure from " +
+    "the Godot log on disk). Also surfaces a top-level `classification` field " +
     "(healthy | reloading | dead_bridge | gone) mirroring the instance " +
     "lock, and a structured `recoveryHint` ({ tool, reason }) that is " +
     "non-null only when the status has a specific recovery tool " +
-    "(dead_bridge → godot_open_mcp_console_get_logs today; a dedicated " +
-    "offline read_compile_errors is planned). When classification is " +
-    "dead_bridge the result explicitly reads as 'Godot alive, bridge " +
-    "heartbeat stale / plugin failed to load' rather than a generic " +
-    "stopped, so an agent can branch on the machine-readable signal. " +
-    "Designed for operators and the future Validation Suite's manual " +
-    "bridge-offline scenario pattern — not a general agent health check " +
-    "(use godot_open_mcp_ping for a lightweight probe). Read-only, " +
-    "gate-free, never spawns Godot. The /ping fetch uses the bridge's " +
-    "standard 5s timeout; this tool takes no arguments.",
+    "(dead_bridge → godot_open_mcp_read_compile_errors, the always-offline " +
+    "log reader). When classification is dead_bridge the result explicitly " +
+    "reads as 'Godot alive, bridge heartbeat stale / plugin failed to load' " +
+    "rather than a generic stopped, so an agent can branch on the " +
+    "machine-readable signal. Designed for operators and the future " +
+    "Validation Suite's manual bridge-offline scenario pattern — not a " +
+    "general agent health check (use godot_open_mcp_ping for a lightweight " +
+    "probe). Read-only, gate-free, never spawns Godot. The /ping fetch uses " +
+    "the bridge's standard 5s timeout; this tool takes no arguments.",
   inputSchema: {
     type: "object",
     properties: {},

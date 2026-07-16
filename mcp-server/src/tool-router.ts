@@ -37,6 +37,23 @@ import { buildCapabilities, type CapabilitiesFilter } from "./capabilities/build
 import { RULE_CATALOG, FIX_CATALOG } from "./capabilities/rule-catalog.js";
 import { readSceneGetDataOffline } from "./offline/scene-get-data.js";
 import { listProjectDirectoryOffline } from "./offline/project-index.js";
+import { identifyGodotProject } from "./offline/project-config.js";
+import { readFile } from "node:fs/promises";
+import {
+  parseProjectLogSettings,
+  godotUserDataRoot,
+  resolveLogPaths,
+  readLogTail,
+  selectLog,
+  detectStaleLog,
+  DEFAULT_LOG_TAIL_BYTES,
+  MIN_LOG_TAIL_BYTES,
+  MAX_LOG_TAIL_BYTES,
+  DEFAULT_MAX_LOG_FILES,
+  LOG_FILE_ENV_OVERRIDE,
+  type GodotLogPlatform,
+} from "./godot-log.js";
+import { extractCompileDiagnostics } from "./compiler-errors.js";
 
 // ---------------------------------------------------------------------------
 // Route vocabulary + metadata helpers (P7.1 §2).
@@ -199,6 +216,10 @@ const SCENE_GET_DATA_TOOL = "godot_open_mcp_scene_get_data";
  *  authoritative resource type + UID); when the bridge is unavailable it lists
  *  the `res://` directory from disk with best-effort extension metadata. */
 const FILESYSTEM_LIST_TOOL = "godot_open_mcp_filesystem_list";
+/** P7.4 — the always-offline diagnostic tool. Never calls the bridge, never
+ *  spawns Godot. Reads a bounded tail of the project's configured Godot log
+ *  and extracts structured C#/GDScript/plugin-load diagnostics. */
+const READ_COMPILE_ERRORS_TOOL = "godot_open_mcp_read_compile_errors";
 
 /**
  * ToolRouter selects live / offline / local per tool call. One instance per
@@ -236,6 +257,9 @@ export class ToolRouter implements Router {
     }
     if (toolName === FILESYSTEM_LIST_TOOL) {
       return this.routeFilesystemList(args);
+    }
+    if (toolName === READ_COMPILE_ERRORS_TOOL) {
+      return this.routeReadCompileErrors(args);
     }
     return this.routeLive(toolName, args);
   }
@@ -491,4 +515,323 @@ export class ToolRouter implements Router {
       { route: "offline", fallbackReason: "live_unavailable" },
     );
   }
+
+  // ── P7.4 — always-offline `read_compile_errors` ─────────────────────────
+
+  /**
+   * `godot_open_mcp_read_compile_errors` — always-offline diagnostic.
+   *
+   * Routing policy (P7.4 spec §8): NEVER call `isLiveAvailable`. NEVER call the
+   * bridge. Return `_source: "offline"` + `_route.route: "offline"` (no
+   * `fallbackReason` — offline is the primary route, not a fallback).
+   *
+   * Pipeline:
+   *   1. Identify the project (`identifyGodotProject`). A missing/unreadable
+   *      `project.godot` → `project_not_found` / `project_config_unreadable`.
+   *   2. Parse the bounded log-settings subset from `project.godot`.
+   *   3. Resolve the per-platform user-data root + log paths (env override →
+   *      project setting → default `user://logs/godot.log`).
+   *   4. Pick the current vs newest-rotated log via `selectLog`.
+   *   5. If file logging is disabled and no log exists → `logging_disabled`
+   *      (a successful, explanatory result — the tool succeeded, the file just
+   *      is not there).
+   *   6. If no log exists at all → `log_not_found` (successful result).
+   *   7. Read a bounded tail; a read failure on an existing log →
+   *      `editor_log_unreadable` (hard error).
+   *   8. Extract structured diagnostics; dedupe + cap at `max_diagnostics`.
+   *   9. Stale-log advisory: compare cited-source mtimes to the selected log.
+   *  10. Compose status (`compile_failed` | `project_unhealthy` |
+   *      `warnings_only` | `no_errors_found`) + `unhealthy` + `headline`.
+   *
+   * `tail_bytes` is clamped to [4096, 1 MiB] (the schema enforces the same
+   * bounds); `max_diagnostics` is clamped to [1, 200]; `include_rotated`
+   * defaults true.
+   */
+  private async routeReadCompileErrors(
+    args: Record<string, unknown>,
+  ): Promise<CallToolResult> {
+    // Argument normalization (the schema enforces the same bounds; the cap is
+    // applied here so a programmatic caller cannot bypass it).
+    const tailBytes = clampInt(
+      args.tail_bytes,
+      DEFAULT_LOG_TAIL_BYTES,
+      MIN_LOG_TAIL_BYTES,
+      MAX_LOG_TAIL_BYTES,
+    );
+    const maxDiagnostics = clampInt(args.max_diagnostics, 50, 1, 200);
+    const includeRotated = args.include_rotated !== false; // default true
+
+    const routeMeta: RouteMeta = { route: "offline" };
+
+    // 1. Identify the project.
+    const project = await identifyGodotProject(this.projectPath);
+    if (!project.ok) {
+      return sourceResult({ error: project.error }, "offline", routeMeta, true);
+    }
+    const projectRoot = project.info.projectRoot;
+
+    // 2. Parse the bounded log-settings subset from project.godot. The marker
+    //    was already read by identifyGodotProject; re-read it here for the
+    //    log settings (the read is bounded + cached by the OS). A read failure
+    //    here is `project_config_unreadable`.
+    let projectGodotText: string;
+    try {
+      projectGodotText = await readFileBounded(
+        `${projectRoot}/project.godot`,
+      );
+    } catch {
+      return sourceResult(
+        {
+          error: {
+            code: "project_config_unreadable",
+            message:
+              "cannot read 'project.godot' for log settings after identification.",
+          },
+        },
+        "offline",
+        routeMeta,
+        true,
+      );
+    }
+    const settings = parseProjectLogSettings(projectGodotText);
+
+    // 3. Resolve paths. Platform follows process.platform; env follows
+    //    process.env. The env override is honored inside resolveLogPaths.
+    const platform = process.platform as GodotLogPlatform;
+    const userDataRoot = godotUserDataRoot(settings, platform);
+    const resolved = resolveLogPaths(settings, userDataRoot);
+
+    // 4. Pick current vs rotated.
+    const selected = selectLog(resolved.currentLogPath, resolved.logDir, {
+      includeRotated,
+      maxLogFiles: settings.maxLogFiles || DEFAULT_MAX_LOG_FILES,
+      loggingDisabled: !settings.fileLoggingEnabled,
+    });
+
+    // 5/6. logging_disabled / log_not_found are successful, explanatory
+    //     results (the tool itself succeeded; the file just does not exist).
+    if (selected.notFound) {
+      const status: ReadCompileStatus =
+        selected.loggingDisabled ? "logging_disabled" : "log_not_found";
+      const body = buildReadCompileErrorsBody({
+        status,
+        unhealthy: false,
+        headline: explanationHeadline(status, resolved, selected),
+        diagnostics: [],
+        errorCount: 0,
+        warningCount: 0,
+        logPath: resolved.currentLogPath,
+        selectedLogKind: selected.kind,
+        usedRotatedFallback: selected.usedRotatedFallback,
+        logSource: resolved.source,
+        loggingDisabled: settings.fileLoggingEnabled
+          ? false
+          : !settings.fileLoggingEnabled,
+        tailBytes,
+        truncated: false,
+        envOverrideUsed: process.env[LOG_FILE_ENV_OVERRIDE] !== undefined,
+      });
+      return sourceResult(body, "offline", routeMeta);
+    }
+
+    // 7. Bounded tail read. An existing-but-unreadable log is a hard error.
+    const tail = readLogTail(selected.path, tailBytes);
+    if (tail.error !== undefined) {
+      return sourceResult(
+        {
+          error: {
+            code: "editor_log_unreadable",
+            message: tail.error,
+          },
+        },
+        "offline",
+        routeMeta,
+        true,
+      );
+    }
+
+    // 8. Extract + dedupe + cap.
+    const diagnostics = extractCompileDiagnostics(tail.content, maxDiagnostics);
+    const errorCount = diagnostics.filter((d) => d.severity === "error").length;
+    const warningCount = diagnostics.filter(
+      (d) => d.severity === "warning",
+    ).length;
+
+    // 9. Stale-log advisory.
+    const citedFiles = diagnostics
+      .map((d) => d.file)
+      .filter((f): f is string => f !== null);
+    const stale = detectStaleLog(selected.path, citedFiles, projectRoot);
+
+    // 10. Compose status.
+    const status = deriveReadCompileStatus(errorCount, warningCount);
+    const headline = composeHeadline(status, errorCount, warningCount);
+
+    const body = buildReadCompileErrorsBody({
+      status,
+      unhealthy: status === "compile_failed" || status === "project_unhealthy",
+      headline,
+      diagnostics,
+      errorCount,
+      warningCount,
+      logPath: selected.path,
+      selectedLogKind: selected.kind,
+      usedRotatedFallback: selected.usedRotatedFallback,
+      logSource: resolved.source,
+      loggingDisabled: false,
+      tailBytes,
+      truncated: tail.truncated,
+      staleLogSuspected: stale.staleLogSuspected,
+      staleLogNewerFiles: stale.newerFiles,
+      staleLogHint: stale.hint,
+      logMtimeMs: tail.mtimeMs,
+      envOverrideUsed: process.env[LOG_FILE_ENV_OVERRIDE] !== undefined,
+    });
+    return sourceResult(body, "offline", routeMeta);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// P7.4 — `read_compile_errors` composition helpers.
+// ---------------------------------------------------------------------------
+
+/** Status vocabulary for the read_compile_errors result. */
+type ReadCompileStatus =
+  | "compile_failed"
+  | "project_unhealthy"
+  | "warnings_only"
+  | "no_errors_found"
+  | "logging_disabled"
+  | "log_not_found";
+
+/** Derive the status from the error/warning counts. `compile_failed` when C#/
+   *  GDScript errors are present; `project_unhealthy` when only load/addon
+   *  errors are present; `warnings_only` for warnings without errors;
+   *  `no_errors_found` for a clean log. */
+function deriveReadCompileStatus(
+  errorCount: number,
+  warningCount: number,
+): ReadCompileStatus {
+  if (errorCount > 0) return "compile_failed";
+  if (warningCount > 0) return "warnings_only";
+  return "no_errors_found";
+}
+
+/** Compose a one-line headline for the status. Empty when there is nothing to
+ *  triage (`no_errors_found`). */
+function composeHeadline(
+  status: ReadCompileStatus,
+  errorCount: number,
+  warningCount: number,
+): string {
+  switch (status) {
+    case "compile_failed":
+      return `${errorCount} compile error(s) found in the Godot log — the bridge will not recover until the source errors are fixed.`;
+    case "warnings_only":
+      return `${warningCount} warning(s) found; no errors.`;
+    case "no_errors_found":
+      return "";
+    default:
+      return "";
+  }
+}
+
+/** Explanation headline for the non-error statuses (logging_disabled /
+ *  log_not_found). Tells the operator what to do next. */
+function explanationHeadline(
+  status: ReadCompileStatus,
+  resolved: { currentLogPath: string; source: string },
+  selected: { usedRotatedFallback: boolean },
+): string {
+  if (status === "logging_disabled") {
+    return (
+      "File logging is disabled in project.godot — Godot is not writing a log " +
+      "file. Enable `debug/file_logging/enable_file_logging = true` in " +
+      "project.godot (or Project Settings > Debug > File Logging) and " +
+      "reproduce the failure, then call this tool again."
+    );
+  }
+  // log_not_found
+  const rotatedNote = selected.usedRotatedFallback
+    ? " (a rotated log was used)"
+    : "";
+  return (
+    `No Godot log file found at '${resolved.currentLogPath}'${rotatedNote}. ` +
+    "If file logging is enabled, reproduce the failure in the Godot editor " +
+    "first; the log is written as the editor runs."
+  );
+}
+
+/** Build the result body object. Fields are ordered for agent readability:
+ *  status + unhealthy first (the triage surface), then counts, then the
+ *  diagnostic list, then provenance. */
+function buildReadCompileErrorsBody(input: {
+  status: ReadCompileStatus;
+  unhealthy: boolean;
+  headline: string;
+  diagnostics: ReturnType<typeof extractCompileDiagnostics>;
+  errorCount: number;
+  warningCount: number;
+  logPath: string;
+  selectedLogKind: "current" | "rotated";
+  usedRotatedFallback: boolean;
+  logSource: "env_override" | "project_setting" | "default";
+  loggingDisabled: boolean;
+  tailBytes: number;
+  truncated: boolean;
+  staleLogSuspected?: boolean;
+  staleLogNewerFiles?: string[];
+  staleLogHint?: string;
+  logMtimeMs?: number;
+  envOverrideUsed: boolean;
+}): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    status: input.status,
+    unhealthy: input.unhealthy,
+    headline: input.headline,
+    errorCount: input.errorCount,
+    warningCount: input.warningCount,
+    diagnostics: input.diagnostics,
+    logPath: input.logPath,
+    selectedLogKind: input.selectedLogKind,
+    usedRotatedFallback: input.usedRotatedFallback,
+    logSource: input.logSource,
+    loggingDisabled: input.loggingDisabled,
+    tailBytes: input.tailBytes,
+    truncated: input.truncated,
+    envOverrideUsed: input.envOverrideUsed,
+  };
+  if (input.staleLogSuspected === true) {
+    body.staleLogSuspected = true;
+    body.staleLogNewerFiles = input.staleLogNewerFiles ?? [];
+    body.staleLogHint = input.staleLogHint ?? "";
+  }
+  if (input.logMtimeMs !== undefined) {
+    body.logMtimeMs = input.logMtimeMs;
+  }
+  return body;
+}
+
+/** Clamp an integer argument to [min, max] with a default fallback for
+ *  non-integer input. */
+function clampInt(
+  raw: unknown,
+  def: number,
+  min: number,
+  max: number,
+): number {
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return def;
+  const n = Math.trunc(raw);
+  if (n < min) return min;
+  if (n > max) return max;
+  return n;
+}
+
+/** Bounded read of a UTF-8 text file. Throws on read failure so the caller
+ *  maps it to the structured error. Used only for the already-validated
+ *  `project.godot` marker (identifyGodotProject already enforced the byte cap).
+ *  Re-reads the file rather than threading the text through to keep the
+ *  composition layer decoupled from identifyGodotProject's internals. */
+async function readFileBounded(path: string): Promise<string> {
+  return readFile(path, "utf-8");
 }

@@ -12,7 +12,7 @@ Tool names follow the `godot_open_mcp_*` convention (ADR-003).
 
 | Family | Tools | Mutating | Notes |
 |---|---|---|---|
-| core | `ping`, `validate_edit`, `checkpoint_create`, `delta`, `apply_fix`, `capabilities`, `bridge_status`, `pull_events` | `apply_fix` only | Always visible in `ListTools`. |
+| core | `ping`, `validate_edit`, `checkpoint_create`, `delta`, `apply_fix`, `capabilities`, `bridge_status`, `pull_events`, `read_compile_errors` | `apply_fix` only | Always visible in `ListTools`. |
 | node | `node_find`, `node_create`, `node_modify`, `node_set_parent`, `node_duplicate`, `node_delete` | create/modify/set-parent/duplicate/delete | Scene-tree operations. |
 | scene | `scene_open`, `scene_save`, `scene_list_opened`, `scene_get_data`, `scene_create` | open/save/create | Scene lifecycle + read. |
 | resource | `resource_find`, `resource_get_data`, `resource_create`, `resource_modify`, `resource_move`, `resource_delete` | create/modify/move/delete | `.tres`/`.res` discovery + bounded property inspection (read-only) + gated create/modify (P4.2) + file lifecycle move/delete (P4.3). |
@@ -27,6 +27,7 @@ Tool names follow the `godot_open_mcp_*` convention (ADR-003).
 |---|---|---|
 | **live** | The CallTool handler POSTs to the bridge; the bridge handler runs on the editor main thread. | Most tools (node, scene, gate meta-tools, `apply_fix`). |
 | **live-first / offline fallback** | The CallTool handler probes the bridge once; if reachable it forwards to the live handler (reflecting unsaved editor state / authoritative import metadata), otherwise it parses the asset from disk with no editor required. A live semantic error (e.g. `scene_not_edited`, `directory_not_found`) is authoritative and does NOT trigger the fallback — only an unreachable bridge does. | `godot_open_mcp_scene_get_data`, `godot_open_mcp_filesystem_list`. |
+| **always-offline** | The CallTool handler NEVER probes the bridge and NEVER POSTs to it — it reads disk straight. Used for diagnostics that must work in the exact state a dead bridge describes (the addon is not running its listener). | `godot_open_mcp_read_compile_errors`. |
 | **local** | The CallTool handler resolves the response in-process — no bridge hop. | `godot_open_mcp_capabilities`. |
 | **local/live hybrid** | The CallTool handler composes a response in-process but runs one `/ping` probe through the live client (auth header + 503 fallback match `ping`). No `POST /tools/{name}` endpoint on the bridge. | `godot_open_mcp_bridge_status`. |
 | **local-drains-live-stream** | The CallTool handler drains a per-process SSE subscription the MCP server keeps open to the bridge's `GET /events`. No `POST /tools/{name}` endpoint on the bridge. | `godot_open_mcp_pull_events`. |
@@ -36,6 +37,8 @@ Tool names follow the `godot_open_mcp_*` convention (ADR-003).
 `bridge_status` is a local/live hybrid: it reads the instance lock from disk, classifies it (`classifyInstance`), runs one `/ping` probe via the live client, and derives a coarse `status` token server-side. The bridge has no `POST /tools/bridge_status` endpoint — the CallTool handler special-cases the name and calls `LiveClient.routeBridgeStatus` directly.
 
 `pull_events` is a local-drains-live-stream tool: the MCP server holds one `BridgeEventStream` (a single SSE reader against `GET /events`) per process, and the CallTool handler drains its buffered queue via `pull()`. The bridge has no `POST /tools/pull_events` endpoint — the handler special-cases the name. Read-only, gate-free. When the bridge is offline the tool returns `connected:false` + `lastError` rather than throwing.
+
+`read_compile_errors` is the one always-offline tool: it reads a bounded tail of the project's configured Godot log file straight from disk and extracts structured C#/GDScript/plugin-load diagnostics. It NEVER probes the bridge and NEVER POSTs to it, so it works in the exact state `bridge_status: dead_bridge` describes — when the addon is not running its listener, every in-bridge channel (`console_get_logs`, `/ping`) is dead with it, but the live Godot editor still writes compile/plugin-load errors to the log. The bridge has no `POST /tools/read_compile_errors` endpoint — the handler special-cases the name. The `dead_bridge` recovery hint points here. Read-only, gate-free.
 
 ## `godot_open_mcp_capabilities`
 
@@ -141,7 +144,7 @@ This is **not** a general agent health check — use `godot_open_mcp_ping` for a
 
 - `ready` — coarse boolean for clients that want a single flag: `true` only when `status === "running"` (the rule a future wait-for-ready CLI poll would terminate on).
 - `classification` — top-level mirror of the instance-lock classification (`healthy | reloading | dead_bridge | gone`) so agents can branch on one field without digging into `instance`.
-- `recoveryHint` — `{ tool, reason, note? } | null`. Non-null **only** for `dead_bridge`. Today it names `godot_open_mcp_console_get_logs` (the closest registered diagnostic) and carries a `note` that it is the bridge-fed addon collector (which stops accumulating once the bridge is dead) and that a dedicated offline `godot_open_mcp_read_compile_errors` is planned for a later phase. The hint tool is always a registered tool — it never points at an unregistered name.
+- `recoveryHint` — `{ tool, reason } | null`. Non-null **only** for `dead_bridge`. Names `godot_open_mcp_read_compile_errors` (the always-offline log reader) — it reads the project's Godot log from disk independent of the bridge, so it works in the exact state `dead_bridge` describes. The hint tool is always a registered tool.
 - `instance.lock` — `null` when no lock was read (no live instance known). The compact summary mirrors the operator-relevant fields (`pid`/`port`/`state`/`isCompiling`/`isPlaying`/`heartbeatAt`/versions); sensitive fields (`authToken`, `projectPath`) are not leaked.
 - `ping` — `{ reachable: false }` when the probe failed (offline/timeout/http error); otherwise the parsed `/ping` body fields.
 - `_source: "local"` — the response is synthesized in the MCP server (no bridge tool endpoint).
@@ -195,6 +198,37 @@ Why poll instead of push? The MCP server runs over a stdio transport and has no 
 **Never throws on an offline bridge.** When the bridge is unreachable the tool returns `connected:false` + `lastError` (and `events:[]`) with `isError:false` so an agent can branch on the connection state. The reader reconnects automatically (2 s backoff) once the bridge is back.
 
 **Capture scope.** `log` events come from the P4.7 collector — the addon's captured activity (bridge lifecycle, tool-handler errors, routed game/script output when a supported hook is active), NOT the entire Godot editor Output panel. `editor_state` events fire at authoritative observed transitions (the bridge-driven play start/stop settle); a background observer for user-clicked play arrives in a later phase.
+
+## `godot_open_mcp_read_compile_errors`
+
+Read C# compiler errors AND GDScript parse errors AND script/addon load failures directly from the project's configured Godot log file (offline, no bridge, no Godot spawn). **Always-offline** route — read-only, gate-free. The one diagnostic channel that works when the bridge addon itself has failed to compile or load: in that state every in-bridge channel (`console_get_logs`, `bridge_status`'s `/ping`) is dead with it, but the live Godot editor still writes parse/compile/plugin-load errors to the project log regardless of bridge health.
+
+`console_get_logs` is the addon-captured collector; it stops accumulating once the bridge is dead. `read_compile_errors` reads the Godot-written log file straight from disk, so it surfaces the failure that preceded the dead bridge. The `dead_bridge` `bridge_status` recovery hint points here.
+
+**Log path resolution** (precedence):
+1. `GODOT_OPEN_MCP_LOG_FILE` env override — operator configuration supplied when launching the MCP server (e.g. when Godot is launched with `--log-file`). Absolute path.
+2. Parsed `debug/file_logging/log_path` project setting — `user://`-relative when it starts with `user://`, otherwise absolute.
+3. Default `user://logs/godot.log` under the per-platform user-data root (`~/Library/Application Support/Godot/app_userdata/<name>/` on macOS, `${XDG_DATA_HOME:-~/.local/share}/godot/app_userdata/<name>/` on Linux, `%APPDATA%/Godot/app_userdata/<name>/` on Windows). Custom user dir settings drop the `Godot/app_userdata/` segment.
+
+**No arbitrary file-read surface.** The tool exposes NO `log_path` argument — only the operator env override + the resolved project path are honored. A caller cannot read arbitrary files.
+
+**Arguments:**
+
+- `tail_bytes` (optional, default `262144`, bounds `4096`–`1048576`) — maximum bytes read from the END of the log.
+- `include_rotated` (optional, default `true`) — fall back to the newest rotated log (`godot.log.N`) when the current log is missing/empty. Strict `godot.log.<digits>` filename policy, bounded by `debug/file_logging/max_log_files`.
+- `max_diagnostics` (optional, default `50`, bounds `1`–`200`) — cap on distinct diagnostics after dedup.
+
+**Result envelope:** `{ status, unhealthy, headline, errorCount, warningCount, diagnostics, logPath, selectedLogKind, logSource, loggingDisabled, tailBytes, truncated, envOverrideUsed, staleLogSuspected?, staleLogNewerFiles?, staleLogHint?, logMtimeMs? }`.
+
+- `status` — `compile_failed` (C#/GDScript/load errors present) | `warnings_only` | `no_errors_found` | `logging_disabled` (file logging off in project.godot + no log) | `log_not_found` (logging enabled but no log file yet).
+- `unhealthy` — `true` when `status === "compile_failed"`.
+- `diagnostics[]` — `{ kind, severity, file, line, column, code, message, raw }`. `kind` is `csharp | gdscript | script_load | addon_load | other`; `severity` is `error | warning`. Deduplicated by the normalized tuple, capped at `max_diagnostics`.
+- `logPath` / `selectedLogKind` / `logSource` / `envOverrideUsed` — provenance for where the diagnostics came from.
+- `staleLogSuspected` — advisory flag (with `staleLogNewerFiles` + `staleLogHint`) when a cited source file's mtime is newer than the log's. Never suppresses diagnostics.
+
+**Non-error diagnostic statuses.** `logging_disabled`, `log_not_found`, `warnings_only`, and `no_errors_found` are SUCCESSFUL results (`isError:false`) — the tool succeeded; the file/state just has nothing to report. Only `project_not_found`, `project_config_unreadable`, `invalid_log_configuration`, `editor_log_unreadable`, and `offline_error` are hard errors.
+
+**Limitations.** Godot crash backtraces may only print to the terminal and never reach the file log. A custom `--log-file` is only discoverable through `GODOT_OPEN_MCP_LOG_FILE`. File logging is OFF by default in Godot — `logging_disabled` is the expected status until `debug/file_logging/enable_file_logging = true` is set in project.godot (Project Settings > Debug > File Logging).
 
 ## `godot_open_mcp_scene_get_data`
 

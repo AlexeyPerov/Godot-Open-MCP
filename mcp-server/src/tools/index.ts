@@ -52,6 +52,7 @@ import { reflectionMethodFind } from "./reflection-method-find.js";
 import { reflectionMethodCall } from "./reflection-method-call.js";
 import { bridgeStatus } from "./bridge-status.js";
 import { pullEvents } from "./pull-events.js";
+import { readCompileErrors } from "./read-compile-errors.js";
 
 /** Ordered list of every tool exposed over stdio MCP. */
 export const ALL_TOOLS: Tool[] = [
@@ -158,4 +159,13 @@ export const ALL_TOOLS: Tool[] = [
   // only, gate-free, live (requires a connected bridge). Returns connected:false + lastError on an
   // offline bridge instead of throwing.
   pullEvents,
+  // P7.4 — read_compile_errors: offline, filesystem-only diagnostic. Reads a bounded tail of the
+  // project's configured Godot log file and extracts structured C#/GDScript/plugin-load diagnostics.
+  // The one recovery channel that works when the bridge addon itself failed to compile or load —
+  // console_get_logs depends on the bridge-fed addon collector and stops accumulating in that state.
+  // Always-offline route: the dispatcher special-cases the name and never calls the bridge or spawns
+  // Godot. Resolves the log path from project.godot's debug/file_logging/* settings + platform user-
+  // data-dir defaults + the operator GODOT_OPEN_MCP_LOG_FILE env override (no per-call log_path —
+  // no arbitrary file-read surface). Read-only, gate-free.
+  readCompileErrors,
 ];

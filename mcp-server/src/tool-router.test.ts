@@ -812,3 +812,253 @@ test("route: filesystem_list does NOT fall back to disk after a live semantic er
   assert.deepEqual(body._route, { route: "live" });
   assert.equal(live.calls.length, 1, "forwarded to live exactly once");
 });
+
+// ---------------------------------------------------------------------------
+// P7.4 — read_compile_errors: always-offline (never calls the bridge)
+// ---------------------------------------------------------------------------
+
+const LOG_PROJECT_GODOT = `config_version=5
+
+[application]
+
+config/name="Log Project"
+
+[debug]
+
+[file_logging]
+
+enable_file_logging=true
+`;
+
+/**
+ * Build a temp project whose Godot log lives under a known absolute path. The
+ * env override `GODOT_OPEN_MCP_LOG_FILE` is set on the router process so the
+ * resolver picks our temp file deterministically (the default user-data dir
+ * would land under the real user home and be flaky in CI).
+ *
+ * Returns the project root + the log file path. The caller writes the log
+ * content via `writeFileSync(logPath, ...)`.
+ */
+async function makeLogProject(): Promise<{ root: string; logPath: string }> {
+  const root = await mkdtemp(join(tmpdir(), "gom-router-log-"));
+  await writeFile(join(root, "project.godot"), LOG_PROJECT_GODOT, "utf-8");
+  const logPath = join(root, "godot.log");
+  process.env.GODOT_OPEN_MCP_LOG_FILE = logPath;
+  return { root, logPath };
+}
+
+function clearLogEnvOverride(): void {
+  delete process.env.GODOT_OPEN_MCP_LOG_FILE;
+}
+
+test("route: read_compile_errors never probes live and never calls the bridge", async () => {
+  const { root, logPath } = await makeLogProject();
+  try {
+    await writeFile(logPath, "clean log, no errors\n", "utf-8");
+    const live = makeFakeLive({ liveAvailable: true });
+    const router = makeRouter(live, makeFakeEventStream(), root);
+
+    const result = await router.route("godot_open_mcp_read_compile_errors", {});
+    const body = parseBody(result);
+
+    // The always-offline route MUST NOT probe availability or POST to the
+    // bridge — even when the bridge is up.
+    assert.equal(live.liveProbes, 0, "must not probe isLiveAvailable");
+    assert.equal(live.calls.length, 0, "must not POST to the bridge");
+    assert.equal(result.isError, false);
+    assert.equal(body._source, "offline");
+    assert.deepEqual(body._route, { route: "offline" });
+    assert.equal(
+      (body._route as { fallbackReason?: string }).fallbackReason,
+      undefined,
+      "offline is the primary route — no fallbackReason",
+    );
+  } finally {
+    clearLogEnvOverride();
+  }
+});
+
+test("route: read_compile_errors surfaces C# errors from the log tail", async () => {
+  const { root, logPath } = await makeLogProject();
+  try {
+    const log = [
+      "Godot startup preamble",
+      "res://scripts/player.cs(75,27): error CS1061: 'Player' does not contain a definition for 'Jump'",
+      "res://other.cs(10,2): error CS0103: The name 'Bar' does not exist",
+    ].join("\n");
+    await writeFile(logPath, log, "utf-8");
+
+    const router = makeRouter(makeFakeLive(), makeFakeEventStream(), root);
+    const result = await router.route("godot_open_mcp_read_compile_errors", {});
+    const body = parseBody(result);
+
+    assert.equal(result.isError, false);
+    assert.equal(body.status, "compile_failed");
+    assert.equal(body.unhealthy, true);
+    assert.equal(body.errorCount, 2);
+    assert.ok(typeof body.headline === "string" && body.headline.length > 0);
+    const diags = body.diagnostics as { kind: string; file: string; code: string }[];
+    assert.equal(diags.length, 2);
+    assert.equal(diags[0].kind, "csharp");
+    assert.equal(diags[0].file, "res://scripts/player.cs");
+    assert.equal(diags[0].code, "CS1061");
+    // Provenance fields.
+    assert.equal(body.logPath, logPath);
+    assert.equal(body.selectedLogKind, "current");
+    assert.equal(body.logSource, "env_override");
+    assert.equal(body.envOverrideUsed, true);
+  } finally {
+    clearLogEnvOverride();
+  }
+});
+
+test("route: read_compile_errors surfaces GDScript parse errors", async () => {
+  const { root, logPath } = await makeLogProject();
+  try {
+    const log =
+      "res://scripts/player.gd:12 - Parse Error: The identifier 'jump' isn't declared.\n";
+    await writeFile(logPath, log, "utf-8");
+
+    const router = makeRouter(makeFakeLive(), makeFakeEventStream(), root);
+    const result = await router.route("godot_open_mcp_read_compile_errors", {});
+    const body = parseBody(result);
+
+    assert.equal(body.status, "compile_failed");
+    const diags = body.diagnostics as { kind: string; file: string; line: number }[];
+    assert.equal(diags.length, 1);
+    assert.equal(diags[0].kind, "gdscript");
+    assert.equal(diags[0].file, "res://scripts/player.gd");
+    assert.equal(diags[0].line, 12);
+  } finally {
+    clearLogEnvOverride();
+  }
+});
+
+test("route: read_compile_errors returns logging_disabled when file logging is off + no log", async () => {
+  // A project with file logging DISABLED and no log file on disk.
+  const root = await mkdtemp(join(tmpdir(), "gom-router-nolog-"));
+  await writeFile(
+    join(root, "project.godot"),
+    `config_version=5\n[application]\nconfig/name="NoLog"\n`,
+    "utf-8",
+  );
+  // Point the env override at a path that does NOT exist under this project.
+  process.env.GODOT_OPEN_MCP_LOG_FILE = join(root, "godot.log");
+  try {
+    const router = makeRouter(makeFakeLive(), makeFakeEventStream(), root);
+    const result = await router.route("godot_open_mcp_read_compile_errors", {});
+    const body = parseBody(result);
+
+    // The tool SUCCEEDED — logging_disabled is a valid explanatory status, not
+    // a hard error. isError must be false.
+    assert.equal(result.isError, false, "logging_disabled is not a hard error");
+    assert.equal(body.status, "logging_disabled");
+    assert.equal(body.unhealthy, false);
+    assert.equal(body.errorCount, 0);
+    assert.equal(body.loggingDisabled, true);
+    assert.ok(
+      typeof body.headline === "string" && body.headline.length > 0,
+      "carries an actionable explanation",
+    );
+    assert.equal(body._source, "offline");
+  } finally {
+    clearLogEnvOverride();
+  }
+});
+
+test("route: read_compile_errors returns log_not_found when logging enabled but no log exists", async () => {
+  // File logging ENABLED but the log file is missing (e.g. Godot has not run
+  // since the setting was toggled). logging_disabled must NOT fire; log_not_found
+  // is the correct explanatory status.
+  const root = await mkdtemp(join(tmpdir(), "gom-router-missinglog-"));
+  await writeFile(
+    join(root, "project.godot"),
+    `config_version=5\n[application]\nconfig/name="MissingLog"\n[debug]\n[file_logging]\nenable_file_logging=true\n`,
+    "utf-8",
+  );
+  process.env.GODOT_OPEN_MCP_LOG_FILE = join(root, "godot.log");
+  try {
+    const router = makeRouter(makeFakeLive(), makeFakeEventStream(), root);
+    const result = await router.route("godot_open_mcp_read_compile_errors", {});
+    const body = parseBody(result);
+
+    assert.equal(result.isError, false);
+    assert.equal(body.status, "log_not_found");
+    assert.equal(body.unhealthy, false);
+    assert.equal(body.loggingDisabled, false);
+  } finally {
+    clearLogEnvOverride();
+  }
+});
+
+test("route: read_compile_errors returns no_errors_found for a clean log", async () => {
+  const { root, logPath } = await makeLogProject();
+  try {
+    await writeFile(logPath, "Godot v4.3 - all good, no errors here\n", "utf-8");
+
+    const router = makeRouter(makeFakeLive(), makeFakeEventStream(), root);
+    const result = await router.route("godot_open_mcp_read_compile_errors", {});
+    const body = parseBody(result);
+
+    assert.equal(result.isError, false);
+    assert.equal(body.status, "no_errors_found");
+    assert.equal(body.unhealthy, false);
+    assert.equal(body.errorCount, 0);
+  } finally {
+    clearLogEnvOverride();
+  }
+});
+
+test("route: read_compile_errors project_not_found when project.godot is missing", async () => {
+  const root = await mkdtemp(join(tmpdir(), "gom-router-noproj-"));
+  // No project.godot marker written.
+  process.env.GODOT_OPEN_MCP_LOG_FILE = join(root, "godot.log");
+  try {
+    const router = makeRouter(makeFakeLive(), makeFakeEventStream(), root);
+    const result = await router.route("godot_open_mcp_read_compile_errors", {});
+    const body = parseBody(result);
+
+    assert.equal(result.isError, true);
+    assert.equal(errCode(result), "project_not_found");
+    assert.equal(body._source, "offline");
+  } finally {
+    clearLogEnvOverride();
+  }
+});
+
+test("route: read_compile_errors stale-log advisory flags when a cited source is newer", async () => {
+  const { root, logPath } = await makeLogProject();
+  try {
+    // Write a C# error citing a source file, then make that source NEWER than
+    // the log → stale-log advisory should fire.
+    await mkdir(join(root, "scripts"), { recursive: true });
+    const srcPath = join(root, "scripts", "player.cs");
+    const srcContent = "namespace Fixed {}";
+    await writeFile(srcPath, srcContent, "utf-8");
+    const log =
+      "res://scripts/player.cs(75,27): error CS1061: 'Player' does not contain 'Jump'\n";
+    await writeFile(logPath, log, "utf-8");
+    // Log older, source newer → stale.
+    const oldT = new Date(1000);
+    const newT = new Date(2000);
+    const { utimes } = await import("node:fs/promises");
+    await utimes(logPath, oldT, oldT);
+    await utimes(srcPath, newT, newT);
+
+    const router = makeRouter(makeFakeLive(), makeFakeEventStream(), root);
+    const result = await router.route("godot_open_mcp_read_compile_errors", {});
+    const body = parseBody(result);
+
+    assert.equal(body.staleLogSuspected, true);
+    assert.ok(Array.isArray(body.staleLogNewerFiles) && body.staleLogNewerFiles.length === 1);
+    assert.equal(
+      (body.staleLogNewerFiles as string[])[0],
+      "scripts/player.cs",
+    );
+    assert.ok(typeof body.staleLogHint === "string" && body.staleLogHint.length > 0);
+    // Diagnostics are still surfaced — staleness is advisory, never suppresses.
+    assert.equal(body.errorCount, 1);
+  } finally {
+    clearLogEnvOverride();
+  }
+});

@@ -174,18 +174,18 @@ test("bridgeStatusRecoveryHint: non-null only for dead_bridge", () => {
   }
 });
 
-test("bridgeStatusRecoveryHint: dead_bridge names a registered diagnostic tool", () => {
+test("bridgeStatusRecoveryHint: dead_bridge names the registered offline compile-errors reader", () => {
   const hint = bridgeStatusRecoveryHint("dead_bridge");
   assert.ok(hint);
-  // The tool referenced MUST be in ALL_TOOLS — the risk safeguard forbids a hint
-  // that points at an unregistered tool. Today it's console_get_logs (closest
-  // registered diagnostic); when read_compile_errors ships, swap the tool + drop the note.
+  // P7.4 — the hint now names the authoritative offline log reader. The risk
+  // safeguard requires the tool to be registered; ALL_TOOLS membership is
+  // asserted here so a future unregister breaks this test in the same change.
+  assert.equal(hint.tool, "godot_open_mcp_read_compile_errors");
   const registered = ALL_TOOLS.some((t) => t.name === hint.tool);
   assert.ok(registered, `recovery hint tool '${hint.tool}' must be a registered tool`);
-  // A note MUST accompany the hint until the authoritative offline reader ships,
-  // so the hint is never misleading about console_get_logs being bridge-fed.
-  assert.equal(typeof hint.note, "string");
-  assert.ok((hint.note ?? "").length > 0);
+  // The hint no longer carries a `note` — the offline reader IS the
+  // authoritative recovery path, so there is no gap to caveat.
+  assert.equal(hint.note, undefined, "no note once the authoritative tool ships");
 });
 
 // nextStep prose — every status has action-oriented guidance.

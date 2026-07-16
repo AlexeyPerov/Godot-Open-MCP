@@ -13,19 +13,21 @@
 //     `dead_bridge`
 //   - `nextStep` operator-facing prose per status
 // Only the recovery *tool id* and the Godot-specific wording change (no Unity
-// Safe Mode cold-start story; the offline compile-errors reader is a later
-// phase — see INTENTIONAL_DELTAS below).
+// Safe Mode cold-start story; the offline compile-errors reader is the
+// authoritative recovery path — see INTENTIONAL_DELTAS below).
 //
 // ── INTENTIONAL_DELTAS (from Unity) ──────────────────────────────────────────
 // 1. No `findUnityForProject` cold-Safe-Mode branch. Unity folds "no lock +
 //    unreachable + a live Unity process for this project" into `dead_bridge`
 //    (cold Safe Mode). Godot has no equivalent out-of-band process scan, and
 //    the plan explicitly defers it. That case stays `stopped` here.
-// 2. Recovery tool today is `godot_open_mcp_console_get_logs` (the closest
-//    registered diagnostic), NOT Unity's offline
-//    `unity_open_mcp_read_compile_errors`. A dedicated offline
-//    `godot_open_mcp_read_compile_errors` arrives in a later phase; until then
-//    the hint carries a `note` documenting the gap so it is never misleading.
+// 2. Recovery tool is `godot_open_mcp_read_compile_errors` (P7.4 — the
+//    always-offline log reader). It reads the project's configured Godot log
+//    file from disk, independent of the bridge, so it works in the exact state
+//    `dead_bridge` describes (the addon is not running its listener). Unity
+//    points at the same-named `unity_open_mcp_read_compile_errors` for the same
+//    reason. The hint carries NO `note` — the tool is the authoritative
+//    recovery path.
 // 3. No Unity Safe Mode language — `dead_bridge` reads as "Godot process
 //    alive, bridge heartbeat stale / plugin failed to load".
 // ─────────────────────────────────────────────────────────────────────────────
@@ -157,29 +159,25 @@ export function deriveBridgeStatus(input: BridgeStatusInput): BridgeStatus {
  * a specific recovery tool to call. Today only `dead_bridge` carries a hint;
  * the shape is extensible so future failure modes can add their own.
  *
- * Per the P5.3 risk safeguard ("only emit a hint when the tool is actually
- * registered; else null + document the gap"), the `dead_bridge` hint names
- * `godot_open_mcp_console_get_logs` — the closest registered diagnostic — and
- * carries a `note` that (a) it is the bridge-fed addon collector so it may be
- * empty while the bridge is dead, and (b) a dedicated offline
- * `godot_open_mcp_read_compile_errors` is planned. When that offline reader
- * ships, swap the `tool` + drop the `note`.
+ * The `dead_bridge` hint names `godot_open_mcp_read_compile_errors` — the
+ * always-offline log reader (P7.4). It reads the project's configured Godot log
+ * file straight from disk, independent of the bridge, so it works in the exact
+ * state `dead_bridge` describes: the addon is not running its listener, so
+ * every in-bridge channel (`console_get_logs`, `/ping`) is dead with it, but
+ * the live Godot editor still writes compile/plugin-load errors to the log. The
+ * hint carries NO `note` — the tool is the authoritative recovery path.
  */
 export function bridgeStatusRecoveryHint(status: BridgeStatus): BridgeRecoveryHint | null {
   if (status === "dead_bridge") {
     return {
-      tool: "godot_open_mcp_console_get_logs",
+      tool: "godot_open_mcp_read_compile_errors",
       reason:
         "Godot is running but the bridge listener is not recovering (stale " +
-        "heartbeat / plugin failed to load). Recent addon-captured logs may " +
-        "show the failure that preceded the stale heartbeat.",
-      note:
-        "console_get_logs reads the bridge-fed addon collector, which stops " +
-        "accumulating once the bridge is dead — recent pre-failure entries " +
-        "may still be visible. A dedicated offline " +
-        "godot_open_mcp_read_compile_errors tool is planned for a later " +
-        "phase; until then, inspect the Godot editor Output / file logs " +
-        "directly for compile or plugin-load errors.",
+        "heartbeat / plugin failed to load), so every in-bridge diagnostic " +
+        "channel is dead with it. The offline compile-errors reader parses " +
+        "the project's Godot log file straight from disk — it works in this " +
+        "exact state and surfaces the C#/GDScript/plugin-load failure that " +
+        "preceded the stale heartbeat.",
     };
   }
   return null;
@@ -202,7 +200,7 @@ export function bridgeStatusNextStep(status: BridgeStatus): string {
     case "unreachable":
       return "Bridge listener is not responding but Godot is running — likely a transient editor-reload window (the bridge tears down its HTTP socket during reloads). Wait a moment and call godot_open_mcp_bridge_status again; if it persists, check the addon is still enabled.";
     case "dead_bridge":
-      return "Godot is running but the bridge heartbeat is stale — the addon is not running its HTTP listener (it failed to load or was disabled mid-session), so /ping will not recover on its own. Check the Godot editor Output panel for compile or plugin-load errors, re-enable the addon if it was disabled, then call godot_open_mcp_bridge_status again. Recent addon-captured logs (godot_open_mcp_console_get_logs) may show the failure.";
+      return "Godot is running but the bridge heartbeat is stale — the addon is not running its HTTP listener (it failed to load or was disabled mid-session), so /ping will not recover on its own. Call godot_open_mcp_read_compile_errors to read the project's Godot log from disk (works without the bridge) and surface the C#/GDScript/plugin-load failure, then fix the source, re-enable the addon if it was disabled, and call godot_open_mcp_bridge_status again.";
   }
 }
 
