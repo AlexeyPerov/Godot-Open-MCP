@@ -198,6 +198,35 @@ export class LiveClient {
   }
 
   /**
+   * Cheap live-availability probe for the router's live-first tools (P7.2).
+   * Fetches `GET /ping` and reports whether the bridge answered as connected:
+   *   - HTTP 200 + `connected: true` → `true`.
+   *   - HTTP 503 (listener up, session not ready) → `true`. The bridge IS
+   *     reachable; the router forwards to the live route so the agent sees the
+   *     bridge's own loading/compiling state rather than a disk fallback.
+   *   - HTTP other / connection failure / timeout → `false`.
+   *
+   * Never throws. Adapted from Unity Open MCP's `LiveClient.isLiveAvailable`
+   * (copy fidelity for the 200/503/offline classification). Intentional delta:
+   * Godot has no ping cache / compat-warning side effects on this path (those
+   * arrive when a later phase adds the ping cache). The router treats `false`
+   * as "fall back to offline"; a live semantic error (e.g. `scene_not_edited`)
+   * is authoritative and must NOT trigger a fallback — only an unreachable
+   * bridge does.
+   */
+  async isLiveAvailable(): Promise<boolean> {
+    try {
+      const res = await this.fetchWithTimeout("/ping", { method: "GET" });
+      if (res.status === 503) return true;
+      if (!res.ok) return false;
+      const body = (await res.json()) as PingResponse;
+      return body.connected === true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * `godot_open_mcp_ping` handler. Fetches `GET /ping` from the resolved
    * bridge endpoint and normalizes the response:
    *   - HTTP 200 + valid body → success, body returned verbatim as JSON text.

@@ -35,6 +35,7 @@ import type { BridgeEventStream } from "./event-stream.js";
 import { ALL_TOOLS } from "./tools/index.js";
 import { buildCapabilities, type CapabilitiesFilter } from "./capabilities/build-capabilities.js";
 import { RULE_CATALOG, FIX_CATALOG } from "./capabilities/rule-catalog.js";
+import { readSceneGetDataOffline } from "./offline/scene-get-data.js";
 
 // ---------------------------------------------------------------------------
 // Route vocabulary + metadata helpers (P7.1 §2).
@@ -188,6 +189,10 @@ function assertNoSourceConflict(
 const CAPABILITIES_TOOL = "godot_open_mcp_capabilities";
 const BRIDGE_STATUS_TOOL = "godot_open_mcp_bridge_status";
 const PULL_EVENTS_TOOL = "godot_open_mcp_pull_events";
+/** P7.2 — the first live-first/offline-fallback tool. When the bridge is
+ *  reachable, it forwards to the live handler (which reflects unsaved editor
+ *  state); when the bridge is unavailable it parses the `.tscn` from disk. */
+const SCENE_GET_DATA_TOOL = "godot_open_mcp_scene_get_data";
 
 /**
  * ToolRouter selects live / offline / local per tool call. One instance per
@@ -219,6 +224,9 @@ export class ToolRouter implements Router {
     }
     if (toolName === PULL_EVENTS_TOOL) {
       return this.routePullEvents(args);
+    }
+    if (toolName === SCENE_GET_DATA_TOOL) {
+      return this.routeSceneGetData(args);
     }
     return this.routeLive(toolName, args);
   }
@@ -311,5 +319,94 @@ export class ToolRouter implements Router {
         : 50;
     const result = this.eventStream.pull(maxEvents);
     return sourceResult(result, "local", { route: "local" });
+  }
+
+  // ── P7.2 — live-first `scene_get_data` with offline fallback ───────────
+
+  /**
+   * `godot_open_mcp_scene_get_data` — the first live-first/offline-fallback
+   * tool. Routing policy (P7.2 spec §7):
+   *
+   *   1. Probe `live.isLiveAvailable()` once. If the bridge answered as
+   *      connected (or returned 503 — reachable but loading), forward the
+   *      unchanged args to the live handler and tag the result `live`. The
+   *      live read reflects unsaved editor state, which the disk parse cannot.
+   *   2. If the bridge is unavailable, require a `path` argument (the offline
+   *      reader has no "edited scene" context to fall back on). Missing
+   *      `path` → `path_required_offline`.
+   *   3. Run the offline parser and tag the result `_source: "offline"` +
+   *      `_route: { route: "offline", fallbackReason: "live_unavailable" }`.
+   *   4. NEVER fall back to disk after a semantic live error (e.g.
+   *      `scene_not_edited`) — the live editor answered authoritatively; only
+   *      an unreachable bridge triggers the fallback.
+   *   5. NEVER fall back on an auth failure or malformed bridge response —
+   *      those surface to the caller as live errors, not as "unavailable".
+   *
+   * `isLiveAvailable` returns false only for connection failure / non-503 HTTP
+   * errors / `connected: false` bodies — exactly the unavailability signal the
+   * fallback keys on. A missing `LiveClient` (test-harness omission) surfaces
+   * a structured `router_not_wired` error so a malformed test never throws.
+   */
+  private async routeSceneGetData(
+    args: Record<string, unknown>,
+  ): Promise<CallToolResult> {
+    if (typeof this.live.isLiveAvailable !== "function") {
+      return sourceResult(
+        {
+          error: {
+            code: "router_not_wired",
+            message:
+              "ToolRouter is not wired to a LiveClient with isLiveAvailable().",
+          },
+        },
+        "offline",
+        { route: "offline", fallbackReason: "router_not_wired" },
+        true,
+      );
+    }
+
+    const liveAvailable = await this.live.isLiveAvailable();
+    if (liveAvailable) {
+      // Live wins — reflects unsaved editor state. Forward unchanged and tag.
+      const result = await this.live.route(SCENE_GET_DATA_TOOL, args);
+      return tagJsonResult(result, "live", { route: "live" });
+    }
+
+    // Bridge unavailable → offline disk parse. `path` is required offline.
+    const path = typeof args.path === "string" ? args.path : "";
+    if (path === "") {
+      return sourceResult(
+        {
+          error: {
+            code: "path_required_offline",
+            message:
+              "scene_get_data requires a 'path' (res://...tscn) when the Godot editor is not running. " +
+              "With the bridge online, omitting 'path' reads the currently edited scene.",
+          },
+        },
+        "offline",
+        { route: "offline", fallbackReason: "live_unavailable" },
+        true,
+      );
+    }
+
+    const read = await readSceneGetDataOffline(
+      path,
+      args.hierarchy_depth,
+      this.projectPath,
+    );
+    if (!read.ok) {
+      return sourceResult(
+        { error: read.error },
+        "offline",
+        { route: "offline", fallbackReason: "live_unavailable" },
+        true,
+      );
+    }
+    return sourceResult(
+      read.result,
+      "offline",
+      { route: "offline", fallbackReason: "live_unavailable" },
+    );
   }
 }

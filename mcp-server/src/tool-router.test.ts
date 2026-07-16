@@ -43,14 +43,19 @@ interface LiveCall {
 /**
  * Minimal LiveClient fake. `route` records every call and returns a canned
  * result; `routeBridgeStatus` records its single composition call and returns
- * a canned result. The router only calls these two methods at P7.1.
+ * a canned result. `isLiveAvailable` controls the P7.2 live-first probe
+ * (default `false` so the offline fallback path is exercised unless a test
+ * opts into live).
  */
 function makeFakeLive(opts: {
   result?: CallToolResult;
   bridgeStatusResult?: CallToolResult;
-} = {}): LiveClient & { calls: LiveCall[]; statusCalls: number } {
+  liveAvailable?: boolean;
+} = {}): LiveClient & { calls: LiveCall[]; statusCalls: number; liveProbes: number } {
   const calls: LiveCall[] = [];
   let statusCalls = 0;
+  let liveProbes = 0;
+  const liveAvailable = opts.liveAvailable ?? false;
   const result =
     opts.result ??
     ({
@@ -78,6 +83,7 @@ function makeFakeLive(opts: {
   return {
     calls,
     statusCalls: 0,
+    liveProbes: 0,
     async route(tool: string, args: Record<string, unknown>) {
       calls.push({ tool, args });
       return result;
@@ -89,7 +95,16 @@ function makeFakeLive(opts: {
       (this as unknown as { statusCalls: number }).statusCalls = statusCalls;
       return bridgeStatusResult;
     },
-  } as unknown as LiveClient & { calls: LiveCall[]; statusCalls: number };
+    async isLiveAvailable() {
+      liveProbes++;
+      (this as unknown as { liveProbes: number }).liveProbes = liveProbes;
+      return liveAvailable;
+    },
+  } as unknown as LiveClient & {
+    calls: LiveCall[];
+    statusCalls: number;
+    liveProbes: number;
+  };
 }
 
 /**
@@ -139,6 +154,12 @@ function parseBody(result: CallToolResult): Record<string, unknown> {
 function routeOf(result: CallToolResult): string {
   const route = parseBody(result)._route as { route?: string } | undefined;
   return route?.route ?? "";
+}
+
+/** Pull the structured error code from a result body, or undefined. */
+function errCode(result: CallToolResult): string | undefined {
+  const err = parseBody(result).error as { code?: string } | undefined;
+  return err?.code;
 }
 
 // ---------------------------------------------------------------------------
@@ -422,4 +443,171 @@ test("route: no route name 'batch' is ever emitted", async () => {
   for (const call of live.calls) {
     assert.notEqual(call.tool, "batch");
   }
+});
+
+// ---------------------------------------------------------------------------
+// P7.2 — scene_get_data: live-first with offline fallback
+// ---------------------------------------------------------------------------
+
+import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+const OFFLINE_SCENE = `[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://player.gd" id="1_s"]
+
+[node name="Main" type="Node2D"]
+
+[node name="Player" type="CharacterBody2D" parent="."]
+script = ExtResource("1_s")
+`;
+
+async function makeOfflineProject(): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), "gom-router-"));
+  await mkdir(join(root, "scenes"), { recursive: true });
+  await writeFile(join(root, "scenes", "main.tscn"), OFFLINE_SCENE, "utf-8");
+  return root;
+}
+
+test("route: scene_get_data forwards to live when the bridge is available", async () => {
+  const live = makeFakeLive({
+    liveAvailable: true,
+    result: {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            path: "res://scenes/main.tscn",
+            name: "Main",
+            isDirty: true,
+            rootType: "Node2D",
+            hierarchyDepth: 1,
+            root: { name: "Main", type: "Node2D" },
+          }),
+        },
+      ],
+      isError: false,
+    },
+  });
+  const router = makeRouter(live, makeFakeEventStream());
+
+  const result = await router.route("godot_open_mcp_scene_get_data", {
+    hierarchy_depth: 1,
+  });
+  const body = parseBody(result);
+
+  // Live wins — exactly one live route call, one availability probe.
+  assert.equal(live.calls.length, 1);
+  assert.equal(live.calls[0].tool, "godot_open_mcp_scene_get_data");
+  assert.equal(live.liveProbes, 1);
+  // The live payload (including unsaved isDirty) is preserved + tagged live.
+  assert.equal(body.isDirty, true, "live reflects unsaved state");
+  assert.equal(body._source, "live");
+  assert.deepEqual(body._route, { route: "live" });
+});
+
+test("route: scene_get_data falls back to offline disk parse when the bridge is down", async () => {
+  const projectRoot = await makeOfflineProject();
+  const live = makeFakeLive({ liveAvailable: false });
+  const router = makeRouter(live, makeFakeEventStream(), projectRoot);
+
+  const result = await router.route("godot_open_mcp_scene_get_data", {
+    path: "res://scenes/main.tscn",
+    hierarchy_depth: 1,
+  });
+  const body = parseBody(result);
+
+  assert.equal(result.isError, false);
+  assert.equal(live.calls.length, 0, "no live POST when bridge unavailable");
+  assert.equal(live.liveProbes, 1, "probed once then fell back");
+  assert.equal(body._source, "offline");
+  assert.deepEqual(body._route, {
+    route: "offline",
+    fallbackReason: "live_unavailable",
+  });
+  // Offline payload: disk-sourced scene with the normalized shape.
+  assert.equal(body.stateSource, "disk");
+  assert.equal(body.isDirty, false);
+  assert.equal(body.name, "Main");
+  assert.equal(body.rootType, "Node2D");
+  const root = body.root as {
+    instanceId: unknown;
+    children: { name: string; scriptResourcePath: string }[];
+  };
+  assert.equal(root.instanceId, null);
+  const player = root.children.find((c) => c.name === "Player");
+  assert.ok(player);
+  assert.equal(player.scriptResourcePath, "res://player.gd");
+});
+
+test("route: scene_get_data offline without path returns path_required_offline", async () => {
+  const projectRoot = await makeOfflineProject();
+  const live = makeFakeLive({ liveAvailable: false });
+  const router = makeRouter(live, makeFakeEventStream(), projectRoot);
+
+  const result = await router.route("godot_open_mcp_scene_get_data", {
+    hierarchy_depth: 1,
+  });
+  const body = parseBody(result);
+
+  assert.equal(result.isError, true);
+  assert.equal(body._source, "offline");
+  assert.equal(errCode(result), "path_required_offline");
+  assert.deepEqual(body._route, {
+    route: "offline",
+    fallbackReason: "live_unavailable",
+  });
+});
+
+test("route: scene_get_data offline structured error is tagged offline + isError", async () => {
+  const projectRoot = await makeOfflineProject();
+  const live = makeFakeLive({ liveAvailable: false });
+  const router = makeRouter(live, makeFakeEventStream(), projectRoot);
+
+  // Missing file → scene_not_found, surfaced as an offline-tagged error.
+  const result = await router.route("godot_open_mcp_scene_get_data", {
+    path: "res://scenes/missing.tscn",
+  });
+  const body = parseBody(result);
+
+  assert.equal(result.isError, true);
+  assert.equal(body._source, "offline");
+  assert.equal(errCode(result), "scene_not_found");
+});
+
+test("route: scene_get_data does NOT fall back to disk after a live semantic error", async () => {
+  // The bridge is UP (liveAvailable=true) but returns a semantic scene_not_edited
+  // error. The router must surface that live error authoritatively — NOT fall
+  // back to disk. Only an UNAVAILABLE bridge triggers the fallback.
+  const live = makeFakeLive({
+    liveAvailable: true,
+    result: {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            error: {
+              code: "scene_not_edited",
+              message: "requested scene is not the edited scene",
+            },
+          }),
+        },
+      ],
+      isError: true,
+    },
+  });
+  const projectRoot = await makeOfflineProject();
+  const router = makeRouter(live, makeFakeEventStream(), projectRoot);
+
+  const result = await router.route("godot_open_mcp_scene_get_data", {
+    path: "res://scenes/main.tscn",
+  });
+  const body = parseBody(result);
+
+  assert.equal(result.isError, true);
+  assert.equal(errCode(result), "scene_not_edited", "live error preserved");
+  assert.equal(body._source, "live", "tagged live, not offline");
+  assert.deepEqual(body._route, { route: "live" });
+  assert.equal(live.calls.length, 1, "forwarded to live exactly once");
 });

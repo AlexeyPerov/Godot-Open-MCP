@@ -31,6 +31,29 @@ test("scene_get_data tool has a non-empty description", () => {
   assert.ok((sceneGetData.description ?? "").length > 0);
 });
 
+test("scene_get_data description documents the offline disk fallback (P7.2)", () => {
+  // The description must tell an agent that the tool works with Godot closed
+  // (offline disk parse) and that `path` is required in that mode. Pins the
+  // P7.2 live-first/offline-fallback contract on the advertised schema.
+  const desc = sceneGetData.description ?? "";
+  assert.ok(desc.includes("offline"), "description mentions offline fallback");
+  assert.ok(desc.includes("stateSource"), "description mentions stateSource");
+  assert.ok(desc.includes("path") && desc.includes("REQUIRED"));
+});
+
+test("scene_get_data path description documents offline-required behavior (P7.2)", () => {
+  const props = sceneGetData.inputSchema.properties as Record<
+    string,
+    { description?: string }
+  >;
+  const pathDesc = props.path.description ?? "";
+  assert.ok(pathDesc.includes("OFFLINE"), "path schema notes offline mode");
+  assert.ok(
+    pathDesc.includes("path_required_offline"),
+    "path schema names the offline error code",
+  );
+});
+
 test("scene_get_data tool declares an object input schema with additionalProperties:false", () => {
   assert.equal(sceneGetData.inputSchema.type, "object");
   assert.equal(sceneGetData.inputSchema.additionalProperties, false);

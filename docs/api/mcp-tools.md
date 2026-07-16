@@ -26,6 +26,7 @@ Tool names follow the `godot_open_mcp_*` convention (ADR-003).
 | Route | Meaning | Tools |
 |---|---|---|
 | **live** | The CallTool handler POSTs to the bridge; the bridge handler runs on the editor main thread. | Most tools (node, scene, gate meta-tools, `apply_fix`). |
+| **live-first / offline fallback** | The CallTool handler probes the bridge once; if reachable it forwards to the live handler (reflecting unsaved editor state), otherwise it parses the asset from disk with no editor required. A live semantic error (e.g. `scene_not_edited`) is authoritative and does NOT trigger the fallback — only an unreachable bridge does. | `godot_open_mcp_scene_get_data`. |
 | **local** | The CallTool handler resolves the response in-process — no bridge hop. | `godot_open_mcp_capabilities`. |
 | **local/live hybrid** | The CallTool handler composes a response in-process but runs one `/ping` probe through the live client (auth header + 503 fallback match `ping`). No `POST /tools/{name}` endpoint on the bridge. | `godot_open_mcp_bridge_status`. |
 | **local-drains-live-stream** | The CallTool handler drains a per-process SSE subscription the MCP server keeps open to the bridge's `GET /events`. No `POST /tools/{name}` endpoint on the bridge. | `godot_open_mcp_pull_events`. |
@@ -194,6 +195,31 @@ Why poll instead of push? The MCP server runs over a stdio transport and has no 
 **Never throws on an offline bridge.** When the bridge is unreachable the tool returns `connected:false` + `lastError` (and `events:[]`) with `isError:false` so an agent can branch on the connection state. The reader reconnects automatically (2 s backoff) once the bridge is back.
 
 **Capture scope.** `log` events come from the P4.7 collector — the addon's captured activity (bridge lifecycle, tool-handler errors, routed game/script output when a supported hook is active), NOT the entire Godot editor Output panel. `editor_state` events fire at authoritative observed transitions (the bridge-driven play start/stop settle); a background observer for user-clicked play arrives in a later phase.
+
+## `godot_open_mcp_scene_get_data`
+
+Read the hierarchy of a Godot scene as a structured NodeData tree (read-only, gate-free). The first **live-first / offline-fallback** tool: when the Godot editor is running it reads the currently edited scene and reflects unsaved editor state; when the editor is unavailable it parses the `.tscn` from disk with no Godot process required.
+
+**Routing:**
+
+- **Live (bridge reachable):** forwards to the bridge handler, which walks the edited scene root via `NodeTools.ToNodeData`. `path` is optional — omit to read the edited scene; set it to assert the edited scene matches (refuses with `scene_not_edited` otherwise, since switching scenes is a mutating op that belongs to `scene_open`). Result carries live instance IDs and the bridge-tracked `isDirty` flag.
+- **Offline (bridge unreachable):** parses the `.tscn` text directly. `path` is **required** (there is no edited-scene context to fall back on); omitting it returns `path_required_offline`. The result is normalized to the same envelope as the live read, with the deltas below.
+
+**Input:**
+
+- `path` (string) — `res://` path of the scene. Optional live (asserts the edited scene); required offline.
+- `hierarchy_depth` (integer, default `1`) — `0` = root node only; `1` = root + direct children; `N` = N layers; `-1` = the whole tree. Positive values are capped at `5` to bound the response (deeper trees blow the token budget — drill in with `node_find` instead).
+
+**Result envelope** (shared live + offline shape): `{ path, name, isDirty, rootType, hierarchyDepth, root }` where `root` is a NodeData (`instanceId`, `name`, `path`, `type`, `scriptResourcePath`, `childCount`, `children` per depth). The offline read adds:
+
+- `stateSource: "disk"` — marks the read as disk-origin so a client never mistakes it for live.
+- `isDirty: false` — offline state has no unsaved edits.
+- `root.instanceId: null` — no live instance IDs offline (never a fake hashed id).
+- `warnings` — present only when non-empty (e.g. an inherited scene whose base is not expanded offline).
+
+**Offline limitations** (documented deltas from the live read): no unsaved state, no instance IDs, partial instanced/inherited-scene expansion (an instanced node with no explicit `type` uses the `PackedSceneInstance` fallback), and script paths come from serialized `ExtResource` references rather than runtime `Script` objects. The offline reader never evaluates code, loads resources, or writes project files; it is read-only and rebuilt per request (no on-disk cache).
+
+**Offline error codes:** `path_required_offline`, `invalid_path` (non-`res://`, traversal, wrong extension, invalid characters), `path_outside_project` (symlink or canonical escape), `scene_not_found`, `scene_unreadable` (permission or non-regular file), `scene_too_large` (exceeds the 8 MiB read cap), `scene_parse_error` (malformed `.tscn`), `scene_hierarchy_invalid` (orphan/duplicate/cyclic parent graph).
 
 ## `godot_open_mcp_resource_find`
 

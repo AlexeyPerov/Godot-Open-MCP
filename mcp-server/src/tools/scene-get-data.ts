@@ -1,9 +1,9 @@
-// `godot_open_mcp_scene_get_data` tool definition (P2.7).
+// `godot_open_mcp_scene_get_data` tool definition (P2.7; offline fallback in P7.2).
 //
-// Read-only. Returns a live snapshot of the edited scene's hierarchy as a NodeData
+// Read-only. Returns a snapshot of the edited scene's hierarchy as a NodeData
 // tree (the same DTO node_find returns), driven by a `hierarchy_depth` bound. The
-// handler lives in the bridge (POST /tools/godot_open_mcp_scene_get_data); this file
-// is the catalog metadata only — name / description / input schema — advertised to
+// live handler lives in the bridge (POST /tools/godot_open_mcp_scene_get_data); this
+// file is the catalog metadata only — name / description / input schema — advertised to
 // AI clients over stdio ListTools.
 //
 // Adapted from Unity Open MCP's mcp-server/src/tools/scene-get-data.ts (adapt
@@ -15,10 +15,11 @@
 //     node_find).
 //   - Unity's paging (page_size/cursor) is deferred — Godot scenes in P2 are read
 //     whole up to the depth cap; a token-budget pager is a later phase.
-//   - `path` is optional: when omitted, reads the edited scene; when set and NOT the
-//     edited scene, the handler refuses with scene_not_edited (live-only in P2;
-//     offline .tscn parse lands in P7.2). Switching scenes is a mutating op that
-//     belongs to scene_open.
+//   - `path` is optional LIVE: when omitted, reads the edited scene; when set and
+//     NOT the edited scene, the live handler refuses with scene_not_edited.
+//     OFFLINE (P7.2) `path` is REQUIRED — no edited-scene context exists when the
+//     bridge is down, so the offline parser must be told which res://...tscn to
+//     read; omitting it offline returns path_required_offline.
 //   - `hierarchy_depth` mirrors Godot-MCP's Tool_Scene.GetData arg: 0 = root only,
 //     1 (default) = root + direct children, N = N layers, -1 = whole tree (positive
 //     capped at 5 to bound the token budget).
@@ -32,25 +33,29 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 export const sceneGetData: Tool = {
   name: "godot_open_mcp_scene_get_data",
   description:
-    "Read the hierarchy of the currently edited Godot scene as a structured NodeData tree (read-only). " +
-    "Returns the scene's path, name, isDirty, rootType, and a `root` NodeData with children populated " +
-    "per `hierarchy_depth`. `hierarchy_depth`: 0 = root node only (no children); 1 (default) = root + " +
-    "direct children; N = N layers; -1 = the whole tree (positive values capped at 5 to bound the " +
-    "response). Each NodeData carries instanceId, name, path, type, scriptResourcePath, and childCount " +
-    "(plus `children` when depth > 0). Optionally pass `path` to assert the edited scene matches a " +
-    "specific res:// path (the handler refuses with scene_not_edited if it does not — P2.7 is a live " +
-    "read only; offline .tscn parse lands later). Use scene_list_opened to enumerate open scenes. " +
-    "Prefer this over reading the .tscn file directly: it reflects unsaved editor state and is " +
-    "token-budgeted by hierarchy_depth.",
+    "Read the hierarchy of a Godot scene as a structured NodeData tree (read-only). Live-first: when " +
+    "the Godot editor is running, reads the currently edited scene and reflects unsaved editor state. " +
+    "When the editor is unavailable, falls back to parsing the .tscn file from disk (Godot closed or " +
+    "the bridge down) — in that case `path` is REQUIRED and the result carries `stateSource: \"disk\"`, " +
+    "`isDirty: false`, and null instance IDs (offline reads cannot expose live instance IDs or unsaved " +
+    "state). Returns the scene's path, name, isDirty, rootType, hierarchyDepth, and a `root` NodeData. " +
+    "`hierarchy_depth`: 0 = root node only; 1 (default) = root + direct children; N = N layers; -1 = " +
+    "the whole tree (positive values capped at 5). Each NodeData carries instanceId (null offline), " +
+    "name, path, type, scriptResourcePath, and childCount (plus `children` when depth > 0). When live, " +
+    "`path` optionally asserts the edited scene matches (refuses with scene_not_edited otherwise). When " +
+    "offline, `path` selects which .tscn to read from disk.",
   inputSchema: {
     type: "object",
     properties: {
       path: {
         type: "string",
         description:
-          "Optional res:// path of the scene to read. When omitted, reads the currently edited scene. " +
-          "When set, the handler verifies it matches the edited scene's path and refuses with " +
-          "scene_not_edited otherwise (P2.7 is a live read; call scene_open to switch scenes first).",
+          "res:// path of the scene to read. LIVE (bridge online, optional): when omitted reads the " +
+          "currently edited scene; when set, the handler verifies it matches the edited scene and " +
+          "refuses with scene_not_edited otherwise (call scene_open to switch). OFFLINE (bridge " +
+          "unavailable, REQUIRED): no edited-scene context exists, so a res://...tscn path must be " +
+          "supplied; omitting it returns path_required_offline. The path is resolved safely beneath the " +
+          "project root — traversal and symlink escapes are rejected.",
       },
       hierarchy_depth: {
         type: "integer",

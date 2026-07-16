@@ -53,9 +53,22 @@ Godot has no headless editor batch mode — there is no `batch` route.
 Every registered `CallTool` dispatch flows through `ToolRouter.route` (P7.1). `index.ts` only validates tool registration (unknown names are rejected before the router runs) and normalizes `arguments`; the router owns live/offline/local selection:
 
 - **local named handlers** — `godot_open_mcp_capabilities`, `godot_open_mcp_bridge_status`, `godot_open_mcp_pull_events` are resolved in the MCP server (no `POST /tools/{name}` bridge hop). Capabilities is built locally from the tool + rule + fix catalog; bridge_status composes the lock classifier with one `/ping` probe; pull_events drains the per-process SSE-backed event stream.
+- **live-first / offline fallback** — `godot_open_mcp_scene_get_data` (P7.2) probes the bridge once via `LiveClient.isLiveAvailable()`; if reachable it forwards to the live handler (reflecting unsaved editor state), otherwise it parses the `.tscn` from disk with no Godot process required. A live semantic error (e.g. `scene_not_edited`) is authoritative and does NOT trigger the fallback — only an unreachable bridge does. The offline result is tagged `_source: "offline"` + `_route.fallbackReason: "live_unavailable"`.
 - **generic live route** — every other registered tool dispatches through `LiveClient.route` → bridge.
 
 Each parseable JSON result is tagged with two MCP-server-owned metadata fields: `_source` (where the payload originated: `live` | `offline` | `local`) and `_route.route` (which policy executed the call). Metadata is added after the route completes and is never sent to a bridge handler. P7.2–P7.4 extend the named-handler map with offline exact handlers; they must not add new branches to `index.ts`.
+
+## Offline `.tscn` reader (`mcp-server/src/offline/`)
+
+P7.2 introduces the MCP-process offline scene reader — a bounded, read-only `.tscn` parser that backs the `scene_get_data` fallback when the bridge is down. It splits into four leaf modules mirroring Unity Open MCP's offline layout (adapt fidelity for the module boundaries; greenfield for the Godot `.tscn` grammar itself, which is unrelated to Unity's YAML document stream):
+
+- `project-paths.ts` — safe `res://` resolution + project containment. Rejects non-`res://` schemes, `..` traversal, NUL/control chars, backslashes, and URL-like authorities; resolves parent + file realpaths and refuses any canonical location that escapes the project root (symlink-safe). Enforces an 8 MiB read cap.
+- `types.ts` — the internal parsed model (`ParsedTscn`, `ParsedSceneNode`, `ExternalResource`, `OfflineWarning`), kept separate from the public NodeData-shaped envelope.
+- `scene-parser.ts` — a quote-aware, line-oriented parser for the `[gd_scene]` / `[ext_resource]` / `[sub_resource]` / `[node]` grammar. Extracts node identity + `script = ExtResource("id")` only; sub-resources and unknown properties are recognized and ignored, never evaluated.
+- `scene-hierarchy.ts` — reconstructs the single-rooted node tree from `parent=` links, with orphan/duplicate/cycle/multi-root detection (`scene_hierarchy_invalid`).
+- `scene-get-data.ts` — normalizes the parsed tree to the live `scene_get_data` envelope (`{ path, name, isDirty, rootType, hierarchyDepth, root }`), applies the `hierarchy_depth` contract, and marks the result `stateSource: "disk"` with null instance IDs.
+
+**No-cache philosophy.** The offline-read path deliberately avoids persistent on-disk caches — scene text is parsed fresh per request. This keeps the read cheap, side-effect-free, and always consistent with the file on disk. Adding a disk cache would require explicit approval and a change to this section.
 
 ## CLI package (`cli/`)
 
