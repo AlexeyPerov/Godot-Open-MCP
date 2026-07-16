@@ -36,6 +36,7 @@ import { ALL_TOOLS } from "./tools/index.js";
 import { buildCapabilities, type CapabilitiesFilter } from "./capabilities/build-capabilities.js";
 import { RULE_CATALOG, FIX_CATALOG } from "./capabilities/rule-catalog.js";
 import { readSceneGetDataOffline } from "./offline/scene-get-data.js";
+import { listProjectDirectoryOffline } from "./offline/project-index.js";
 
 // ---------------------------------------------------------------------------
 // Route vocabulary + metadata helpers (P7.1 §2).
@@ -193,6 +194,11 @@ const PULL_EVENTS_TOOL = "godot_open_mcp_pull_events";
  *  reachable, it forwards to the live handler (which reflects unsaved editor
  *  state); when the bridge is unavailable it parses the `.tscn` from disk. */
 const SCENE_GET_DATA_TOOL = "godot_open_mcp_scene_get_data";
+/** P7.3 — the second live-first/offline-fallback tool. When the bridge is
+ *  reachable, it forwards to the live handler (which reads the import index for
+ *  authoritative resource type + UID); when the bridge is unavailable it lists
+ *  the `res://` directory from disk with best-effort extension metadata. */
+const FILESYSTEM_LIST_TOOL = "godot_open_mcp_filesystem_list";
 
 /**
  * ToolRouter selects live / offline / local per tool call. One instance per
@@ -227,6 +233,9 @@ export class ToolRouter implements Router {
     }
     if (toolName === SCENE_GET_DATA_TOOL) {
       return this.routeSceneGetData(args);
+    }
+    if (toolName === FILESYSTEM_LIST_TOOL) {
+      return this.routeFilesystemList(args);
     }
     return this.routeLive(toolName, args);
   }
@@ -405,6 +414,79 @@ export class ToolRouter implements Router {
     }
     return sourceResult(
       read.result,
+      "offline",
+      { route: "offline", fallbackReason: "live_unavailable" },
+    );
+  }
+
+  // ── P7.3 — live-first `filesystem_list` with offline fallback ──────────
+
+  /**
+   * `godot_open_mcp_filesystem_list` — the second live-first/offline-fallback
+   * tool (P7.3). Routing policy mirrors `scene_get_data`:
+   *
+   *   1. Probe `live.isLiveAvailable()` once. If the bridge answered as
+   *      connected (or returned 503 — reachable but loading), forward the
+   *      unchanged args to the live handler and tag the result `live`. The
+   *      live read returns authoritative importer resource type + UID from the
+   *      EditorFileSystem index, which the disk listing cannot.
+   *   2. If the bridge is unavailable, run the offline disk listing and tag
+   *      the result `_source: "offline"` + `_route: { route: "offline",
+   *      fallbackReason: "live_unavailable" }`.
+   *   3. NEVER fall back to disk after a semantic live error (e.g.
+   *      `directory_not_found`, `invalid_path`) — the live editor answered
+   *      authoritatively; only an unreachable bridge triggers the fallback.
+   *   4. NEVER fall back on an auth failure or malformed bridge response.
+   *
+   * Unlike `scene_get_data`, `path` is OPTIONAL offline too — the listing
+   * defaults to the project root (`res://`), same as the live contract. The
+   * `page_size` / `cursor` / `include_hidden` args pass through unchanged to
+   * the offline listing, which preserves the live response shape
+   * field-for-field (plus `stateSource: "disk"`).
+   */
+  private async routeFilesystemList(
+    args: Record<string, unknown>,
+  ): Promise<CallToolResult> {
+    if (typeof this.live.isLiveAvailable !== "function") {
+      return sourceResult(
+        {
+          error: {
+            code: "router_not_wired",
+            message:
+              "ToolRouter is not wired to a LiveClient with isLiveAvailable().",
+          },
+        },
+        "offline",
+        { route: "offline", fallbackReason: "router_not_wired" },
+        true,
+      );
+    }
+
+    const liveAvailable = await this.live.isLiveAvailable();
+    if (liveAvailable) {
+      // Live wins — authoritative importer metadata from the import index.
+      const result = await this.live.route(FILESYSTEM_LIST_TOOL, args);
+      return tagJsonResult(result, "live", { route: "live" });
+    }
+
+    // Bridge unavailable → offline disk listing. `path` defaults to res://
+    // (project root), same as the live contract.
+    const path = typeof args.path === "string" ? args.path : "res://";
+    const listed = await listProjectDirectoryOffline(path, this.projectPath, {
+      pageSize: typeof args.page_size === "number" ? args.page_size : undefined,
+      cursor: typeof args.cursor === "string" ? args.cursor : undefined,
+      includeHidden: args.include_hidden === true,
+    });
+    if (!listed.ok) {
+      return sourceResult(
+        { error: listed.error },
+        "offline",
+        { route: "offline", fallbackReason: "live_unavailable" },
+        true,
+      );
+    }
+    return sourceResult(
+      listed.result,
       "offline",
       { route: "offline", fallbackReason: "live_unavailable" },
     );

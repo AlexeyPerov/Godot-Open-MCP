@@ -36,6 +36,85 @@ export type ResolveResResult =
   | { kind: "invalid_path"; message: string }
   | { kind: "path_outside_project"; message: string };
 
+/** Pure-shape validation shared by the file + directory resolvers (steps that
+ *  do not touch the project root): `res://` prefix, URL-authority rejection,
+ *  NUL / control / backslash rejection, and `..` traversal rejection. Returns
+ *  the validated `afterScheme` tail on success, or the matching failure
+ *  result. Extracted so {@link resolveResPath} and {@link resolveResDir} apply
+ *  identical character/scheme discipline. */
+function validateResShape(
+  resPath: string,
+): { ok: true; afterScheme: string } | { ok: false; result: ResolveResResult } {
+  if (typeof resPath !== "string" || resPath === "") {
+    return {
+      ok: false,
+      result: { kind: "invalid_path", message: "path is empty." },
+    };
+  }
+  if (!resPath.startsWith(RES_PREFIX)) {
+    return {
+      ok: false,
+      result: {
+        kind: "invalid_path",
+        message: `path must start with 'res://' (got '${truncate(resPath)}').`,
+      },
+    };
+  }
+
+  // Godot `res://` is an opaque project-relative scheme with no authority
+  // component. A `res://host/...` form is not produced by Godot and would
+  // confuse a naive join; reject it.
+  const afterScheme = resPath.slice(RES_PREFIX.length);
+  if (/^[A-Za-z0-9._-]+\.[A-Za-z]{2,}\//.test(afterScheme)) {
+    return {
+      ok: false,
+      result: {
+        kind: "invalid_path",
+        message: `path has a URL-like authority component, which Godot 'res://' never carries ('${truncate(resPath)}').`,
+      },
+    };
+  }
+
+  // Reject NUL (string-termination attack), backslashes (Windows separator
+  // ambiguity on POSIX — Godot writes forward slashes), and control chars.
+  if (/\0/.test(resPath)) {
+    return {
+      ok: false,
+      result: { kind: "invalid_path", message: "path contains a NUL byte." },
+    };
+  }
+  if (resPath.includes("\\")) {
+    return {
+      ok: false,
+      result: {
+        kind: "invalid_path",
+        message: `path contains a backslash; Godot 'res://' paths use forward slashes ('${truncate(resPath)}').`,
+      },
+    };
+  }
+  if (/[\x00-\x1f]/.test(resPath)) {
+    return {
+      ok: false,
+      result: { kind: "invalid_path", message: "path contains a control character." },
+    };
+  }
+
+  // Reject traversal segments outright. normalize() would collapse them, but
+  // an explicit refusal surfaces the intent (and refuses `..` that would stay
+  // inside the project — the offline reader has no reason to use it).
+  const segments = afterScheme.split("/");
+  if (segments.some((s) => s === "..")) {
+    return {
+      ok: false,
+      result: {
+        kind: "invalid_path",
+        message: `path contains a '..' traversal segment, which is not permitted ('${truncate(resPath)}').`,
+      },
+    };
+  }
+  return { ok: true, afterScheme };
+}
+
 /**
  * Resolve a `res://...` path to a native filesystem path safely beneath the
  * canonical project root.
@@ -63,52 +142,9 @@ export function resolveResPath(
   resPath: string,
   projectRoot: string,
 ): ResolveResResult {
-  if (typeof resPath !== "string" || resPath === "") {
-    return { kind: "invalid_path", message: "path is empty." };
-  }
-  if (!resPath.startsWith(RES_PREFIX)) {
-    return {
-      kind: "invalid_path",
-      message: `path must start with 'res://' (got '${truncate(resPath)}').`,
-    };
-  }
-
-  // Godot `res://` is an opaque project-relative scheme with no authority
-  // component. A `res://host/...` form is not produced by Godot and would
-  // confuse a naive join; reject it.
-  const afterScheme = resPath.slice(RES_PREFIX.length);
-  if (/^[A-Za-z0-9._-]+\.[A-Za-z]{2,}\//.test(afterScheme)) {
-    return {
-      kind: "invalid_path",
-      message: `path has a URL-like authority component, which Godot 'res://' never carries ('${truncate(resPath)}').`,
-    };
-  }
-
-  // Reject NUL (string-termination attack), backslashes (Windows separator
-  // ambiguity on POSIX — Godot writes forward slashes), and control chars.
-  if (/\0/.test(resPath)) {
-    return { kind: "invalid_path", message: "path contains a NUL byte." };
-  }
-  if (resPath.includes("\\")) {
-    return {
-      kind: "invalid_path",
-      message: `path contains a backslash; Godot 'res://' paths use forward slashes ('${truncate(resPath)}').`,
-    };
-  }
-  if (/[\x00-\x1f]/.test(resPath)) {
-    return { kind: "invalid_path", message: "path contains a control character." };
-  }
-
-  // Reject traversal segments outright. normalize() would collapse them, but
-  // an explicit refusal surfaces the intent (and refuses `..` that would stay
-  // inside the project — the offline reader has no reason to use it).
-  const segments = afterScheme.split("/");
-  if (segments.some((s) => s === "..")) {
-    return {
-      kind: "invalid_path",
-      message: `path contains a '..' traversal segment, which is not permitted ('${truncate(resPath)}').`,
-    };
-  }
+  const shape = validateResShape(resPath);
+  if (!shape.ok) return shape.result;
+  const afterScheme = shape.afterScheme;
 
   // Join + normalize under the project root. normalize() also folds redundant
   // `//` and `.` segments Godot occasionally emits.
@@ -165,6 +201,85 @@ export function resolveResPath(
 }
 
 /**
+ * Resolve a `res://` DIRECTORY path (or bare `res://`/`res://`/empty for the
+ * project root) to a native filesystem path safely beneath the canonical
+ * project root. Backs the offline directory listing (P7.3).
+ *
+ * Differs from {@link resolveResPath}:
+ *   - Bare/empty/`res://` input resolves to the project root itself (a
+ *     directory listing root). The file resolver treats bare input as
+ *     `invalid_path`.
+ *   - A trailing slash on the input is allowed and normalized away (the
+ *     caller decides the canonical `res://` output form).
+ *   - If the resolved native path EXISTS, its own realpath must stay inside
+ *     the project — this catches a symlinked directory that points outside
+ *     (e.g. `res://link/` → `/etc`), which the parent-dir check alone misses
+ *     for the root edge case.
+ *
+ * Does NOT verify the path actually exists or is a directory — the caller does
+ * that (it may want `directory_not_found` vs `invalid_path`). What is
+ * guaranteed: IF a directory exists at the resolved location, its real path is
+ * inside the project. Returns the same structured outcome as
+ * {@link resolveResPath}.
+ */
+export function resolveResDir(
+  resDir: string,
+  projectRoot: string,
+): ResolveResResult {
+  // The directory resolver accepts a bare `res://` or empty input as the
+  // project root. Anything else must still pass the shared `res://` shape gate.
+  const input = typeof resDir === "string" ? resDir.trim() : "";
+  const isRootForm = input === "" || input === RES_PREFIX;
+
+  let afterScheme: string;
+  if (isRootForm) {
+    afterScheme = "";
+  } else {
+    const shape = validateResShape(input);
+    if (!shape.ok) return shape.result;
+    afterScheme = shape.afterScheme;
+  }
+
+  // A trailing slash is cosmetic for a directory; normalize it away so the
+  // join produces a clean native path. Redundant `//` and `.` segments fold
+  // via normalize() below.
+  if (afterScheme.endsWith("/")) afterScheme = afterScheme.slice(0, -1);
+
+  const projectReal = canonicalRoot(projectRoot);
+  if (projectReal === null) {
+    return {
+      kind: "path_outside_project",
+      message: "project root does not exist or is not accessible.",
+    };
+  }
+  const joined = afterScheme === "" ? projectReal : normalize(join(projectReal, afterScheme));
+  if (!joined.startsWith(projectReal + sep) && joined !== projectReal) {
+    return {
+      kind: "path_outside_project",
+      message: "resolved directory escapes the project root after normalization.",
+    };
+  }
+
+  // Directory-realpath containment: if the dir itself exists (possibly a
+  // symlink), follow it and refuse any target outside the project. The file
+  // resolver's parent-dir check collapses to the same idea; for the root form
+  // the parent IS the project, so this realpath check is the only symlink
+  // defense for the project root itself.
+  const dirReal = canonicalRoot(joined);
+  if (dirReal !== null && !isInside(dirReal, projectReal)) {
+    return {
+      kind: "path_outside_project",
+      message: "resolved directory escapes the project root (symlink target is outside the project).",
+    };
+  }
+
+  // Use the realpath when available (matches on-disk identity); otherwise fall
+  // back to the joined path so the caller can distinguish not-found from
+  // escape on a missing directory.
+  return { kind: "ok", nativePath: dirReal ?? joined };
+}
+
+/**
  * Verify the resolved native path points at a regular file and report its
  * size. Used by the scene reader to refuse non-regular files (directories,
  * devices, pipes) and to enforce {@link SCENE_BYTE_CAP} before reading.
@@ -215,9 +330,11 @@ export function probeFile(nativePath: string, cap = SCENE_BYTE_CAP): ProbeFileRe
   return { kind: "ok", size: real.size };
 }
 
-/** Canonical (realpath'd, no trailing sep) project root, or `null` when it
- *  cannot be resolved (missing / permission denied). */
-function canonicalRoot(dir: string): string | null {
+/** Canonical (realpath'd, no trailing sep) path, or `null` when it cannot be
+ *  resolved (missing / permission denied). Exported so the directory listing
+ *  can classify symlinks against the same canonical identity the resolvers
+ *  use. */
+export function canonicalRoot(dir: string): string | null {
   try {
     const real = realpathSync(dir);
     // Strip a trailing separator so the `real + sep` containment prefix check
@@ -228,8 +345,9 @@ function canonicalRoot(dir: string): string | null {
   }
 }
 
-/** Is `child` equal to or beneath `parent` (both canonicalized)? */
-function isInside(child: string, parent: string): boolean {
+/** Is `child` equal to or beneath `parent` (both canonicalized)? Exported for
+ *  the directory listing's symlink-target containment check. */
+export function isInside(child: string, parent: string): boolean {
   return child === parent || child.startsWith(parent + sep);
 }
 

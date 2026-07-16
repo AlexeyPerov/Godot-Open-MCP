@@ -26,7 +26,7 @@ Tool names follow the `godot_open_mcp_*` convention (ADR-003).
 | Route | Meaning | Tools |
 |---|---|---|
 | **live** | The CallTool handler POSTs to the bridge; the bridge handler runs on the editor main thread. | Most tools (node, scene, gate meta-tools, `apply_fix`). |
-| **live-first / offline fallback** | The CallTool handler probes the bridge once; if reachable it forwards to the live handler (reflecting unsaved editor state), otherwise it parses the asset from disk with no editor required. A live semantic error (e.g. `scene_not_edited`) is authoritative and does NOT trigger the fallback — only an unreachable bridge does. | `godot_open_mcp_scene_get_data`. |
+| **live-first / offline fallback** | The CallTool handler probes the bridge once; if reachable it forwards to the live handler (reflecting unsaved editor state / authoritative import metadata), otherwise it parses the asset from disk with no editor required. A live semantic error (e.g. `scene_not_edited`, `directory_not_found`) is authoritative and does NOT trigger the fallback — only an unreachable bridge does. | `godot_open_mcp_scene_get_data`, `godot_open_mcp_filesystem_list`. |
 | **local** | The CallTool handler resolves the response in-process — no bridge hop. | `godot_open_mcp_capabilities`. |
 | **local/live hybrid** | The CallTool handler composes a response in-process but runs one `/ping` probe through the live client (auth header + 503 fallback match `ping`). No `POST /tools/{name}` endpoint on the bridge. | `godot_open_mcp_bridge_status`. |
 | **local-drains-live-stream** | The CallTool handler drains a per-process SSE subscription the MCP server keeps open to the bridge's `GET /events`. No `POST /tools/{name}` endpoint on the bridge. | `godot_open_mcp_pull_events`. |
@@ -401,13 +401,18 @@ Delete a Godot resource file (`.tres`/`.res`) and its `.import` sidecar via `Dir
 
 ## `godot_open_mcp_filesystem_list`
 
-List the immediate children of one `res://` directory from the editor's indexed filesystem. Read-only (gate-free). Returns directories first, then files, each group sorted by name (ordinal). No resource is loaded — file types come from `EditorFileSystemDirectory.GetFileType` and UIDs from `ResourceLoader.GetResourceUid` (both read the import index). Listing is one level; recursive full-tree listing is deferred to the offline project indexer (Phase 7).
+List the immediate children of one `res://` directory. Read-only (gate-free). The second **live-first / offline-fallback** tool: when the Godot editor is running it reads the editor's indexed filesystem for authoritative importer resource type + UID; when the editor is unavailable it lists the directory straight from disk with best-effort extension metadata.
+
+**Routing:**
+
+- **Live (bridge reachable):** forwards to the bridge handler, which walks `EditorFileSystemDirectory` and reads file types from `GetFileType` + UIDs from `ResourceLoader.GetResourceUid` (both read the import index). No resource is loaded.
+- **Offline (bridge unreachable):** lists the directory from disk via `readdir`. The result carries `stateSource: "disk"`, the resource type is a best-effort guess from the file extension, and `uid` is always `null` (the UID table lives in `.godot/` import state, which the offline reader refuses to read). The response shape is otherwise identical to the live read.
 
 **Input:**
-- `path` (optional) — `res://` directory (trailing slash optional); omit or pass `res://` for the project root.
+- `path` (optional) — `res://` directory (trailing slash optional); omit or pass `res://` for the project root. Resolved safely beneath the project root — traversal and symlink escapes are rejected.
 - `page_size` (optional, default 100, max 500) — max entries per page (directories + files combined, directories first).
-- `cursor` (optional) — opaque continuation cursor from a previous response's `pagination.nextCursor`.
-- `include_hidden` (optional, default false) — include hidden entries the editor index exposes.
+- `cursor` (optional) — opaque continuation cursor from a previous response's `pagination.nextCursor`. Offline: a cursor that belongs to another directory, or whose directory has changed since the previous page, is rejected (`invalid_cursor` / `stale_cursor`).
+- `include_hidden` (optional, default false) — include hidden entries (dotfiles) the listing would otherwise skip. Engine/import internals (`.godot/`) and VCS directories (`.git`, `.hg`, `.svn`, `node_modules`) are **always** excluded — `include_hidden` does not expose them.
 
 **Result (success):**
 
@@ -430,9 +435,11 @@ List the immediate children of one `res://` directory from the editor's indexed 
 }
 ```
 
-`directoryCount`/`fileCount` describe the full one-level directory; `entries` is the current page (directories first, then files).
+`directoryCount`/`fileCount` describe the full one-level directory; `entries` is the current page (directories first, then files, each group sorted by name with a locale-independent ordinal compare so the order is deterministic across environments).
 
-**Errors:** `invalid_path` (non-`res://`, traversal, or file path), `directory_not_found` (indexed directory missing), `filesystem_unavailable` (editor filesystem not available).
+**Offline resource-type mapping** (best-effort, by extension): `.tscn` → `PackedScene`, `.tres` → `Resource` (generic; the serialized sub-type is inside the file, not the extension), `.gd` → `GDScript`, `.cs` → `CSharpScript`, `.gdshader` → `Shader`. All other extensions (images, audio, fonts, `.gdshaderinc`) surface `resourceType: null` rather than a guess — offline never claims importer authority.
+
+**Errors:** `invalid_path` (non-`res://`, traversal, file path, or invalid characters), `path_outside_project` (symlink or canonical escape), `directory_not_found` (directory absent), `directory_unreadable` (permission/IO failure), `invalid_cursor` (malformed or cross-path cursor), `stale_cursor` (directory changed after the prior page), `filesystem_unavailable` (live editor filesystem not available). `project_not_found` / `project_config_unreadable` surface when the project root lacks a valid `project.godot` marker.
 
 ## `godot_open_mcp_filesystem_reimport`
 

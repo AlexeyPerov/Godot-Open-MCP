@@ -53,8 +53,47 @@ test("filesystem_list does NOT expose Unity-only fields or gate surface", () => 
   assert.equal(props.paths_hint, undefined, "read-only tool — no gate surface");
   assert.equal(props.gate, undefined, "read-only tool — no gate surface");
   assert.equal(props.guid, undefined, "Unity GUID replaced by uid in file entries");
-  assert.equal(props.recursive, undefined, "one-level listing only — recursive deferred to P7.3");
+  assert.equal(props.recursive, undefined, "one-level listing only");
   assert.equal(props.folder, undefined, "renamed to path");
+});
+
+test("filesystem_list description documents the offline disk fallback (P7.3)", () => {
+  // The description must tell an agent the tool works with Godot closed and
+  // that offline metadata is best-effort. Pins the P7.3 live-first/offline
+  // contract on the advertised schema.
+  const desc = filesystemList.description ?? "";
+  assert.ok(desc.includes("offline"), "description mentions offline fallback");
+  assert.ok(desc.includes("stateSource"), "description mentions stateSource");
+  assert.ok(desc.includes("disk"), "description mentions disk fallback");
+  assert.ok(desc.includes("extension"), "description mentions extension-based metadata");
+  assert.ok(desc.includes("null"), "description notes null uid offline");
+});
+
+test("filesystem_list cursor description documents invalid/stale cursor behavior (P7.3)", () => {
+  const props = filesystemList.inputSchema.properties as Record<
+    string,
+    { description?: string }
+  >;
+  const cursorDesc = props.cursor.description ?? "";
+  assert.ok(cursorDesc.includes("OFFLINE"), "cursor schema notes offline mode");
+  assert.ok(
+    cursorDesc.includes("invalid_cursor"),
+    "cursor schema names invalid_cursor",
+  );
+  assert.ok(
+    cursorDesc.includes("stale_cursor"),
+    "cursor schema names stale_cursor",
+  );
+});
+
+test("filesystem_list include_hidden documents always-excluded internals (P7.3)", () => {
+  const props = filesystemList.inputSchema.properties as Record<
+    string,
+    { description?: string }
+  >;
+  const desc = props.include_hidden.description ?? "";
+  assert.ok(desc.includes(".godot"), "include_hidden names .godot as always-excluded");
+  assert.ok(desc.includes("ALWAYS"), "include_hidden documents the override policy");
 });
 
 test("filesystem_list page_size defaults to 100 with bounds", () => {

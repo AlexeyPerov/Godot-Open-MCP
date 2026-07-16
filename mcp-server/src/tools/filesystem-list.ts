@@ -1,37 +1,47 @@
-// `godot_open_mcp_filesystem_list` tool definition (P4.4).
+// `godot_open_mcp_filesystem_list` tool definition (P4.4; offline fallback in P7.3).
 //
-// Read-only (gate-free). Lists the immediate children of one res:// directory from the editor's
-// indexed filesystem — directories first, then files, each group sorted by name. The handler lives
-// in the bridge (POST /tools/godot_open_mcp_filesystem_list); this file is the catalog metadata
-// only — name / description / input schema — advertised to AI clients over stdio ListTools.
+// Read-only (gate-free). Lists the immediate children of one res:// directory — directories first,
+// then files, each group sorted by name. Live-first: when the Godot editor is running, the handler
+// lives in the bridge (POST /tools/godot_open_mcp_filesystem_list) and reads the import index for
+// authoritative importer resource type + uid; when the editor is unavailable, the MCP server lists
+// the res:// directory straight from disk with best-effort extension metadata. This file is the
+// catalog metadata only — name / description / input schema — advertised to AI clients over stdio
+// ListTools.
 //
 // Adapted from Unity Open MCP's mcp-server/src/tools/list-assets.ts (adapt fidelity): Unity's
 // AssetDatabase folder→kind→count listing becomes Godot's EditorFileSystemDirectory one-level walk.
 // Unity's GUID/asset-type identity becomes Godot res:// path + optional uid:// + importer-assigned
 // resource type. The bounded, paged discipline is preserved; only the identity + indexing
-// primitives change. Listing is one level — recursive full-tree listing is deferred to the offline
-// project indexer (Phase 7).
+// primitives change. Listing is one level.
 //
-// No resource is loaded: the type comes from EditorFileSystemDirectory.GetFileType and the uid from
-// ResourceLoader.GetResourceUid (both read the import index). The result carries the directory path,
-// full-count totals (directoryCount / fileCount across the whole directory), the current page of
-// entries, and a paging cursor. A path that is not a res:// directory, contains a parent-traversal
-// segment, or names a file is rejected with invalid_path / directory_not_found.
+// No resource is loaded: LIVE the type comes from EditorFileSystemDirectory.GetFileType and the uid
+// from ResourceLoader.GetResourceUid (both read the import index); OFFLINE the type is a best-effort
+// guess from the file extension (e.g. .tscn → PackedScene, .gd → GDScript) and the uid is always
+// null — the UID table lives in .godot/ import state, which the offline reader refuses to read. The
+// result carries the directory path, full-count totals (directoryCount / fileCount across the whole
+// directory), the current page of entries, and a paging cursor. A path that is not a res://
+// directory, contains a parent-traversal segment, or names a file is rejected with invalid_path;
+// a missing directory yields directory_not_found.
 
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 export const filesystemList: Tool = {
   name: "godot_open_mcp_filesystem_list",
   description:
-    "List the immediate children of one res:// directory from the editor's indexed filesystem. " +
-    "Read-only (gate-free). Returns directories first, then files, each group sorted by name. " +
-    "Each file entry includes the importer-assigned resource type (e.g. 'StandardMaterial3D', " +
-    "'PackedScene') and uid:// when assigned — read straight from the editor filesystem index, so " +
-    "no resource is loaded. The result carries full-count totals (directoryCount / fileCount across " +
-    "the whole directory) plus a paged entries array. Omit 'path' (or pass 'res://') to list the " +
-    "project root. A path that is not a res:// directory, contains a '..' segment, or names a file " +
-    "yields invalid_path; an indexed-but-missing directory yields directory_not_found. Listing is " +
-    "one level — use this iteratively to descend the tree.",
+    "List the immediate children of one res:// directory. Read-only (gate-free). Live-first: when " +
+    "the Godot editor is running, reads the editor's indexed filesystem (EditorFileSystemDirectory) " +
+    "for authoritative importer-assigned resource type and uid://. When the editor is unavailable, " +
+    "falls back to an offline disk listing (Godot closed or the bridge down) — in that case the " +
+    "result carries `stateSource: \"disk\"`, the resource type is a best-effort guess from the file " +
+    "extension (.tscn → PackedScene, .tres → Resource, .gd → GDScript, .cs → CSharpScript, " +
+    ".gdshader → Shader; unknown extensions → null), and uid is always null (the UID table is not " +
+    "readable without the import index). Returns directories first, then files, each group sorted " +
+    "by name, with full-count totals (directoryCount / fileCount across the whole directory) plus a " +
+    "paged entries array. Omit 'path' (or pass 'res://') to list the project root. A path that is " +
+    "not a res:// directory, contains a '..' segment, or names a file yields invalid_path; a missing " +
+    "directory yields directory_not_found. Listing is one level — use this iteratively to descend " +
+    "the tree. Engine/import internals (.godot/, VCS dirs, node_modules) are excluded by policy " +
+    "regardless of include_hidden.",
   inputSchema: {
     type: "object",
     properties: {
@@ -39,7 +49,8 @@ export const filesystemList: Tool = {
         type: "string",
         description:
           "Optional res:// directory to list (a trailing slash is optional). Omit or pass 'res://' " +
-          "for the project root.",
+          "for the project root. Resolved safely beneath the project root — traversal and symlink " +
+          "escapes are rejected.",
       },
       page_size: {
         type: "integer",
@@ -54,13 +65,16 @@ export const filesystemList: Tool = {
         type: "string",
         description:
           "Opaque continuation cursor from a previous response's pagination.nextCursor. Omit for " +
-          "the first page.",
+          "the first page. OFFLINE: a cursor that belongs to another directory, or whose directory " +
+          "has changed since the previous page, is rejected (invalid_cursor / stale_cursor).",
       },
       include_hidden: {
         type: "boolean",
         default: false,
         description:
-          "When true, include hidden entries the editor index exposes. Default false.",
+          "When true, include hidden entries (dotfiles) the listing would otherwise skip. Default " +
+          "false. Engine/import internals (.godot/) and VCS directories (.git, .hg, .svn, " +
+          "node_modules) are ALWAYS excluded — include_hidden does not expose them.",
       },
     },
     additionalProperties: false,

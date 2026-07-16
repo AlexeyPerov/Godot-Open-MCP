@@ -611,3 +611,204 @@ test("route: scene_get_data does NOT fall back to disk after a live semantic err
   assert.deepEqual(body._route, { route: "live" });
   assert.equal(live.calls.length, 1, "forwarded to live exactly once");
 });
+
+// ---------------------------------------------------------------------------
+// P7.3 — filesystem_list: live-first with offline fallback
+// ---------------------------------------------------------------------------
+
+async function makeListingProject(): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), "gom-router-list-"));
+  await writeFile(
+    join(root, "project.godot"),
+    `[application]\nconfig/name="Listing Project"\n`,
+    "utf-8",
+  );
+  await mkdir(join(root, "scenes"), { recursive: true });
+  await writeFile(join(root, "scenes", "main.tscn"), "x", "utf-8");
+  await writeFile(join(root, "player.gd"), "x", "utf-8");
+  return root;
+}
+
+test("route: filesystem_list forwards to live when the bridge is available", async () => {
+  const live = makeFakeLive({
+    liveAvailable: true,
+    result: {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            path: "res://",
+            directoryCount: 1,
+            fileCount: 1,
+            entries: [
+              {
+                name: "scenes",
+                path: "res://scenes/",
+                isDirectory: true,
+                resourceType: null,
+                uid: null,
+              },
+              {
+                name: "player.gd",
+                path: "res://player.gd",
+                isDirectory: false,
+                resourceType: "GDScript",
+                uid: "uid://abc123",
+              },
+            ],
+            pagination: { nextCursor: null },
+          }),
+        },
+      ],
+      isError: false,
+    },
+  });
+  const router = makeRouter(live, makeFakeEventStream());
+
+  const result = await router.route("godot_open_mcp_filesystem_list", {
+    path: "res://",
+  });
+  const body = parseBody(result);
+
+  // Live wins — exactly one live route call, one availability probe.
+  assert.equal(live.calls.length, 1);
+  assert.equal(live.calls[0].tool, "godot_open_mcp_filesystem_list");
+  assert.equal(live.liveProbes, 1);
+  // The live payload (including importer uid) is preserved + tagged live.
+  assert.equal(body.directoryCount, 1);
+  assert.equal(body._source, "live");
+  assert.deepEqual(body._route, { route: "live" });
+});
+
+test("route: filesystem_list falls back to offline disk listing when the bridge is down", async () => {
+  const projectRoot = await makeListingProject();
+  const live = makeFakeLive({ liveAvailable: false });
+  const router = makeRouter(live, makeFakeEventStream(), projectRoot);
+
+  const result = await router.route("godot_open_mcp_filesystem_list", {
+    path: "res://",
+  });
+  const body = parseBody(result);
+
+  assert.equal(result.isError, false);
+  assert.equal(live.calls.length, 0, "no live POST when bridge unavailable");
+  assert.equal(live.liveProbes, 1, "probed once then fell back");
+  assert.equal(body._source, "offline");
+  assert.deepEqual(body._route, {
+    route: "offline",
+    fallbackReason: "live_unavailable",
+  });
+  // Offline payload: disk-sourced listing with the same shape + stateSource.
+  assert.equal(body.stateSource, "disk");
+  assert.equal(body.path, "res://");
+  assert.equal(body.directoryCount, 1);
+  assert.equal(body.fileCount, 1);
+  const entries = body.entries as { name: string; resourceType: string | null; uid: null }[];
+  const names = entries.map((e) => e.name);
+  // Directories first (scenes), then files (player.gd).
+  assert.deepEqual(names, ["scenes", "player.gd"]);
+  // Offline uid is always null.
+  for (const e of entries) assert.equal(e.uid, null);
+  // Offline resource type is best-effort by extension.
+  const player = entries.find((e) => e.name === "player.gd");
+  assert.equal(player!.resourceType, "GDScript");
+});
+
+test("route: filesystem_list offline without path defaults to res:// project root", async () => {
+  const projectRoot = await makeListingProject();
+  const live = makeFakeLive({ liveAvailable: false });
+  const router = makeRouter(live, makeFakeEventStream(), projectRoot);
+
+  const result = await router.route("godot_open_mcp_filesystem_list", {});
+  const body = parseBody(result);
+
+  assert.equal(result.isError, false);
+  assert.equal(body._source, "offline");
+  assert.equal(body.path, "res://", "defaults to project root");
+  assert.equal(body.directoryCount, 1);
+});
+
+test("route: filesystem_list offline passes page_size + include_hidden through", async () => {
+  const projectRoot = await mkdtemp(join(tmpdir(), "gom-router-opts-"));
+  await writeFile(
+    join(projectRoot, "project.godot"),
+    `[application]\nconfig/name="Opts"\n`,
+    "utf-8",
+  );
+  // 3 visible + 1 hidden file.
+  for (const n of ["a.gd", "b.gd", "c.gd"]) {
+    await writeFile(join(projectRoot, n), "x", "utf-8");
+  }
+  await writeFile(join(projectRoot, ".hidden.gd"), "x", "utf-8");
+
+  const live = makeFakeLive({ liveAvailable: false });
+  const router = makeRouter(live, makeFakeEventStream(), projectRoot);
+
+  // page_size 2 → first page has 2 entries; hidden excluded by default.
+  const p1 = await router.route("godot_open_mcp_filesystem_list", {
+    page_size: 2,
+  });
+  const b1 = parseBody(p1);
+  assert.equal(b1.fileCount, 3, "hidden not counted by default");
+  assert.equal((b1.entries as unknown[]).length, 2);
+  assert.ok((b1.pagination as { nextCursor: string | null }).nextCursor);
+
+  // include_hidden surfaces the dotfile.
+  const all = await router.route("godot_open_mcp_filesystem_list", {
+    page_size: 100,
+    include_hidden: true,
+  });
+  const bAll = parseBody(all);
+  assert.equal(bAll.fileCount, 4, "hidden counted with include_hidden");
+});
+
+test("route: filesystem_list offline structured error is tagged offline + isError", async () => {
+  const projectRoot = await makeListingProject();
+  const live = makeFakeLive({ liveAvailable: false });
+  const router = makeRouter(live, makeFakeEventStream(), projectRoot);
+
+  // Missing directory → directory_not_found, surfaced as an offline-tagged error.
+  const result = await router.route("godot_open_mcp_filesystem_list", {
+    path: "res://nope/",
+  });
+  const body = parseBody(result);
+
+  assert.equal(result.isError, true);
+  assert.equal(body._source, "offline");
+  assert.equal(errCode(result), "directory_not_found");
+});
+
+test("route: filesystem_list does NOT fall back to disk after a live semantic error", async () => {
+  // The bridge is UP but returns a semantic directory_not_found. The router
+  // surfaces the live error authoritatively — NOT a disk fallback.
+  const live = makeFakeLive({
+    liveAvailable: true,
+    result: {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            error: {
+              code: "directory_not_found",
+              message: "indexed directory missing",
+            },
+          }),
+        },
+      ],
+      isError: true,
+    },
+  });
+  const projectRoot = await makeListingProject();
+  const router = makeRouter(live, makeFakeEventStream(), projectRoot);
+
+  const result = await router.route("godot_open_mcp_filesystem_list", {
+    path: "res://missing/",
+  });
+  const body = parseBody(result);
+
+  assert.equal(result.isError, true);
+  assert.equal(errCode(result), "directory_not_found", "live error preserved");
+  assert.equal(body._source, "live", "tagged live, not offline");
+  assert.deepEqual(body._route, { route: "live" });
+  assert.equal(live.calls.length, 1, "forwarded to live exactly once");
+});
