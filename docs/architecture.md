@@ -48,6 +48,15 @@ flowchart LR
 
 Godot has no headless editor batch mode — there is no `batch` route.
 
+## Routing authority (`mcp-server/src/tool-router.ts`)
+
+Every registered `CallTool` dispatch flows through `ToolRouter.route` (P7.1). `index.ts` only validates tool registration (unknown names are rejected before the router runs) and normalizes `arguments`; the router owns live/offline/local selection:
+
+- **local named handlers** — `godot_open_mcp_capabilities`, `godot_open_mcp_bridge_status`, `godot_open_mcp_pull_events` are resolved in the MCP server (no `POST /tools/{name}` bridge hop). Capabilities is built locally from the tool + rule + fix catalog; bridge_status composes the lock classifier with one `/ping` probe; pull_events drains the per-process SSE-backed event stream.
+- **generic live route** — every other registered tool dispatches through `LiveClient.route` → bridge.
+
+Each parseable JSON result is tagged with two MCP-server-owned metadata fields: `_source` (where the payload originated: `live` | `offline` | `local`) and `_route.route` (which policy executed the call). Metadata is added after the route completes and is never sent to a bridge handler. P7.2–P7.4 extend the named-handler map with offline exact handlers; they must not add new branches to `index.ts`.
+
 ## CLI package (`cli/`)
 
 `cli/` is a separate TypeScript ESM package (`godot-open-mcp-cli`) with its own bin. It is the developer-facing entry point for install, setup-mcp, open, wait-for-ready, ping, status, and configure — wrapping the MCP server and bridge for scripting and CI.
@@ -262,7 +271,8 @@ Phase 2 must not start until the parity smoke is green on a clean checkout. The 
 - `mcp-server/src/instance-discovery.ts` — per-project bridge port + auth token resolution from instance locks; mirrors `InstancePortResolver.cs` byte-for-byte.
 - `mcp-server/src/integration.test.ts` — P1.9 phase-gate parity smoke (in-process): MCP SDK `Client` + `InMemoryTransport` + `LiveClient` + loopback bridge stub drives the full `godot_open_mcp_ping` → bridge `/ping` route on every `npm test`.
 - `mcp-server/scripts/p1-parity-smoke.mjs` — P1.9 scripted stdio smoke: spawns the built `dist/index.js` as a child process and verifies the parity route over a real stdio pipe (`npm run smoke:p1`).
-- `mcp-server/src/tool-router.ts` — live/offline/local route selection (planned).
+- `mcp-server/src/tool-router.ts` — P7.1 routing authority: live/offline/local route selection + `_source` / `_route` metadata. Local named handlers for capabilities / bridge_status / pull_events; generic live fallback for every other registered tool.
+- `mcp-server/src/router.ts` — minimal `Router` interface (`route(toolName, args)`); the seam `index.ts` dispatches through.
 - `packages/bridge/plugin.cfg` — addon metadata; installed as `addons/godot_open_mcp/plugin.cfg`.
 - `packages/bridge/Editor/GodotOpenMcpPlugin.cs` — editor entry point; owns bridge enable/disable lifecycle (installs the dispatcher, caches session state, starts/stops the HTTP listener).
 - `packages/bridge/Runtime/MainThread/MainThreadDispatcher.cs` — pumps off-thread work onto the editor main thread via a long-lived `Node._Process` tick; the single dispatch path all editor API calls route through.

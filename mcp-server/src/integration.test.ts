@@ -42,6 +42,8 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 
 import { createServer as createMcpServer } from "./index.js";
 import { LiveClient, type PingResponse } from "./live-client.js";
+import { ToolRouter } from "./tool-router.js";
+import { BridgeEventStream } from "./event-stream.js";
 
 /**
  * The client-side return shape of `Client.callTool`. The SDK infers this from
@@ -137,7 +139,21 @@ async function setupHarness(
   projectPath?: string,
 ): Promise<Harness> {
   const liveClient = new LiveClient(bridge.port, undefined, projectPath);
-  const server = createMcpServer("godot-open-mcp", liveClient);
+  // P7.1 — every registered call dispatches through ToolRouter. The router
+  // wires the live client + the shared event stream (the SSE reader is never
+  // started in these tests because no pull_events call is made, so the stream
+  // stays inert). Tagging of `_source` / `_route` happens inside the router.
+  const eventStream = new BridgeEventStream(
+    `http://127.0.0.1:${bridge.port}`,
+    undefined,
+    undefined,
+  );
+  const router = new ToolRouter(
+    liveClient,
+    projectPath ?? "/home/user/MyGame",
+    eventStream,
+  );
+  const server = createMcpServer("godot-open-mcp", router);
   const [clientTransport, serverTransport] =
     InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);
@@ -181,11 +197,13 @@ test("P1.9 smoke: tools/list advertises godot_open_mcp_ping", async () => {
   }
 });
 
-test("P1.9 smoke: tools/call godot_open_mcp_ping returns the live PingResponse body", async () => {
+test("P1.9 smoke: tools/call godot_open_mcp_ping returns the live PingResponse body with live route metadata", async () => {
   // The canonical Phase 1 exit-gate step: an MCP client calls the registered
-  // ping tool and receives the bridge's live health payload verbatim. If this
-  // breaks, Phase 2 must NOT start — the wire route between the MCP server and
-  // the bridge has drifted (port formula, envelope, or tool registry).
+  // ping tool and receives the bridge's live health payload verbatim, now
+  // tagged with `_source: "live"` + `_route.route: "live"` by the P7.1 router.
+  // If this breaks, Phase 2 must NOT start — the wire route between the MCP
+  // server and the bridge has drifted (port formula, envelope, tool registry,
+  // or router metadata).
   const bridge = await startBridgeStub(healthyHandler);
   try {
     const { client, cleanup } = await setupHarness(bridge);
@@ -195,8 +213,16 @@ test("P1.9 smoke: tools/call godot_open_mcp_ping returns the live PingResponse b
         arguments: {},
       });
       assert.equal(result.isError, false, "healthy ping must not be an error");
-      const body = JSON.parse(textOf(result)) as PingResponse;
-      assert.deepEqual(body, HEALTHY_PING);
+      const body = JSON.parse(textOf(result)) as PingResponse & {
+        _source?: string;
+        _route?: { route?: string };
+      };
+      // Every PingResponse field is preserved verbatim alongside the metadata.
+      const { _source, _route, ...pingFields } = body;
+      assert.deepEqual(pingFields, HEALTHY_PING);
+      // P7.1 — live route metadata is attached by the router.
+      assert.equal(_source, "live");
+      assert.equal(_route?.route, "live");
     } finally {
       await cleanup();
     }

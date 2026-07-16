@@ -12,9 +12,11 @@
 //   - instance discovery — bridge port resolved from GODOT_PROJECT_PATH +
 //     GODOT_OPEN_MCP_BRIDGE_PORT at startup (P1.6),
 //   - `godot_open_mcp_ping` round-trip: tool registry (P1.7) → live bridge
-//     client (P1.7) → bridge `GET /ping`. Mutating tool dispatch arrives in
-//     later phases (P2.x onwards); until then route() surfaces a structured
-//     "tool_not_routed" error for any non-ping tool name.
+//     client (P1.7) → bridge `GET /ping`.
+//   - P7.1 — every registered `CallTool` dispatches through `ToolRouter`. The
+//     router owns live/offline/local selection and the `_source` / `_route`
+//     metadata. `index.ts` only validates registration (unknown names are
+//     rejected before the router runs) and normalizes non-object `arguments`.
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -23,8 +25,6 @@ import {
   CallToolRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { ALL_TOOLS } from "./tools/index.js";
-import { buildCapabilities, type CapabilitiesFilter } from "./capabilities/build-capabilities.js";
-import { RULE_CATALOG, FIX_CATALOG } from "./capabilities/rule-catalog.js";
 import { readPackageVersion } from "./package-version.js";
 import {
   PORT_OVERRIDE_ENV_VAR,
@@ -33,7 +33,8 @@ import {
 } from "./instance-discovery.js";
 import { LiveClient } from "./live-client.js";
 import { BridgeEventStream } from "./event-stream.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { ToolRouter } from "./tool-router.js";
+import type { Router, CallToolResult } from "./router.js";
 
 // Read the version from package.json at runtime so `npm version` and the
 // maintainer-panel version-bump keep the reported server version in sync
@@ -53,22 +54,19 @@ export async function handleListTools(): Promise<{ tools: typeof ALL_TOOLS }> {
 /**
  * CallTool handler. Defensive: returns a structured `isError` response for
  * unknown tools instead of throwing so a malformed client cannot kill the
- * server process. Routed tools dispatch through the supplied LiveClient.
+ * server process. Registered tools dispatch through the supplied
+ * {@link Router} (P7.1), which owns live/offline/local selection and the
+ * `_source` / `_route` metadata.
  *
- * Three tools are resolved WITHOUT a POST /tools/{name} bridge hop:
- *   - `godot_open_mcp_capabilities` — built locally from ALL_TOOLS + the rule/fix catalog.
- *   - `godot_open_mcp_bridge_status` — local/live hybrid: composes the lock classifier with one
- *     /ping probe via LiveClient.routeBridgeStatus.
- *   - `godot_open_mcp_pull_events` — local-drains-live-stream: drains the shared
- *     BridgeEventStream (its SSE reader connects to GET /events on the bridge). Needs an eventStream.
- *
- * `liveClient` / `eventStream` are optional so unit tests for the unknown-tool / capabilities paths
- * do not need to spin them up. The stdio `main()` always supplies both.
+ * `router` is optional so unit tests for the unknown-tool / missing-wiring
+ * paths do not need to construct one. The stdio `main()` always supplies a
+ * fully-wired `ToolRouter`; a registered call with no router attached returns
+ * a structured `router_not_wired` error (the same never-throw contract).
  */
 export async function handleCallTool(params: {
   name: string;
   arguments?: unknown;
-}, liveClient?: LiveClient, eventStream?: BridgeEventStream): Promise<CallToolResult> {
+}, router?: Router): Promise<CallToolResult> {
   const toolName = params.name;
   const isRegistered = ALL_TOOLS.some((t) => t.name === toolName);
   if (!isRegistered) {
@@ -88,86 +86,20 @@ export async function handleCallTool(params: {
       ? (params.arguments as Record<string, unknown>)
       : {};
 
-  // P3.8 — capabilities is built locally over the full tool + rule + fix catalog. No bridge round-trip,
-  // so it does not need a liveClient and never POSTs. The kind / include_planned filters pass through.
-  if (toolName === "godot_open_mcp_capabilities") {
-    const filter: CapabilitiesFilter = {};
-    if (args.kind === "tools" || args.kind === "rules" || args.kind === "fixes") {
-      filter.kind = args.kind;
-    }
-    if (typeof args.include_planned === "boolean") {
-      filter.includePlanned = args.include_planned;
-    }
-    const result = buildCapabilities(
-      { tools: ALL_TOOLS, rules: RULE_CATALOG, fixes: FIX_CATALOG },
-      filter,
-    );
-    return {
-      content: [{ type: "text", text: JSON.stringify(result) }],
-    };
-  }
-
-  // P5.3 — bridge_status is a local/live hybrid. It composes the instance-lock classifier with one
-  // /ping probe (driven through LiveClient so the auth header + ping cache path match godot_open_mcp_ping).
-  // The synthesis happens in the MCP server (no POST /tools/bridge_status endpoint on the bridge), so it
-  // is special-cased here rather than routed through liveClient.route. Unlike capabilities, it DOES need
-  // a liveClient (to run the /ping probe); the no-liveClient guard below returns the structured test-harness
-  // error for it. Read-only, gate-free, never errors on an offline bridge — `stopped` IS the answer there.
-  if (toolName === "godot_open_mcp_bridge_status") {
-    if (!liveClient) {
-      return {
-        isError: true,
-        content: [
-          {
-            type: "text",
-            text: `Tool ${toolName} is registered but no live client is wired (test harness omission).`,
-          },
-        ],
-      };
-    }
-    return liveClient.routeBridgeStatus();
-  }
-
-  // P5.4 — pull_events drains the per-process BridgeEventStream (a single SSE subscription to the
-  // bridge's GET /events endpoint). No POST /tools/pull_events endpoint on the bridge. The stream is
-  // constructed once in main() and shared across calls so every pull amortizes one connection.
-  // Read-only, gate-free, never throws on an offline bridge — it returns connected:false + lastError.
-  if (toolName === "godot_open_mcp_pull_events") {
-    if (!eventStream) {
-      return {
-        isError: true,
-        content: [
-          {
-            type: "text",
-            text: `Tool ${toolName} is registered but no event stream is wired (test harness omission).`,
-          },
-        ],
-      };
-    }
-    const rawMax = args.max_events;
-    const maxEvents =
-      typeof rawMax === "number" && rawMax > 0
-        ? Math.min(rawMax, 1000)
-        : 50;
-    const result = eventStream.pull(maxEvents);
-    return {
-      content: [{ type: "text", text: JSON.stringify(result) }],
-      isError: false,
-    };
-  }
-
-  if (!liveClient) {
+  if (!router) {
+    // Test-harness omission. Production main() always wires a ToolRouter.
     return {
       isError: true,
       content: [
         {
           type: "text",
-          text: `Tool ${toolName} is registered but no live client is wired (test harness omission).`,
+          text: `Tool ${toolName} is registered but no router is wired (test harness omission).`,
         },
       ],
     };
   }
-  return liveClient.route(toolName, args);
+
+  return router.route(toolName, args);
 }
 
 /**
@@ -175,15 +107,13 @@ export async function handleCallTool(params: {
  * hosting) can construct a server without touching process state.
  *
  * @param serverName — base name reported in the MCP `initialize` response.
- * @param liveClient — routes registered tool calls to the bridge. Optional so
- *                     tests that only exercise handleListTools don't need one.
- * @param eventStream — shared bridge event SSE reader for `godot_open_mcp_pull_events`.
- *                      Optional for the same reason; the stdio `main()` always supplies one.
+ * @param router — routes registered tool calls. Optional so tests that only
+ *                 exercise handleListTools don't need one; the stdio `main()`
+ *                 always supplies a fully-wired ToolRouter.
  */
 export function createServer(
   serverName = "godot-open-mcp",
-  liveClient?: LiveClient,
-  eventStream?: BridgeEventStream,
+  router?: Router,
 ): Server {
   const server = new Server(
     { name: serverName, version: PACKAGE_VERSION },
@@ -198,7 +128,7 @@ export function createServer(
   server.setRequestHandler(ListToolsRequestSchema, () => handleListTools());
 
   server.setRequestHandler(CallToolRequestSchema, (request) =>
-    handleCallTool(request.params, liveClient, eventStream),
+    handleCallTool(request.params, router),
   );
 
   return server;
@@ -273,7 +203,12 @@ async function main(): Promise<void> {
     undefined,
     env.bridgeAuthToken,
   );
-  const server = createServer("godot-open-mcp", liveClient, eventStream);
+  // P7.1 — every registered call dispatches through ToolRouter. The router owns
+  // live/offline/local selection (capabilities / bridge_status / pull_events are
+  // local named handlers; everything else routes live) and the `_source` /
+  // `_route` metadata. index.ts only validates registration + normalizes args.
+  const router = new ToolRouter(liveClient, env.projectPath, eventStream);
+  const server = createServer("godot-open-mcp", router);
   const transport = new StdioServerTransport();
 
   // Clean shutdown on disconnect. The SDK closes the transport when stdin
