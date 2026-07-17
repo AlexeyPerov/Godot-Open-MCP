@@ -104,6 +104,13 @@ Discover the full capability surface in one call.
     "issueCodes": ["missing_script"],
     "safe": true
   }],
+  "toolGroups": [{
+    "id": "core",
+    "description": "Essential entry points and the gate/verify safety surface: ping, validate_edit, checkpoint_create, delta, apply_fix. Always on for a fresh session.",
+    "defaultEnabled": true,
+    "tools": ["godot_open_mcp_apply_fix", "godot_open_mcp_checkpoint_create", "godot_open_mcp_delta", "godot_open_mcp_ping", "godot_open_mcp_validate_edit"],
+    "available": true
+  }],
   "counts": { "toolsImplemented": 17, "toolsPlanned": 0, "rulesImplemented": 3, "rulesPlanned": 0, "fixesImplemented": 1, "fixesPlanned": 0 }
 }
 ```
@@ -126,6 +133,18 @@ The `rules[]` and `fixes[]` arrays mirror the C# verify package and MUST stay in
 | `remove_missing_script` | `missing_scripts` / `missing_script` | true |
 
 The catalog source of truth is `mcp-server/src/capabilities/rule-catalog.ts`; the builder is `mcp-server/src/capabilities/build-capabilities.ts`. There is no planned-rule surface yet — when a rule is stubbed but not built, add it with `implemented:false` + `guidance` so agents get a structured "not yet available" signal.
+
+### Tool groups
+
+The `toolGroups[]` array advertises the canonical tool-group catalog so an agent can learn which groups exist and what they contain before any tool call. Every registered tool maps to exactly one group via `groupFor(toolName)`; meta-tools (`capabilities`, `bridge_status`, `pull_events`, `read_compile_errors`) map to `null` and are always visible.
+
+| Group id | Default-on | Covers |
+|---|---|---|
+| `core` | yes | Essential entry points + the gate/verify safety surface (`ping`, `validate_edit`, `checkpoint_create`, `delta`, `apply_fix`). The only group visible in a fresh session. |
+| `typed-editor` | no | The whole typed editor surface: nodes, scenes, resources, filesystem, editor state/selection, console, screenshots, reflection. |
+| `tilemap` / `navigation` / `particles` / `animation` / `csg` | no | Domain pack stubs. Reserved ids with empty tool rosters — empty until the packs ship. |
+
+The catalog source of truth is `mcp-server/src/capabilities/tool-groups.ts`. The `toolGroups` block is compiled-state catalog only (no per-session activation flags) and is independent of the `kind` filter — an agent asking for `kind: "rules"` still gets the group catalog. `available` is always `true` today; a later phase will flip unavailable domain packs without reshaping the field. Per-session activation (which groups are visible in `ListTools`) and the `manage_tools` activate/deactivate/reset/list_groups surface follow in subsequent phases.
 
 ## `godot_open_mcp_bridge_status`
 

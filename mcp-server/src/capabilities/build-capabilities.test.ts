@@ -1,15 +1,17 @@
-// build-capabilities builder tests (P3.8; route policy + routing summary in P7.5). Pins the
-// aggregation + filtering contract: every tool ships as implemented, the rule/fix catalog passes
-// through, counts are accurate, the `kind` / `includePlanned` filters narrow the result, every
-// tool carries a valid `routePolicy`, and the routing summary is present and batch-free. Adapted
-// from Unity Open MCP's build-capabilities.test.ts (copy for the test shape; the assertions are
-// Godot-specific).
+// build-capabilities builder tests (P3.8; route policy + routing summary in P7.5; tool-group
+// catalog block in P8.1). Pins the aggregation + filtering contract: every tool ships as
+// implemented, the rule/fix catalog passes through, counts are accurate, the `kind` /
+// `includePlanned` filters narrow the result, every tool carries a valid `routePolicy`, the
+// routing summary is present and batch-free, and the `toolGroups` catalog block is advertised
+// with the right shape. Adapted from Unity Open MCP's build-capabilities.test.ts (copy for the
+// test shape; the assertions are Godot-specific).
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildCapabilities, type BuildCapabilitiesDeps } from "./build-capabilities.js";
 import { RULE_CATALOG, FIX_CATALOG } from "./rule-catalog.js";
 import { ROUTE_POLICIES, SPECIAL_ROUTE_TOOLS, type RoutePolicy } from "./route-policy.js";
+import { TOOL_GROUPS, DEFAULT_ENABLED_GROUPS } from "./tool-groups.js";
 import { ALL_TOOLS } from "../tools/index.js";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
@@ -168,6 +170,71 @@ test("routing summary is returned even with a kind filter", () => {
   assert.ok(rulesOnly.routing);
   assert.equal(rulesOnly.routing.liveDefault, true);
   assert.ok(rulesOnly.routing.policies.length > 0);
+});
+
+// ---------------------------------------------------------------------------
+// P8.1 — tool-group catalog block
+// ---------------------------------------------------------------------------
+
+test("buildCapabilities advertises a toolGroups block matching the catalog", () => {
+  const result = buildCapabilities(DEPS);
+  assert.ok(Array.isArray(result.toolGroups));
+  // Every catalog group appears, in catalog order.
+  assert.deepEqual(
+    result.toolGroups.map((g) => g.id),
+    TOOL_GROUPS.map((g) => g.id),
+  );
+});
+
+test("toolGroups core entry is default-on", () => {
+  const result = buildCapabilities(DEPS);
+  const core = result.toolGroups.find((g) => g.id === "core");
+  assert.ok(core, "core group must appear in toolGroups");
+  assert.equal(core!.defaultEnabled, true);
+  assert.ok(DEFAULT_ENABLED_GROUPS.has("core"));
+});
+
+test("toolGroups domain stubs appear with empty rosters and available:true", () => {
+  const result = buildCapabilities(DEPS);
+  const stubIds = ["tilemap", "navigation", "particles", "animation", "csg"];
+  for (const id of stubIds) {
+    const g = result.toolGroups.find((entry) => entry.id === id);
+    assert.ok(g, `${id} stub must appear in toolGroups`);
+    assert.equal(g!.defaultEnabled, false);
+    assert.deepEqual(g!.tools, [], `${id} roster must be empty in P8`);
+    assert.equal(g!.available, true, `${id} must report available:true in P8`);
+  }
+});
+
+test("every toolGroups entry reports available:true (P8 — no compile inventory)", () => {
+  // P8 has no bridge compile inventory for domain packs, so every group is
+  // `available: true`. P12 will flip uninstalled packs without reshaping the
+  // field — pin the P8 contract here.
+  const result = buildCapabilities(DEPS);
+  for (const g of result.toolGroups) {
+    assert.equal(g.available, true, `${g.id} must be available:true in P8`);
+  }
+});
+
+test("toolGroups tool rosters are sorted and exclude meta-tools", () => {
+  const result = buildCapabilities(DEPS);
+  for (const g of result.toolGroups) {
+    const sorted = [...g.tools].sort();
+    assert.deepEqual(g.tools, sorted, `${g.id} roster must be sorted`);
+    // Meta-tools (groupFor → null) never appear in a group roster.
+    for (const name of g.tools) {
+      assert.notEqual(name, "godot_open_mcp_capabilities");
+      assert.notEqual(name, "godot_open_mcp_bridge_status");
+    }
+  }
+});
+
+test("toolGroups is returned even with a kind filter", () => {
+  // Independent of the kind filter — same rationale as `routing`. An agent
+  // asking only for rules still benefits from group discovery.
+  const rulesOnly = buildCapabilities(DEPS, { kind: "rules" });
+  assert.ok(Array.isArray(rulesOnly.toolGroups));
+  assert.equal(rulesOnly.toolGroups.length, TOOL_GROUPS.length);
 });
 
 // ---------------------------------------------------------------------------
