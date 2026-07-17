@@ -19,12 +19,14 @@ Rules for `mcp-server/` — the stdio MCP server (`godot-open-mcp`). Inherits ro
 
 ## Routing
 
-- `src/tool-router.ts` selects live / offline / local per tool call. Route policies:
-  - **live** — requires the bridge running; routes to `POST /tools/{name}`.
-  - **offline** — local disk parsers, no Godot editor needed.
-  - **local** — never hits Godot (capabilities, manage_tools, skill generation).
-- Godot has no headless editor batch mode — do not add a `batch` route.
-- Do not add a new route type without updating `docs/architecture.md` and the route-policy table in `docs/api/mcp-tools.md`.
+- `src/tool-router.ts` selects live / offline / local / live-first per tool call. Route policies:
+  - **live** — requires the bridge running; routes to `POST /tools/{name}`. The default for any tool not in an override set.
+  - **offline** — local disk parsers, no Godot editor needed. Never probes the bridge.
+  - **local** — never hits Godot (capabilities, bridge_status, pull_events; manage_tools / generate_skill when they ship).
+  - **live-first** — probes the bridge once; forwards live when reachable, otherwise reads from disk. Used for `scene_get_data` / `filesystem_list` (live unsaved/import state is more authoritative than disk).
+- The canonical policy vocabulary + per-tool overrides live in `src/capabilities/route-policy.ts` — the single source of truth shared by `build-capabilities.ts` (advertises `routePolicy` per tool) and `tool-router.ts` (named-handler constants imported from the same module). A parity test in `route-policy.test.ts` pins that every non-`live` policy tool has a matching router named handler and vice versa.
+- Godot has no headless editor batch mode — do not add a `batch` route, a `batchCapable` flag, or a headless spawn fallback.
+- Do not add a new route type without updating `route-policy.ts`, `docs/architecture.md`, and the route-policy table in `docs/api/mcp-tools.md`.
 - `godot_open_mcp_capabilities`, `godot_open_mcp_generate_skill`, and `godot_open_mcp_manage_tools` are **local-only** — they must never depend on the live bridge.
 
 ## Tool-group visibility

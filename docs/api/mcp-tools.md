@@ -23,22 +23,55 @@ Tool names follow the `godot_open_mcp_*` convention (ADR-003).
 
 ## Route policy
 
-| Route | Meaning | Tools |
-|---|---|---|
-| **live** | The CallTool handler POSTs to the bridge; the bridge handler runs on the editor main thread. | Most tools (node, scene, gate meta-tools, `apply_fix`). |
-| **live-first / offline fallback** | The CallTool handler probes the bridge once; if reachable it forwards to the live handler (reflecting unsaved editor state / authoritative import metadata), otherwise it parses the asset from disk with no editor required. A live semantic error (e.g. `scene_not_edited`, `directory_not_found`) is authoritative and does NOT trigger the fallback — only an unreachable bridge does. | `godot_open_mcp_scene_get_data`, `godot_open_mcp_filesystem_list`. |
-| **always-offline** | The CallTool handler NEVER probes the bridge and NEVER POSTs to it — it reads disk straight. Used for diagnostics that must work in the exact state a dead bridge describes (the addon is not running its listener). | `godot_open_mcp_read_compile_errors`. |
-| **local** | The CallTool handler resolves the response in-process — no bridge hop. | `godot_open_mcp_capabilities`. |
-| **local/live hybrid** | The CallTool handler composes a response in-process but runs one `/ping` probe through the live client (auth header + 503 fallback match `ping`). No `POST /tools/{name}` endpoint on the bridge. | `godot_open_mcp_bridge_status`. |
-| **local-drains-live-stream** | The CallTool handler drains a per-process SSE subscription the MCP server keeps open to the bridge's `GET /events`. No `POST /tools/{name}` endpoint on the bridge. | `godot_open_mcp_pull_events`. |
+Every registered tool follows exactly one route policy. The policy is descriptive metadata advertised in `godot_open_mcp_capabilities` (the `routePolicy` field on each tool entry) and the authoritative classification is shared between the catalog and the router via `mcp-server/src/capabilities/route-policy.ts` so the two cannot drift.
 
-`capabilities` is the one local-only tool: its response is built in-process from `ALL_TOOLS` + the rule/fix catalog via `buildCapabilities`. It never POSTs to the bridge (mirroring Unity Open MCP's tool-router `routeCapabilities`).
+| Policy | Meaning |
+|---|---|
+| **live** | The CallTool handler POSTs to the bridge; the bridge handler runs on the editor main thread. Requires the bridge; no disk substitute. The default for any tool not in an override set. |
+| **local** | The CallTool handler resolves the response in the MCP process — no `POST /tools/{name}` bridge hop. `bridge_status` and `pull_events` may touch the live transport (one bounded `/ping` probe; one SSE-driven queue drain) but the call is synthesized locally; the bridge has no dedicated handler for them. |
+| **offline** | The CallTool handler NEVER probes the bridge and NEVER POSTs to it — it reads disk/config straight. Used for diagnostics that must work in the exact state a dead bridge describes (the addon is not running its listener). |
+| **live-first** | The CallTool handler probes the bridge once; if reachable it forwards to the live handler (reflecting unsaved editor state / authoritative import metadata), otherwise it reads from disk with no editor required. A live semantic error (e.g. `scene_not_edited`, `directory_not_found`) is authoritative and does NOT trigger the fallback — only an unreachable bridge does. |
+
+**Route selection.** The router (`mcp-server/src/tool-router.ts`) selects one policy per call: a tool in an override set (`local` / `offline` / `live-first`) is dispatched to its named handler; every other registered tool falls through to the generic live route (`LiveClient.route` → bridge). There is no per-call route override — `routePolicy` advertises possible behavior, it does not let callers pick a route.
+
+**No batch route.** Godot has no headless editor batch equivalent, so there is no `batch` policy, no `batchCapable` flag, and no headless spawn fallback. Every call is live / offline / local.
+
+**Runtime metadata.** Every parseable JSON result is tagged with two MCP-server-owned fields so an agent can answer "where did this originate?":
+
+- `_source` — `live` | `offline` | `local` (where the payload originated).
+- `_route` — `{ route, fallbackReason? }` (which policy executed the call). `fallbackReason` appears only when a live-first tool fell back to disk (`"live_unavailable"`).
+
+### Per-tool route column
+
+| Tool | Route policy | Key note |
+|---|---|---|
+| `godot_open_mcp_capabilities` | local | Registry/rule/fix synthesis; built in-process. |
+| `godot_open_mcp_bridge_status` | local | Local/live hybrid — composes the lock classifier with one bounded `/ping` probe. |
+| `godot_open_mcp_pull_events` | local | Drains a live-fed SSE queue; `connected:false` on an offline bridge is a valid state. |
+| `godot_open_mcp_read_compile_errors` | offline | Reads a bounded project log tail; never probes the bridge. The `dead_bridge` recovery hint points here. |
+| `godot_open_mcp_scene_get_data` | live-first | Offline requires `path`; disk state only (no unsaved edits, null instance IDs). |
+| `godot_open_mcp_filesystem_list` | live-first | Offline resource type/UID metadata is degraded (best-effort extension guess; `uid` always null). |
+| All other registered tools | live | Bridge required; no disk substitute. |
+
+`capabilities` is built locally from `ALL_TOOLS` + the rule/fix catalog via `buildCapabilities`. It never POSTs to the bridge.
 
 `bridge_status` is a local/live hybrid: it reads the instance lock from disk, classifies it (`classifyInstance`), runs one `/ping` probe via the live client, and derives a coarse `status` token server-side. The bridge has no `POST /tools/bridge_status` endpoint — the CallTool handler special-cases the name and calls `LiveClient.routeBridgeStatus` directly.
 
 `pull_events` is a local-drains-live-stream tool: the MCP server holds one `BridgeEventStream` (a single SSE reader against `GET /events`) per process, and the CallTool handler drains its buffered queue via `pull()`. The bridge has no `POST /tools/pull_events` endpoint — the handler special-cases the name. Read-only, gate-free. When the bridge is offline the tool returns `connected:false` + `lastError` rather than throwing.
 
 `read_compile_errors` is the one always-offline tool: it reads a bounded tail of the project's configured Godot log file straight from disk and extracts structured C#/GDScript/plugin-load diagnostics. It NEVER probes the bridge and NEVER POSTs to it, so it works in the exact state `bridge_status: dead_bridge` describes — when the addon is not running its listener, every in-bridge channel (`console_get_logs`, `/ping`) is dead with it, but the live Godot editor still writes compile/plugin-load errors to the log. The bridge has no `POST /tools/read_compile_errors` endpoint — the handler special-cases the name. The `dead_bridge` recovery hint points here. Read-only, gate-free.
+
+### Offline fidelity limitations
+
+The offline / live-first tools read from disk and never require the Godot editor. The disk parse is rebuilt per request (no persistent cache), so it is always consistent with the files on disk but cannot reflect state that lives only in a running editor:
+
+- **No unsaved editor state.** An offline `scene_get_data` reports `isDirty: false`; pending edits not yet saved to the `.tscn` are invisible.
+- **No instance IDs.** Offline reads surface `instanceId: null` — they never fabricate a hashed id, so an agent cannot chain into `node_modify` from an offline read.
+- **Degraded importer metadata.** Offline `filesystem_list` guesses the resource type from the file extension and reports `uid: null` (the UID table lives in `.godot/` import state, which the offline reader refuses to read).
+- **Partial instanced/inherited-scene expansion.** An instanced node with no explicit `type` uses a `PackedSceneInstance` fallback; script paths come from serialized `ExtResource` references rather than runtime `Script` objects.
+- **Read-only.** The offline readers never evaluate code, load resources, or write project files.
+
+A live semantic error is authoritative and does NOT trigger a fallback — only an unreachable bridge does.
 
 ## `godot_open_mcp_capabilities`
 

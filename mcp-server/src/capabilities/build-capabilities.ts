@@ -1,4 +1,4 @@
-// Capability-discovery builder (P3.8).
+// Capability-discovery builder (P3.8; route policy + routing summary in P7.5).
 //
 // Aggregates the capability surface (tools + verify rules + fixes) that
 // `godot_open_mcp_capabilities` returns. Pure transformation module: dependencies (registered tools,
@@ -6,16 +6,18 @@
 // loads cleanly under `node --experimental-strip-types`.
 //
 // Adapted from Unity Open MCP's mcp-server/src/capabilities/build-capabilities.ts (copy for the
-// CapabilitiesResult / filter contract; the builder itself is a slim greenfield cut). Intentional
-// deltas for v1 (per the minimal P3.8 scope):
-//   - No routing summary / cost hints / lifecycle taxonomy / tool-group availability. Unity's builder
-//     annotates every tool with routePolicy / batchCapable / lifecycle / cost hints + emits a
-//     RoutingSummary, CostHintsBlock, LifecycleBlock, and ToolGroupCapability[]. Those surfaces have no
-//     Godot-side backing implementation yet (tool-groups, batch allow-lists, offline classification,
-//     lifecycle classes arrive in later phases). The slim builder returns {tools, rules, fixes, counts}
-//     only; the omitted blocks are additive and safe to add when their phases land.
-//   - No `bridgeReachable` flag. Unity probes the live bridge to annotate per-group availability; the
-//     Godot capabilities tool is built entirely locally (no bridge hop), so there is nothing to annotate.
+// CapabilitiesResult / filter contract + the per-tool `routePolicy` annotation + the top-level
+// routing summary). Intentional deltas from Unity:
+//   - No `batchCapable` / `lifecycle` / `costHints` / `toolGroups` / `bridgeReachable` surfaces.
+//     Those have no Godot-side backing implementation yet (tool-groups, lifecycle classes, cost
+//     hints arrive in later phases). The builder returns {tools, rules, fixes, counts, routing};
+//     the omitted blocks are additive and safe to add when their phases land.
+//   - Route policies come from `route-policy.ts` (the single source of truth shared with
+//     `tool-router.ts`) — no `batch` / `batchCapable` vocabulary, and `live-first` replaces
+//     Unity's `offline-first` for scene/filesystem reads.
+//   - No `bridgeReachable` flag. Unity probes the live bridge to annotate per-group availability;
+//     the Godot capabilities tool is built entirely locally (no bridge hop), so there is nothing
+//     to annotate.
 //
 // Per packages/verify/AGENTS.md §Capability catalog sync, KEEP the rule/fix entries in sync with the
 // C# verify package — the drift-detection tests in rule-catalog.test.ts + build-capabilities.test.ts
@@ -27,6 +29,12 @@ import type {
   FixCapability,
   CapabilityStatus,
 } from "./rule-catalog.js";
+import {
+  routePolicyFor,
+  ROUTING_SUMMARY,
+  type RoutePolicy,
+  type RoutingSummary,
+} from "./route-policy.js";
 
 /** One tool's capability entry — name + description + implemented flag (every registered tool ships as implemented). */
 export interface ToolCapability {
@@ -34,6 +42,13 @@ export interface ToolCapability {
   implemented: boolean;
   status: CapabilityStatus;
   description: string;
+  /**
+   * Execution policy this tool follows (P7.5). Descriptive metadata only — it
+   * does NOT let callers override routing. Mirrors the router's classification
+   * via the shared `route-policy.ts` module so the catalog and the router
+   * cannot drift. See `docs/api/mcp-tools.md` §Route policy.
+   */
+  routePolicy: RoutePolicy;
 }
 
 export interface CapabilitiesCounts {
@@ -50,6 +65,15 @@ export interface CapabilitiesResult {
   rules: RuleCapability[];
   fixes: FixCapability[];
   counts: CapabilitiesCounts;
+  /**
+   * One-shot routing narrative for agents (P7.5). Lets an agent learn the route
+   * vocabulary and that the router prefers the live bridge by default, without
+   * reading repo docs. Concise on purpose — per-tool `routePolicy` lives on
+   * each {@link ToolCapability} entry, not here. Independent of the `kind`
+   * filter — agents asking for rules/fixes still benefit from the routing
+   * narrative.
+   */
+  routing: RoutingSummary;
 }
 
 export interface CapabilitiesFilter {
@@ -86,6 +110,11 @@ export function buildCapabilities(
     implemented: true,
     status: "implemented",
     description: tool.description ?? "",
+    // P7.5 — per-tool policy from the shared route-policy module. This is the
+    // catalog's classification; tool-router.ts imports the same override sets
+    // so the two cannot drift (the parity test in route-policy.test.ts pins
+    // it). Descriptive metadata only — does not let callers override routing.
+    routePolicy: routePolicyFor(tool.name),
   }));
 
   const rules = includePlanned
@@ -104,14 +133,20 @@ export function buildCapabilities(
     fixesPlanned: deps.fixes.filter((f) => !f.implemented).length,
   };
 
+  // P7.5 — routing summary is constant and independent of the kind filter:
+  // an agent asking for `kind: "rules"` still benefits from the routing
+  // narrative. The per-tool `routePolicy` is the authoritative roster; this
+  // summary is the vocabulary + the live-default note.
+  const routing = ROUTING_SUMMARY;
+
   switch (filter.kind) {
     case "tools":
-      return { tools, rules: [], fixes: [], counts };
+      return { tools, rules: [], fixes: [], counts, routing };
     case "rules":
-      return { tools: [], rules, fixes: [], counts };
+      return { tools: [], rules, fixes: [], counts, routing };
     case "fixes":
-      return { tools: [], rules: [], fixes, counts };
+      return { tools: [], rules: [], fixes, counts, routing };
     default:
-      return { tools, rules, fixes, counts };
+      return { tools, rules, fixes, counts, routing };
   }
 }

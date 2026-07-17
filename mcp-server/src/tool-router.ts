@@ -35,6 +35,19 @@ import type { BridgeEventStream } from "./event-stream.js";
 import { ALL_TOOLS } from "./tools/index.js";
 import { buildCapabilities, type CapabilitiesFilter } from "./capabilities/build-capabilities.js";
 import { RULE_CATALOG, FIX_CATALOG } from "./capabilities/rule-catalog.js";
+// P7.5 — the named-handler constants below are imported from the shared
+// route-policy module so the router's dispatch list and the capability
+// catalog's advertised policies cannot drift. The parity test in
+// route-policy.test.ts asserts every non-`live` policy tool has a matching
+// named handler here (and vice versa).
+import {
+  CAPABILITIES_TOOL,
+  BRIDGE_STATUS_TOOL,
+  PULL_EVENTS_TOOL,
+  SCENE_GET_DATA_TOOL,
+  FILESYSTEM_LIST_TOOL,
+  READ_COMPILE_ERRORS_TOOL,
+} from "./capabilities/route-policy.js";
 import { readSceneGetDataOffline } from "./offline/scene-get-data.js";
 import { listProjectDirectoryOffline } from "./offline/project-index.js";
 import { identifyGodotProject } from "./offline/project-config.js";
@@ -203,23 +216,20 @@ function assertNoSourceConflict(
 // ToolRouter.
 // ---------------------------------------------------------------------------
 
-/** Tool names handled locally by the MCP server (no bridge hop). */
-const CAPABILITIES_TOOL = "godot_open_mcp_capabilities";
-const BRIDGE_STATUS_TOOL = "godot_open_mcp_bridge_status";
-const PULL_EVENTS_TOOL = "godot_open_mcp_pull_events";
-/** P7.2 — the first live-first/offline-fallback tool. When the bridge is
- *  reachable, it forwards to the live handler (which reflects unsaved editor
- *  state); when the bridge is unavailable it parses the `.tscn` from disk. */
-const SCENE_GET_DATA_TOOL = "godot_open_mcp_scene_get_data";
-/** P7.3 — the second live-first/offline-fallback tool. When the bridge is
- *  reachable, it forwards to the live handler (which reads the import index for
- *  authoritative resource type + UID); when the bridge is unavailable it lists
- *  the `res://` directory from disk with best-effort extension metadata. */
-const FILESYSTEM_LIST_TOOL = "godot_open_mcp_filesystem_list";
-/** P7.4 — the always-offline diagnostic tool. Never calls the bridge, never
- *  spawns Godot. Reads a bounded tail of the project's configured Godot log
- *  and extracts structured C#/GDScript/plugin-load diagnostics. */
-const READ_COMPILE_ERRORS_TOOL = "godot_open_mcp_read_compile_errors";
+/**
+ * Tool names handled by a named route in the router. P7.5 imports these from
+ * the shared `route-policy.ts` module so the dispatch list and the capability
+ * catalog's `routePolicy` field agree. The parity test in
+ * `route-policy.test.ts` asserts every non-`live` policy tool has a matching
+ * named handler here (and vice versa).
+ *
+ * Handler semantics (kept here because the dispatch logic lives in this file):
+ *   - `CAPABILITIES_TOOL` / `BRIDGE_STATUS_TOOL` / `PULL_EVENTS_TOOL` — local
+ *     (no bridge hop). bridge_status + pull_events may touch the live transport
+ *     but synthesize the response in-process.
+ *   - `SCENE_GET_DATA_TOOL` / `FILESYSTEM_LIST_TOOL` — live-first with offline
+ *     fallback (probe once; forward live when reachable, else read disk).
+ *   - `READ_COMPILE_ERRORS_TOOL` — always offline (never probes the bridge).
 
 /**
  * ToolRouter selects live / offline / local per tool call. One instance per

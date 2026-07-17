@@ -32,8 +32,11 @@ A desktop **Hub** app for guided setup is planned but deferred.
 ```mermaid
 flowchart LR
   AIClient[AI_client] -->|stdio_MCP| McpServer[mcp_server]
-  McpServer -->|live_HTTP| Bridge[godot_bridge_addon]
-  McpServer -->|offline| DiskReaders[res_parsers]
+  McpServer --> Router[ToolRouter]
+  Router -->|live| LiveClient[LiveClient]
+  LiveClient -->|HTTP| Bridge[godot_bridge_addon]
+  Router -->|offline| DiskReaders[res_parsers]
+  Router -->|local| LocalHandlers[local_handlers]
   Bridge --> Verify[verify_addon]
   Bridge --> GodotEditor[EditorInterface]
   Cli[godot_open_mcp_cli] --> McpServer
@@ -45,19 +48,26 @@ flowchart LR
 - `live` — Godot Editor bridge is running and reachable.
 - `offline` — disk readers for selected scene/resource/project operations (no editor required).
 - `local` — no Godot call required (catalog-style operations).
+- `live-first` — prefer the live editor when reachable; fall back to disk on classified unavailability.
 
-Godot has no headless editor batch mode — there is no `batch` route.
+Godot has no headless editor batch mode — there is no `batch` route, no `batchCapable` flag, and no headless spawn fallback. Every call is live / offline / local.
 
 ## Routing authority (`mcp-server/src/tool-router.ts`)
 
-Every registered `CallTool` dispatch flows through `ToolRouter.route` (P7.1). `index.ts` only validates tool registration (unknown names are rejected before the router runs) and normalizes `arguments`; the router owns live/offline/local selection:
+Every registered `CallTool` dispatch flows through `ToolRouter.route`. `index.ts` only validates tool registration (unknown names are rejected before the router runs) and normalizes `arguments`; the router owns live/offline/local selection:
 
 - **local named handlers** — `godot_open_mcp_capabilities`, `godot_open_mcp_bridge_status`, `godot_open_mcp_pull_events` are resolved in the MCP server (no `POST /tools/{name}` bridge hop). Capabilities is built locally from the tool + rule + fix catalog; bridge_status composes the lock classifier with one `/ping` probe; pull_events drains the per-process SSE-backed event stream.
-- **always-offline** — `godot_open_mcp_read_compile_errors` (P7.4) NEVER probes the bridge and NEVER POSTs to it. It reads a bounded tail of the project's configured Godot log file straight from disk and extracts C#/GDScript/plugin-load diagnostics. Used for diagnostics that must work in the exact state a `dead_bridge` describes (the addon is not running its listener); the `dead_bridge` recovery hint points here. Tagged `_source: "offline"` + `_route.route: "offline"` (no `fallbackReason` — offline is the primary route).
-- **live-first / offline fallback** — `godot_open_mcp_scene_get_data` (P7.2) and `godot_open_mcp_filesystem_list` (P7.3) probe the bridge once via `LiveClient.isLiveAvailable()`; if reachable they forward to the live handler (reflecting unsaved editor state / authoritative import metadata), otherwise they read from disk with no Godot process required (`scene_get_data` parses the `.tscn`; `filesystem_list` walks the `res://` directory tree). A live semantic error (e.g. `scene_not_edited`, `directory_not_found`) is authoritative and does NOT trigger the fallback — only an unreachable bridge does. The offline result is tagged `_source: "offline"` + `_route.fallbackReason: "live_unavailable"`.
+- **always-offline** — `godot_open_mcp_read_compile_errors` NEVER probes the bridge and NEVER POSTs to it. It reads a bounded tail of the project's configured Godot log file straight from disk and extracts C#/GDScript/plugin-load diagnostics. Used for diagnostics that must work in the exact state a `dead_bridge` describes (the addon is not running its listener); the `dead_bridge` recovery hint points here. Tagged `_source: "offline"` + `_route.route: "offline"` (no `fallbackReason` — offline is the primary route).
+- **live-first / offline fallback** — `godot_open_mcp_scene_get_data` and `godot_open_mcp_filesystem_list` probe the bridge once via `LiveClient.isLiveAvailable()`; if reachable they forward to the live handler (reflecting unsaved editor state / authoritative import metadata), otherwise they read from disk with no Godot process required (`scene_get_data` parses the `.tscn`; `filesystem_list` walks the `res://` directory tree). A live semantic error (e.g. `scene_not_edited`, `directory_not_found`) is authoritative and does NOT trigger the fallback — only an unreachable bridge does. The offline result is tagged `_source: "offline"` + `_route.fallbackReason: "live_unavailable"`.
 - **generic live route** — every other registered tool dispatches through `LiveClient.route` → bridge.
 
-Each parseable JSON result is tagged with two MCP-server-owned metadata fields: `_source` (where the payload originated: `live` | `offline` | `local`) and `_route.route` (which policy executed the call). Metadata is added after the route completes and is never sent to a bridge handler. P7.2–P7.4 extend the named-handler map with offline exact handlers; they must not add new branches to `index.ts`.
+The route vocabulary and per-tool overrides live in `mcp-server/src/capabilities/route-policy.ts` — the single source of truth shared by the catalog (`build-capabilities.ts` advertises a `routePolicy` per tool) and the router (its named-handler constants derive from the same override sets). A parity test pins that every non-`live` policy tool has a matching named handler, so the advertised catalog and the shipped router cannot drift.
+
+Each parseable JSON result is tagged with two MCP-server-owned metadata fields: `_source` (where the payload originated: `live` | `offline` | `local`) and `_route.route` (which policy executed the call). Metadata is added after the route completes and is never sent to a bridge handler. Offline-named handlers must not add new branches to `index.ts`.
+
+**`GODOT_PROJECT_PATH` containment.** Offline readers resolve `res://` paths against the project root supplied to the MCP server (`GODOT_PROJECT_PATH` → the `project.godot` marker). Every resolved path is canonicalized and refused if it escapes the project root (symlink-safe), so an offline call cannot read files outside the project regardless of the `res://` input.
+
+**No batch route.** The router has no batch/headless classification and no headless spawn fallback. Adding one would require a Godot headless editor entry point that does not exist in the shipped editor; the docs and the capabilities surface state this explicitly so an agent never expects a batch fallback when the live bridge is down.
 
 ## Offline readers (`mcp-server/src/offline/`)
 
@@ -78,7 +88,7 @@ P7.2 introduces the MCP-process offline scene reader — a bounded, read-only `.
 
 **Offline log channel (P7.4):** `godot-log.ts` + `compiler-errors.ts` back the always-offline `godot_open_mcp_read_compile_errors` diagnostic. `console_get_logs` is the bridge-fed addon collector and stops accumulating when the addon fails to compile or load; `read_compile_errors` is the one channel that survives a dead bridge — it reads the project's configured Godot log file straight from disk. The modules live at `mcp-server/src/` (not under `offline/`) because they are NOT a fallback for a live tool — they are the always-offline diagnostic surface. `godot-log.ts` resolves the log path from `project.godot`'s `debug/file_logging/*` settings + per-platform user-data-dir defaults + the operator `GODOT_OPEN_MCP_LOG_FILE` env override (no per-call `log_path` — no arbitrary file-read surface), reads a bounded tail, falls back to the newest rotated `godot.log.N` by mtime, and runs a stale-log mtime advisory. `compiler-errors.ts` extracts normalized C#/GDScript/script-load/addon-load diagnostics. The `dead_bridge` `bridge_status` recovery hint points here.
 
-**No-cache philosophy.** The offline-read path deliberately avoids persistent on-disk caches — scene text is parsed fresh per request and directory listings are re-walked per request. This keeps the reads cheap, side-effect-free, and always consistent with the files on disk. Adding a disk cache (a persistent full-project database, a session asset model, etc.) would require explicit approval and a change to this section.
+**No-cache philosophy.** The offline-read path deliberately avoids persistent on-disk caches — scene text is parsed fresh per request and directory listings are re-walked per request. This keeps the reads cheap, side-effect-free, and always consistent with the files on disk. Adding a disk cache (a persistent full-project database, a session asset model, etc.) would require explicit approval and a change to this section. The per-request parsing model also means there is no stale-cache window: an offline read reflects the file at the instant of the call, and a subsequent edit + re-read sees the new content immediately.
 
 ## CLI package (`cli/`)
 

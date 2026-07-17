@@ -7,7 +7,7 @@ This file is the index for external interfaces and protocol contracts exposed by
 | Document | Covers | Status |
 |---|---|---|
 | `api/bridge-http.md` | Godot bridge HTTP endpoints (`/ping`, `/tools/*`), envelopes, and errors. | Shipped (P2.1) |
-| `api/mcp-tools.md` | MCP tool catalog, tool families, route policy (live/local), `capabilities` surface, rule + fix catalog contract. | Shipped (P3.8) |
+| `api/mcp-tools.md` | MCP tool catalog, tool families, route policy (live / local / offline / live-first), `capabilities` surface, rule + fix catalog contract. | Shipped |
 | `api/resources.md` | MCP resource URIs, payload shapes, and resource router behavior. | TBD |
 
 ## Contract boundaries
@@ -24,7 +24,7 @@ This file is the index for external interfaces and protocol contracts exposed by
 - Prefer documenting behavior and payload shapes over implementation details.
 - Call out breaking changes explicitly.
 - Keep examples minimal and representative.
-- Godot paths use `res://`; no batch route — document live/offline/local only.
+- Godot paths use `res://`; no batch route — document live / offline / local / live-first only. The shipped route policies and per-tool overrides live in `mcp-server/src/capabilities/route-policy.ts`; see `api/mcp-tools.md` §Route policy for the catalog.
 
 ## Update triggers
 
