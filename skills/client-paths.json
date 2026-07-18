@@ -1,0 +1,30 @@
+{
+  "$schema": "./client-paths.schema.json",
+  "skillId": "godot-open-mcp",
+  "templateRelativePath": "skills/godot-open-mcp/SKILL.md",
+  "description": "Single source of truth for project-relative agent-skill install paths and the MCP-client to skill-target mapping for Godot Open MCP. The CLI agent registry (cli/src/utils/agents.ts) owns the MCP-client id vocabulary; this manifest owns the per-client skill destination and the mapping from each MCP client id to one or more skill-target client keys. Future consumers (the Hub wizard, a setup-skills CLI command, a project-specific skill generator) must read this file instead of duplicating constants. To add or rename a client, edit this file — do not hand-maintain duplicate constants in TypeScript or elsewhere.",
+  "clients": {
+    "cursor": { "relativePath": ".cursor/skills/godot-open-mcp/SKILL.md" },
+    "claude": { "relativePath": ".claude/skills/godot-open-mcp/SKILL.md" },
+    "vscode": { "relativePath": ".vscode/skills/godot-open-mcp/SKILL.md" },
+    "vs": { "relativePath": ".vs/skills/godot-open-mcp/SKILL.md" },
+    "opencode": { "relativePath": ".opencode/skills/godot-open-mcp/SKILL.md" },
+    "gemini": { "relativePath": ".gemini/skills/godot-open-mcp/SKILL.md" },
+    "cline": { "relativePath": ".cline/skills/godot-open-mcp/SKILL.md" },
+    "kilocode": { "relativePath": ".kilocode/skills/godot-open-mcp/SKILL.md" },
+    "agents": { "relativePath": ".agents/skills/godot-open-mcp/SKILL.md" }
+  },
+  "mcpClientMapping": {
+    "cursor": ["cursor"],
+    "claude-code": ["claude"],
+    "claude-desktop": ["claude"],
+    "vscode-copilot": ["vscode"],
+    "vs-copilot": ["vs"],
+    "opencode": ["opencode"],
+    "gemini": ["gemini"],
+    "cline": ["cline"],
+    "kilo-code": ["kilocode"],
+    "github-copilot-cli": [],
+    "custom": ["cursor", "claude", "opencode", "agents"]
+  }
+}

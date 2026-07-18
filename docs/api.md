@@ -10,6 +10,10 @@ This file is the index for external interfaces and protocol contracts exposed by
 | `api/mcp-tools.md` | MCP tool catalog, tool families, route policy (live / local / offline / live-first), `capabilities` surface, rule + fix catalog contract. | Shipped |
 | `api/resources.md` | MCP resource URIs, payload shapes, and resource router behavior. | TBD |
 
+## Related surfaces
+
+- [Agent skills](skills.md) — operational playbook installed into game projects (`skills/godot-open-mcp/SKILL.md`) and the per-client install-target manifest. Indexes the agent-facing guidance that complements the API tables above.
+
 ## Contract boundaries
 
 - Bridge HTTP contract source: `packages/bridge/Editor/Bridge/BridgeHttpServer.cs`

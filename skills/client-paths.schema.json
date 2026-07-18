@@ -1,0 +1,52 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://godot-open-mcp/skills/client-paths.schema.json",
+  "title": "Godot Open MCP skill client-paths manifest",
+  "description": "Single source of truth for project-relative agent-skill install paths and the MCP-client to skill-target mapping. The JSON Schema enforces structural shape only (every client has a relativePath, every mcpClientMapping value is a string array). Cross-field rules — every MCP-client id in mcpClientMapping matches the CLI agent registry, every mapping value names a key in clients, no duplicate relativePath, and templateRelativePath exists — are enforced by scripts/check-skill.mjs because they require reading the CLI registry and the filesystem.",
+  "type": "object",
+  "required": ["skillId", "templateRelativePath", "clients", "mcpClientMapping"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "JSON Schema reference. Self-referential in the shipped manifest."
+    },
+    "skillId": {
+      "type": "string",
+      "description": "Stable skill identifier used by clients to namespace the skill directory (e.g. 'godot-open-mcp')."
+    },
+    "templateRelativePath": {
+      "type": "string",
+      "description": "Path of the template SKILL.md relative to the repository root. Must exist (enforced by scripts/check-skill.mjs)."
+    },
+    "description": {
+      "type": "string",
+      "description": "Free-form note for maintainers (not consumed by tooling)."
+    },
+    "clients": {
+      "type": "object",
+      "description": "Map of client key to project-relative install metadata. Keys are the canonical skill-target identifiers used by mcpClientMapping. Paths are relative, forward-slash, and stay inside the target project (no parent traversal).",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["relativePath"],
+        "additionalProperties": false,
+        "properties": {
+          "relativePath": {
+            "type": "string",
+            "description": "Project-relative path the skill template is copied to (forward slashes; no leading slash; no '..' segments).",
+            "pattern": "^[^/].*\\.md$"
+          }
+        }
+      }
+    },
+    "mcpClientMapping": {
+      "type": "object",
+      "description": "Map of MCP-client id (mirrors the cli/src/utils/agents.ts agentRegistry vocabulary) to one or more client keys from `clients`. An explicit empty array means this MCP client has no supported skill install target today. Cross-field constraints (every key is a registered CLI agent id; every array element is a key in clients) are enforced by scripts/check-skill.mjs.",
+      "additionalProperties": {
+        "type": "array",
+        "items": { "type": "string" },
+        "uniqueItems": true
+      }
+    }
+  }
+}

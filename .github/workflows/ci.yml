@@ -3,6 +3,9 @@
 # - bootstrap: required repo paths present.
 # - version-sync: generated version targets match version.json.
 # - runtime-boundary: fast static guard — no editor-only Godot API leaks into Runtime/.
+# - skill-audit: drift + safety audit for skills/godot-open-mcp/SKILL.md and
+#   skills/client-paths.json (line budget, tool references, manifest cross-field
+#   rules, forbidden content).
 # - mcp-server: typecheck + unit tests for the stdio MCP server package.
 
 name: ci
@@ -105,3 +108,23 @@ jobs:
       - name: Test
         working-directory: mcp-server
         run: npm test
+
+  skill-audit:
+    name: Agent skill + client-paths audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Verify skill + manifest pass audit
+        # No dependencies — pure node:fs. Validates that every tool name
+        # referenced in skills/godot-open-mcp/SKILL.md is in the registry, the
+        # skill is within the 130–180 line budget, the client-paths manifest
+        # matches the CLI agent registry, and no internal/forbidden content
+        # leaks into the skill. See scripts/check-skill.mjs for the rule set.
+        run: node scripts/check-skill.mjs
