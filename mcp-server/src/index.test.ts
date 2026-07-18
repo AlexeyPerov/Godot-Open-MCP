@@ -1,20 +1,23 @@
 // Smoke test for the stdio MCP scaffold (P7.1 router-delegation contract,
-// P8.2 ListTools filter).
+// P8.2 ListTools filter, P8.4 listChanged capability advertisement).
 //
 // Verifies the contracts this scaffold ships:
 //   1. `createServer` returns a Server instance whose backing package name and
 //      version match package.json — the values clients see in `initialize`.
-//   2. `handleListTools` filters `ALL_TOOLS` through the supplied session
+//   2. `createServer` advertises `tools.listChanged: true` so the
+//      `notifications/tools/list_changed` emitter (P8.4) is honored without a
+//      capability renegotiation.
+//   3. `handleListTools` filters `ALL_TOOLS` through the supplied session
 //      state: a fresh state advertises `core` (incl. ping) plus always-visible
 //      meta-tools and omits `typed-editor` tools like `node_find` (P8.2).
-//   3. `handleCallTool` returns a structured `isError` response for unknown
+//   4. `handleCallTool` returns a structured `isError` response for unknown
 //      tools instead of throwing, and dispatches REGISTERED tools through the
 //      supplied `Router` exactly once (P7.1). The router owns live/offline/
 //      local selection and the `_source` / `_route` metadata; index.ts only
 //      validates registration + normalizes `arguments`.
-//   4. A registered call with no router wired (test-harness omission) returns
+//   5. A registered call with no router wired (test-harness omission) returns
 //      a structured `isError` rather than throwing.
-//   5. P8.2 — CallTool does NOT filter by group: a hidden-but-registered tool
+//   6. P8.2 — CallTool does NOT filter by group: a hidden-but-registered tool
 //      name still reaches the router (regression guard against accidentally
 //      gating the call path).
 //
@@ -63,6 +66,29 @@ test("createServer injects the supplied sessionState instead of constructing one
     "createServer must use the injected sessionState",
   );
   assert.deepEqual(sessionState.activeGroups(), ["core", "typed-editor"]);
+});
+
+test("P8.4 — createServer advertises tools.listChanged:true in server capabilities", () => {
+  // The SDK's Server class exposes `getCapabilities()` (protected, used during
+  // the initialize handshake) which surfaces the capabilities object passed at
+  // construction. The listChanged flag MUST stay true so P8.4's
+  // notifications/tools/list_changed emitter is honored without a capability
+  // renegotiation. Pin the contract so a future edit that drops the flag (or
+  // drops the `tools` capability block) fails this test loudly.
+  const { server } = createServer("godot-open-mcp");
+  // Cast to access the protected member from the test side — same field the
+  // SDK sends in the `initialize` response.
+  const caps = (
+    server as unknown as {
+      getCapabilities(): { tools?: { listChanged?: boolean } };
+    }
+  ).getCapabilities();
+  assert.ok(caps.tools, "capabilities must advertise a tools block");
+  assert.equal(
+    caps.tools?.listChanged,
+    true,
+    "tools.listChanged MUST be true (P8.4 notifications/tools/list_changed)",
+  );
 });
 
 test("handleListTools with a fresh state includes ping + capabilities + omits node_find", async () => {

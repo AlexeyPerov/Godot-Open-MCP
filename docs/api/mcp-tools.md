@@ -245,7 +245,7 @@ Catalog order is preserved (the order groups appear in `capabilities.toolGroups`
 | `activate` / `deactivate` without `group` | true | `missing_parameter` |
 | Unknown `group` | true | `unknown_group` (lists valid ids; hint to use `list_groups`) |
 
-**Notifications.** `manage_tools` accepts an optional `notifyToolListChanged` callback that fires when an activate/deactivate/reset actually changes the visible set. The MCP server wires the real `notifications/tools/list_changed` emitter through this hook; idempotent calls and `list_groups` never fire it. The notification lets MCP clients that support `listChanged` refresh `ListTools` automatically — an agent does not have to re-list after every activate.
+**Notifications.** When an `activate` / `deactivate` / `reset` call actually changes the visible tool set, the server emits the MCP `notifications/tools/list_changed` notification so clients that support `listChanged` refresh `ListTools` automatically — an agent does not have to re-list after every activate. Idempotent calls (no state change) and `list_groups` never emit. The notification carries no params. The capability is advertised at `initialize` time (`tools.listChanged: true`) so no renegotiation is needed. Transport faults on the notification are isolated: the error is logged to stderr and the manage_tools result is still returned as a success — the tool call never flips to `isError` because the notification could not be delivered. Agents on clients without `listChanged` support should call `ListTools` explicitly after a successful activate/deactivate/reset to refresh their tool surface.
 
 **Agent happy path.**
 

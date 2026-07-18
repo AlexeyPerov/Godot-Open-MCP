@@ -251,12 +251,13 @@ function assertNoSourceConflict(
  * visible to the next ListTools response. Constructing two stores would desync
  * the two surfaces; the factory in `index.ts` constructs exactly one.
  *
- * `notifyToolListChanged` (P8.3 stub / P8.4 owner) is the optional callback
- * fired when an activate/deactivate/reset call changes the visible tool set.
- * P8.3 wires it as an optional no-op (or omits it); P8.4 swaps in the real
- * `notifications/tools/list_changed` emitter and pins the emit-on-change
- * semantics in tests. The router only fires the callback on an actual change
- * — an idempotent activate is a no-op for state AND for the notification.
+ * `notifyToolListChanged` (P8.4) is the optional callback fired when an
+ * activate/deactivate/reset call changes the visible tool set. The bootstrap in
+ * `index.ts` wires the real `notifications/tools/list_changed` emitter (a
+ * closure over the SDK Server). The router fires it ONLY on an actual change —
+ * an idempotent activate is a no-op for state AND for the notification. Notify
+ * failures are isolated: a rejecting notifier is swallowed + logged so the
+ * manage_tools result is never flipped to `isError` by a transport fault.
  */
 export class ToolRouter implements Router {
   constructor(
@@ -801,7 +802,7 @@ export class ToolRouter implements Router {
       const after = this.sessionState.activeGroups();
       const changed = !activeGroupsEqual(before, after);
       if (changed) {
-        await this.notifyToolListChanged?.();
+        await this.notifyListChangedSafely();
       }
       return sourceResult(
         {
@@ -856,7 +857,7 @@ export class ToolRouter implements Router {
           ? this.sessionState.activate(group)
           : this.sessionState.deactivate(group);
       if (changed) {
-        await this.notifyToolListChanged?.();
+        await this.notifyListChangedSafely();
       }
       return sourceResult(
         {
@@ -898,6 +899,27 @@ export class ToolRouter implements Router {
       routeMeta,
       true,
     );
+  }
+
+  /**
+   * Fire the optional {@link notifyToolListChanged} callback, swallowing any
+   * rejection or throw so the manage_tools result is never flipped to
+   * `isError` by a transport fault (P8.4 §3 failure isolation). The bootstrap
+   * closure in `index.ts` already swallows transport errors with a stderr log;
+   * this is defense-in-depth for unit tests that inject a rejecting notifier
+   * without the bootstrap wrapper. The error is logged to stderr here too so a
+   * faulting fake notifier is visible in test output.
+   */
+  private async notifyListChangedSafely(): Promise<void> {
+    if (!this.notifyToolListChanged) return;
+    try {
+      await this.notifyToolListChanged();
+    } catch (err) {
+      console.error(
+        "[godot-open-mcp] manage_tools notifier threw; suppressing:",
+        err,
+      );
+    }
   }
 }
 

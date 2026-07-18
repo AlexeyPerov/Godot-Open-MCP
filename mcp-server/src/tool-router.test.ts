@@ -1452,3 +1452,74 @@ test("route: manage_tools error paths do NOT notify", async () => {
   await router.route("godot_open_mcp_manage_tools", { action: "bogus" });
   assert.equal(notifyCount, 0);
 });
+
+test("route: manage_tools succeed even when notify rejects (failure isolation)", async () => {
+  // P8.4 §3 — a rejecting notifier must NOT flip the manage_tools result to
+  // isError. The router swallows the rejection so a transport fault can't
+  // surface as a tool-call failure. State still mutated; the change is durable.
+  const session = new ToolSessionState();
+  const router = makeRouter(
+    makeFakeLive(),
+    makeFakeEventStream(),
+    "/proj",
+    session,
+    async () => {
+      throw new Error("transport down");
+    },
+  );
+  const result = await router.route("godot_open_mcp_manage_tools", {
+    action: "activate",
+    group: "typed-editor",
+  });
+  const body = parseBody(result);
+
+  assert.equal(result.isError, false, "rejection must not flip isError");
+  assert.equal(body.changed, true, "state change is durable");
+  assert.deepEqual(body.activeGroups, ["core", "typed-editor"]);
+  assert.ok(
+    session.isGroupActive("typed-editor"),
+    "session still reflects the activation",
+  );
+});
+
+test("route: manage_tools succeed even when notify throws synchronously (failure isolation)", async () => {
+  // A notifier that throws synchronously (rather than returning a rejected
+  // promise) must also be isolated — `await` re-throws sync throws the same
+  // way, but this pins the contract explicitly.
+  const router = makeRouter(
+    makeFakeLive(),
+    makeFakeEventStream(),
+    "/proj",
+    new ToolSessionState(),
+    () => {
+      throw new Error("sync boom");
+    },
+  );
+  const result = await router.route("godot_open_mcp_manage_tools", {
+    action: "activate",
+    group: "typed-editor",
+  });
+  assert.equal(result.isError, false, "sync throw must not flip isError");
+  assert.equal(parseBody(result).changed, true);
+});
+
+test("route: manage_tools with no notifier wired is a no-op for notification", async () => {
+  // P8.3/P8.4 — the notifier is optional. When omitted (e.g. test harnesses,
+  // pre-P8.4 wiring), manage_tools must still mutate state and report changed.
+  const session = new ToolSessionState();
+  const router = makeRouter(
+    makeFakeLive(),
+    makeFakeEventStream(),
+    "/proj",
+    session,
+    // No notifier — makeRouter leaves it undefined.
+  );
+  const result = await router.route("godot_open_mcp_manage_tools", {
+    action: "activate",
+    group: "typed-editor",
+  });
+  const body = parseBody(result);
+  assert.equal(result.isError, false);
+  assert.equal(body.changed, true);
+  assert.ok(session.isGroupActive("typed-editor"));
+});

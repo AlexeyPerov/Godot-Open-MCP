@@ -250,6 +250,30 @@ async function main(): Promise<void> {
   // two stores would desync ListTools and manage_tools; the shared instance is
   // the single source of truth for per-session tool-group visibility.
   const sessionState = new ToolSessionState();
+  // P8.4 — emit `notifications/tools/list_changed` when manage_tools mutates
+  // the visible tool set. The notifier closes over the SDK Server (the only
+  // object that owns the transport), but in Godot the router is constructed
+  // BEFORE `createServer` returns the server — the inverse of Unity's order
+  // (Unity builds server → notifier → router inside createServer; Godot's
+  // factory takes a pre-built router). A lazy `serverRef` defers the capture so
+  // the closure never observes null at call time: manage_tools only runs after
+  // `main()` has fully booted the server. Transport errors are swallowed + sent
+  // to stderr so a dead transport cannot flip `isError` on the manage_tools
+  // result (failure-isolation contract, P8.4 §3).
+  let serverRef: Server | null = null;
+  const notifyToolListChanged = async (): Promise<void> => {
+    if (!serverRef) return;
+    try {
+      await serverRef.notification({
+        method: "notifications/tools/list_changed",
+      });
+    } catch (err) {
+      console.error(
+        "[godot-open-mcp] Failed to send tools/list_changed notification:",
+        err,
+      );
+    }
+  };
   // P7.1 — every registered call dispatches through ToolRouter. The router owns
   // live/offline/local selection (capabilities / bridge_status / pull_events /
   // manage_tools are local named handlers; scene_get_data / filesystem_list are
@@ -258,17 +282,19 @@ async function main(): Promise<void> {
   // registration + normalizes args.
   //
   // P8.3 — `sessionState` is injected so `manage_tools` can mutate the same
-  // store ListTools reads. `notifyToolListChanged` is left unwired here — the
-  // tools/list_changed notification lands in P8.4 and will be plumbed through
-  // the SDK `Server.sendNotification` API; P8.3 only needs the router to fire
-  // the callback on a real change (and to be a no-op when none is supplied).
+  // store ListTools reads. P8.4 — `notifyToolListChanged` is the real
+  // `notifications/tools/list_changed` emitter (defined above); the router
+  // fires it ONLY when an activate/deactivate/reset actually changes the
+  // visible set. list_groups + idempotent calls never fire it.
   const router = new ToolRouter(
     liveClient,
     env.projectPath,
     eventStream,
     sessionState,
+    notifyToolListChanged,
   );
   const { server } = createServer("godot-open-mcp", router, { sessionState });
+  serverRef = server;
   const transport = new StdioServerTransport();
 
   // Clean shutdown on disconnect. The SDK closes the transport when stdin
