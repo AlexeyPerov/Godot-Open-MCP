@@ -73,7 +73,7 @@ export const TOOL_GROUPS: ToolGroup[] = [
   {
     id: "typed-editor",
     description:
-      "Typed editor surface: nodes, scenes, scripts, resources, filesystem, " +
+      "Typed editor surface: nodes, scenes, resources, filesystem, " +
       "editor state/selection, console, screenshots, reflection.",
     defaultEnabled: false,
   },

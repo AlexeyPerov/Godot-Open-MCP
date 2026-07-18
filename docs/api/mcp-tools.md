@@ -12,7 +12,7 @@ Tool names follow the `godot_open_mcp_*` convention (ADR-003).
 
 | Family | Tools | Mutating | Notes |
 |---|---|---|---|
-| core | `ping`, `validate_edit`, `checkpoint_create`, `delta`, `apply_fix`, `capabilities`, `bridge_status`, `pull_events`, `read_compile_errors`, `manage_tools` | `apply_fix` only | Always visible in `ListTools`. `manage_tools` is the per-session visibility mutator (P8.3). |
+| core | `ping`, `validate_edit`, `checkpoint_create`, `delta`, `apply_fix`, `capabilities`, `bridge_status`, `pull_events`, `read_compile_errors`, `manage_tools` | `apply_fix` only | Always visible in `ListTools`. `manage_tools` is the per-session visibility mutator. |
 | node | `node_find`, `node_create`, `node_modify`, `node_set_parent`, `node_duplicate`, `node_delete` | create/modify/set-parent/duplicate/delete | Scene-tree operations. |
 | scene | `scene_open`, `scene_save`, `scene_list_opened`, `scene_get_data`, `scene_create` | open/save/create | Scene lifecycle + read. |
 | resource | `resource_find`, `resource_get_data`, `resource_create`, `resource_modify`, `resource_move`, `resource_delete` | create/modify/move/delete | `.tres`/`.res` discovery + bounded property inspection (read-only) + gated create/modify (P4.2) + file lifecycle move/delete (P4.3). |
@@ -174,7 +174,7 @@ State is ephemeral and per-session — it resets to `core` only when the MCP ser
     },
     {
       "id": "typed-editor",
-      "description": "Typed editor surface: nodes, scenes, scripts, …",
+      "description": "Typed editor surface: nodes, scenes, resources, …",
       "defaultEnabled": false,
       "active": false,
       "activationSource": null,
