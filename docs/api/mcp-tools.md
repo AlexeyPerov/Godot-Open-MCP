@@ -12,7 +12,7 @@ Tool names follow the `godot_open_mcp_*` convention (ADR-003).
 
 | Family | Tools | Mutating | Notes |
 |---|---|---|---|
-| core | `ping`, `validate_edit`, `checkpoint_create`, `delta`, `apply_fix`, `capabilities`, `bridge_status`, `pull_events`, `read_compile_errors` | `apply_fix` only | Always visible in `ListTools`. |
+| core | `ping`, `validate_edit`, `checkpoint_create`, `delta`, `apply_fix`, `capabilities`, `bridge_status`, `pull_events`, `read_compile_errors`, `manage_tools` | `apply_fix` only | Always visible in `ListTools`. `manage_tools` is the per-session visibility mutator (P8.3). |
 | node | `node_find`, `node_create`, `node_modify`, `node_set_parent`, `node_duplicate`, `node_delete` | create/modify/set-parent/duplicate/delete | Scene-tree operations. |
 | scene | `scene_open`, `scene_save`, `scene_list_opened`, `scene_get_data`, `scene_create` | open/save/create | Scene lifecycle + read. |
 | resource | `resource_find`, `resource_get_data`, `resource_create`, `resource_modify`, `resource_move`, `resource_delete` | create/modify/move/delete | `.tres`/`.res` discovery + bounded property inspection (read-only) + gated create/modify (P4.2) + file lifecycle move/delete (P4.3). |
@@ -48,6 +48,7 @@ Every registered tool follows exactly one route policy. The policy is descriptiv
 | `godot_open_mcp_capabilities` | local | Registry/rule/fix synthesis; built in-process. |
 | `godot_open_mcp_bridge_status` | local | Local/live hybrid — composes the lock classifier with one bounded `/ping` probe. |
 | `godot_open_mcp_pull_events` | local | Drains a live-fed SSE queue; `connected:false` on an offline bridge is a valid state. |
+| `godot_open_mcp_manage_tools` | local | Mutates per-session tool-group visibility; no bridge hop. Always visible so the visibility surface stays reachable. |
 | `godot_open_mcp_read_compile_errors` | offline | Reads a bounded project log tail; never probes the bridge. The `dead_bridge` recovery hint points here. |
 | `godot_open_mcp_scene_get_data` | live-first | Offline requires `path`; disk state only (no unsaved edits, null instance IDs). |
 | `godot_open_mcp_filesystem_list` | live-first | Offline resource type/UID metadata is degraded (best-effort extension guess; `uid` always null). |
@@ -136,7 +137,7 @@ The catalog source of truth is `mcp-server/src/capabilities/rule-catalog.ts`; th
 
 ### Tool groups
 
-The `toolGroups[]` array advertises the canonical tool-group catalog so an agent can learn which groups exist and what they contain before any tool call. Every registered tool maps to exactly one group via `groupFor(toolName)`; meta-tools (`capabilities`, `bridge_status`, `pull_events`, `read_compile_errors`) map to `null` and are always visible.
+The `toolGroups[]` array advertises the canonical tool-group catalog so an agent can learn which groups exist and what they contain before any tool call. Every registered tool maps to exactly one group via `groupFor(toolName)`; meta-tools (`capabilities`, `bridge_status`, `pull_events`, `read_compile_errors`, `manage_tools`) map to `null` and are always visible.
 
 | Group id | Default-on | Covers |
 |---|---|---|
@@ -144,7 +145,119 @@ The `toolGroups[]` array advertises the canonical tool-group catalog so an agent
 | `typed-editor` | no | The whole typed editor surface: nodes, scenes, resources, filesystem, editor state/selection, console, screenshots, reflection. |
 | `tilemap` / `navigation` / `particles` / `animation` / `csg` | no | Domain pack stubs. Reserved ids with empty tool rosters — empty until the packs ship. |
 
-The catalog source of truth is `mcp-server/src/capabilities/tool-groups.ts`. The `toolGroups` block is compiled-state catalog only (no per-session activation flags) and is independent of the `kind` filter — an agent asking for `kind: "rules"` still gets the group catalog. `available` is always `true` today; a later phase will flip unavailable domain packs without reshaping the field. Per-session activation (which groups are visible in `ListTools`) and the `manage_tools` activate/deactivate/reset/list_groups surface follow in subsequent phases.
+The catalog source of truth is `mcp-server/src/capabilities/tool-groups.ts`. The `toolGroups` block is compiled-state catalog only (no per-session activation flags) and is independent of the `kind` filter — an agent asking for `kind: "rules"` still gets the group catalog. `available` is always `true` today; a later phase will flip unavailable domain packs without reshaping the field. Per-session activation is owned by `godot_open_mcp_manage_tools` (below) — it mutates the same `ToolSessionState` that `ListTools` filters through.
+
+## `godot_open_mcp_manage_tools`
+
+Per-session tool-group visibility mutator. The MCP server holds the session state (`ToolSessionState`); the bridge does not track it. Activating a group makes its tools appear in subsequent `ListTools` responses; deactivating removes them; `reset` restores the default-on groups (`core` only). **Local** route — no `POST /tools/manage_tools` endpoint on the bridge. Read-only (`list_groups`) and mutator (`activate` / `deactivate` / `reset`) actions share one local handler. Always visible so an agent can reach the visibility surface before any other group is active.
+
+State is ephemeral and per-session — it resets to `core` only when the MCP server restarts. The store is intentionally not keyed by session id: the stdio MCP server has exactly one client per process. HTTP/SSE MCP transports would need a per-client map.
+
+**Input:**
+
+- `action` (required) — `list_groups` | `activate` | `deactivate` | `reset`.
+- `group` (optional, required for `activate` / `deactivate`) — group id; valid ids come from `list_groups`.
+
+**Result (`list_groups`):**
+
+```json
+{
+  "groups": [
+    {
+      "id": "core",
+      "description": "Essential entry points and the gate/verify safety surface …",
+      "defaultEnabled": true,
+      "active": true,
+      "activationSource": "default",
+      "toolCount": 5,
+      "tools": ["godot_open_mcp_apply_fix", "godot_open_mcp_checkpoint_create", "godot_open_mcp_delta", "godot_open_mcp_ping", "godot_open_mcp_validate_edit"]
+    },
+    {
+      "id": "typed-editor",
+      "description": "Typed editor surface: nodes, scenes, scripts, …",
+      "defaultEnabled": false,
+      "active": false,
+      "activationSource": null,
+      "toolCount": 30,
+      "tools": ["godot_open_mcp_node_find", "..."]
+    },
+    {
+      "id": "tilemap",
+      "description": "TileMapLayer tools (domain pack). Empty until the pack ships.",
+      "defaultEnabled": false,
+      "active": false,
+      "activationSource": null,
+      "toolCount": 0,
+      "tools": []
+    }
+  ],
+  "activeGroups": ["core"],
+  "note": "Activate a group to add its tools to your ListTools surface; deactivate to hide them. State is per-session and ephemeral — it resets to `core` only when the MCP server restarts.",
+  "_source": "local",
+  "_route": { "route": "local" }
+}
+```
+
+Catalog order is preserved (the order groups appear in `capabilities.toolGroups`). `toolCount: 0` on a stub pack conveys "empty until the pack ships" without a separate availability field.
+
+**Result (`activate` / `deactivate`):**
+
+```json
+{
+  "action": "activate",
+  "group": "typed-editor",
+  "changed": true,
+  "activeGroups": ["core", "typed-editor"],
+  "message": "Group 'typed-editor' activated. Its tools will appear in the next ListTools response; MCP clients that support listChanged will refresh automatically.",
+  "_source": "local",
+  "_route": { "route": "local" }
+}
+```
+
+`changed` is `false` on an idempotent call (the group was already in the requested state). Activating a default-on group that was previously deactivated flips its `activationSource` from `"default"` to `"manual"` — the explicit act wins.
+
+**Result (`reset`):**
+
+```json
+{
+  "reset": true,
+  "changed": true,
+  "activeGroups": ["core"],
+  "message": "Tool-group visibility restored to `core` only. …",
+  "_source": "local",
+  "_route": { "route": "local" }
+}
+```
+
+`changed` is `false` when the state was already at the defaults (the call was a no-op for both state and notification).
+
+**Field notes:**
+
+- `activationSource` — `default` (default-on group), `manual` (activated via `manage_tools`), or `null` (group is not active). There is intentionally NO `auto` value in P8 — Godot has no bridge compile inventory for domain packs yet; Phase 12 may add it when pack auto-activation lands.
+- `activeGroups` — sorted snapshot of the active set, the same value `ListTools` consults.
+
+**Errors (structured, never throws):**
+
+| Condition | `isError` | Code |
+|---|---|---|
+| Missing `action` | true | `missing_parameter` |
+| Unknown `action` | true | `unknown_action` (lists valid actions) |
+| `activate` / `deactivate` without `group` | true | `missing_parameter` |
+| Unknown `group` | true | `unknown_group` (lists valid ids; hint to use `list_groups`) |
+
+**Notifications.** `manage_tools` accepts an optional `notifyToolListChanged` callback that fires when an activate/deactivate/reset actually changes the visible set. The MCP server wires the real `notifications/tools/list_changed` emitter through this hook; idempotent calls and `list_groups` never fire it. The notification lets MCP clients that support `listChanged` refresh `ListTools` automatically — an agent does not have to re-list after every activate.
+
+**Agent happy path.**
+
+```
+1. manage_tools { action: "list_groups" }
+2. manage_tools { action: "activate", group: "typed-editor" }
+3. ListTools  → includes godot_open_mcp_node_find
+4. Use node / scene / resource / … tools
+5. manage_tools { action: "reset" }   # optional
+```
+
+**Non-goals.** P8 ships four actions only. Unity's `suggest` / `activate_for` (intent-driven activation via free-text task description) is not ported; persisting activation across MCP server restarts is not supported; `CallTool` is NOT filtered by active group (hiding is a prompt-size control, not an authorization boundary — a hidden tool name still routes when called directly).
 
 ## `godot_open_mcp_bridge_status`
 

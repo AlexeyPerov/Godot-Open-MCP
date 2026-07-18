@@ -44,10 +44,17 @@ import {
   CAPABILITIES_TOOL,
   BRIDGE_STATUS_TOOL,
   PULL_EVENTS_TOOL,
+  MANAGE_TOOLS_TOOL,
   SCENE_GET_DATA_TOOL,
   FILESYSTEM_LIST_TOOL,
   READ_COMPILE_ERRORS_TOOL,
 } from "./capabilities/route-policy.js";
+import {
+  TOOL_GROUPS,
+  GROUP_IDS,
+  toolsInGroup,
+} from "./capabilities/tool-groups.js";
+import type { ToolSessionState } from "./tool-session-state.js";
 import { readSceneGetDataOffline } from "./offline/scene-get-data.js";
 import { listProjectDirectoryOffline } from "./offline/project-index.js";
 import { identifyGodotProject } from "./offline/project-config.js";
@@ -237,12 +244,27 @@ function assertNoSourceConflict(
  * `main()` feed every call. Constructed dependencies are optional only so unit
  * tests for individual handlers do not need to spin them all up — production
  * `main()` always supplies both.
+ *
+ * `sessionState` (P8.3) is the per-session tool-group visibility store that
+ * ListTools filters through and `manage_tools` mutates. The same instance is
+ * shared between ListTools and the router so an activate/deactivate call is
+ * visible to the next ListTools response. Constructing two stores would desync
+ * the two surfaces; the factory in `index.ts` constructs exactly one.
+ *
+ * `notifyToolListChanged` (P8.3 stub / P8.4 owner) is the optional callback
+ * fired when an activate/deactivate/reset call changes the visible tool set.
+ * P8.3 wires it as an optional no-op (or omits it); P8.4 swaps in the real
+ * `notifications/tools/list_changed` emitter and pins the emit-on-change
+ * semantics in tests. The router only fires the callback on an actual change
+ * — an idempotent activate is a no-op for state AND for the notification.
  */
 export class ToolRouter implements Router {
   constructor(
     private live: LiveClient,
     private projectPath: string,
     private eventStream: BridgeEventStream,
+    private sessionState: ToolSessionState,
+    private notifyToolListChanged?: () => void | Promise<void>,
   ) {}
 
   async route(
@@ -270,6 +292,9 @@ export class ToolRouter implements Router {
     }
     if (toolName === READ_COMPILE_ERRORS_TOOL) {
       return this.routeReadCompileErrors(args);
+    }
+    if (toolName === MANAGE_TOOLS_TOOL) {
+      return this.routeManageTools(args);
     }
     return this.routeLive(toolName, args);
   }
@@ -699,6 +724,223 @@ export class ToolRouter implements Router {
     });
     return sourceResult(body, "offline", routeMeta);
   }
+
+  // ── P8.3 — local `manage_tools` (per-session visibility mutator) ────────
+
+  /**
+   * `godot_open_mcp_manage_tools` — the only mutator of `ToolSessionState`.
+   * Resolved entirely in the MCP server (no bridge round-trip); the body is
+   * tagged `_source: "local"` + `_route.route: "local"`. Four actions:
+   *
+   *   - `list_groups` — read-only. Returns the catalog with per-group `active`,
+   *     `defaultEnabled`, `activationSource` (`"default" | "manual" | null`),
+   *     the tool roster, and the active set snapshot.
+   *   - `activate` / `deactivate` — toggle one group (requires `group`). The
+   *     store returns whether state changed; the router fires the optional
+   *     `notifyToolListChanged` callback ONLY when state actually changed.
+   *     Idempotent calls report `changed: false` and do not notify.
+   *   - `reset` — restore `core` only. The store always returns `true`; the
+   *     router computes `changed` by snapshotting `activeGroups()` before and
+   *     after so an idempotent reset (state already at defaults) reports
+   *     `changed: false` and does not notify.
+   *
+   * Structured errors (never throws):
+   *   - missing `action` → `missing_parameter` (the schema requires `action`;
+   *     this branch defends a programmatic caller that bypassed validation).
+   *   - unknown `action` → `unknown_action` (lists the valid actions).
+   *   - activate/deactivate without `group` → `missing_parameter`.
+   *   - activate/deactivate with unknown `group` → `unknown_group` (lists the
+   *     valid ids; hint to use `list_groups`).
+   *
+   * Adapted from Unity Open MCP's `routeManageTools` (copy for the action
+   * switch + error contract; the list_groups payload strips Unity's
+   * `available` / `availableReason` / `unityPackage` / `packageDependency` /
+   * `autoActivated` fields because Godot has no bridge compile inventory or
+   * package auto-activation in P8).
+   */
+  private async routeManageTools(
+    args: Record<string, unknown>,
+  ): Promise<CallToolResult> {
+    const routeMeta: RouteMeta = { route: "local" };
+    const action = typeof args.action === "string" ? args.action : "";
+    const group = typeof args.group === "string" ? args.group.trim() : "";
+
+    // list_groups — read-only snapshot of the catalog + session state.
+    if (action === "list_groups") {
+      const groups = TOOL_GROUPS.map((g) => {
+        const tools = toolsInGroup(g.id);
+        return {
+          id: g.id,
+          description: g.description,
+          defaultEnabled: g.defaultEnabled,
+          active: this.sessionState.isGroupActive(g.id),
+          activationSource: this.sessionState.activationSource(g.id),
+          toolCount: tools.length,
+          tools,
+        };
+      });
+      return sourceResult(
+        {
+          groups,
+          activeGroups: this.sessionState.activeGroups(),
+          note:
+            "Activate a group to add its tools to your ListTools surface; " +
+            "deactivate to hide them. State is per-session and ephemeral — " +
+            "it resets to `core` only when the MCP server restarts.",
+        },
+        "local",
+        routeMeta,
+      );
+    }
+
+    // reset — restore the default-on groups. Compute `changed` by snapshot
+    // (the store always returns true from reset()).
+    if (action === "reset") {
+      const before = this.sessionState.activeGroups();
+      this.sessionState.reset();
+      const after = this.sessionState.activeGroups();
+      const changed = !activeGroupsEqual(before, after);
+      if (changed) {
+        await this.notifyToolListChanged?.();
+      }
+      return sourceResult(
+        {
+          reset: true,
+          changed,
+          activeGroups: after,
+          message: changed
+            ? "Tool-group visibility restored to `core` only. The next " +
+              "ListTools response reflects the default surface; MCP " +
+              "clients that support listChanged will refresh automatically."
+            : "Tool-group visibility was already at the defaults (`core` " +
+              "only); no change.",
+        },
+        "local",
+        routeMeta,
+      );
+    }
+
+    // activate / deactivate — toggle one group.
+    if (action === "activate" || action === "deactivate") {
+      if (!group) {
+        return sourceResult(
+          {
+            error: {
+              code: "missing_parameter",
+              message: `'group' is required for action '${action}'.`,
+            },
+          },
+          "local",
+          routeMeta,
+          true,
+        );
+      }
+      if (!GROUP_IDS.has(group)) {
+        return sourceResult(
+          {
+            error: {
+              code: "unknown_group",
+              message:
+                `Unknown group '${group}'. Valid ids: ` +
+                `${Array.from(GROUP_IDS).sort().join(", ")}. ` +
+                `Call manage_tools with action 'list_groups' to see the catalog.`,
+            },
+          },
+          "local",
+          routeMeta,
+          true,
+        );
+      }
+      const changed =
+        action === "activate"
+          ? this.sessionState.activate(group)
+          : this.sessionState.deactivate(group);
+      if (changed) {
+        await this.notifyToolListChanged?.();
+      }
+      return sourceResult(
+        {
+          action,
+          group,
+          changed,
+          activeGroups: this.sessionState.activeGroups(),
+          message: manageToolsMessage(action, group, changed),
+        },
+        "local",
+        routeMeta,
+      );
+    }
+
+    // Missing action (defensive — the schema requires it) OR an unknown value.
+    if (action === "") {
+      return sourceResult(
+        {
+          error: {
+            code: "missing_parameter",
+            message: "'action' is required.",
+          },
+        },
+        "local",
+        routeMeta,
+        true,
+      );
+    }
+    return sourceResult(
+      {
+        error: {
+          code: "unknown_action",
+          message:
+            `Unknown action '${action}'. Valid actions: list_groups, ` +
+            `activate, deactivate, reset.`,
+        },
+      },
+      "local",
+      routeMeta,
+      true,
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// P8.3 — `manage_tools` helpers.
+// ---------------------------------------------------------------------------
+
+/**
+ * Compare two `activeGroups()` snapshots for set equality. Both inputs are
+ * sorted arrays (the store returns them sorted); a shallow deepEqual is
+ * sufficient. Used by `routeManageTools` to compute whether `reset` actually
+ * changed the visible set.
+ */
+function activeGroupsEqual(
+  a: readonly string[],
+  b: readonly string[],
+): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+/** Compose the human-readable message for an activate/deactivate result. */
+function manageToolsMessage(
+  action: string,
+  group: string,
+  changed: boolean,
+): string {
+  if (action === "activate") {
+    return changed
+      ? `Group '${group}' activated. Its tools will appear in the next ` +
+          "ListTools response; MCP clients that support listChanged will " +
+          "refresh automatically."
+      : `Group '${group}' was already active.`;
+  }
+  // deactivate
+  return changed
+    ? `Group '${group}' deactivated. Its tools are now hidden from the ` +
+        "next ListTools response; MCP clients that support listChanged " +
+        "will refresh automatically."
+    : `Group '${group}' was already inactive.`;
 }
 
 // ---------------------------------------------------------------------------

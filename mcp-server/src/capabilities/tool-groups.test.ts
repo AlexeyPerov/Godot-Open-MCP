@@ -142,13 +142,16 @@ test("getGroup returns undefined for unknown ids", () => {
 
 test("groupFor returns null for always-visible meta-tools", () => {
   // These tools MUST stay always-visible so an agent can reach them before
-  // any other group is active. P8.2 will enforce this via ALWAYS_VISIBLE_TOOLS;
-  // P8.1 only pins the catalog-side classification.
+  // any other group is active. P8.2 enforces this via ALWAYS_VISIBLE_TOOLS in
+  // tool-session-state.ts; P8.1 only pins the catalog-side classification.
+  // P8.3 adds manage_tools — it mutates the per-session store and must stay
+  // reachable across any group teardown.
   for (const name of [
     "godot_open_mcp_capabilities",
     "godot_open_mcp_bridge_status",
     "godot_open_mcp_pull_events",
     "godot_open_mcp_read_compile_errors",
+    "godot_open_mcp_manage_tools",
   ]) {
     assert.equal(
       groupFor(name),
@@ -247,12 +250,18 @@ test("toolsInGroup core roster matches the assign table", () => {
  * Always-visible meta-tools: these are intentionally NOT in any group
  * (groupFor → null) and bypass the future ListTools filter. The parity test
  * below asserts every OTHER tool in ALL_TOOLS maps to a known group id.
+ *
+ * P8.3 adds `godot_open_mcp_manage_tools` — registered in P8.3, it mutates
+ * the per-session store that filters ListTools and must always be reachable
+ * so an agent can re-enable a group it just tore down. Matches the canonical
+ * allow-list in `tool-session-state.ts`.
  */
 const ALWAYS_VISIBLE_TOOLS: ReadonlySet<string> = new Set([
   "godot_open_mcp_capabilities",
   "godot_open_mcp_bridge_status",
   "godot_open_mcp_pull_events",
   "godot_open_mcp_read_compile_errors",
+  "godot_open_mcp_manage_tools",
 ]);
 
 test("every registered non-meta tool maps to a known group id", () => {

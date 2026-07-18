@@ -39,10 +39,8 @@ export const DEFAULT_ROUTE_POLICY: RoutePolicy = "live";
  * `/tools/{name}` endpoint. `bridge_status` and `pull_events` may touch the
  * live transport (one bounded `/ping` probe; one SSE-driven queue drain), but
  * the call is synthesized locally — the bridge has no dedicated handler for
- * them.
- *
- * P8 local tools (`manage_tools`, `generate_skill`) MUST be added here when
- * they ship, not listed as implemented early.
+ * them. `manage_tools` mutates the per-session `ToolSessionState` and never
+ * touches the live transport at all.
  *
  * The named per-tool constants below are the single source of truth for these
  * names — `tool-router.ts` imports them so its named-handler dispatch list and
@@ -51,11 +49,13 @@ export const DEFAULT_ROUTE_POLICY: RoutePolicy = "live";
 export const CAPABILITIES_TOOL = "godot_open_mcp_capabilities";
 export const BRIDGE_STATUS_TOOL = "godot_open_mcp_bridge_status";
 export const PULL_EVENTS_TOOL = "godot_open_mcp_pull_events";
+export const MANAGE_TOOLS_TOOL = "godot_open_mcp_manage_tools";
 
 const LOCAL_TOOLS: ReadonlySet<string> = new Set([
   CAPABILITIES_TOOL,
   BRIDGE_STATUS_TOOL,
   PULL_EVENTS_TOOL,
+  MANAGE_TOOLS_TOOL,
 ]);
 
 /**

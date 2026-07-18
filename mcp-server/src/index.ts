@@ -17,6 +17,11 @@
 //     router owns live/offline/local selection and the `_source` / `_route`
 //     metadata. `index.ts` only validates registration (unknown names are
 //     rejected before the router runs) and normalizes non-object `arguments`.
+//   - P8.2 — `ListTools` filters `ALL_TOOLS` through per-session tool-group
+//     visibility state. A fresh `ToolSessionState` advertises only `core`
+//     plus always-visible meta-tools; CallTool is NOT filtered (hiding is a
+//     prompt-size control, not an authorization boundary). One store per
+//     server process, threaded into the handler from `createServer`.
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -34,6 +39,7 @@ import {
 import { LiveClient } from "./live-client.js";
 import { BridgeEventStream } from "./event-stream.js";
 import { ToolRouter } from "./tool-router.js";
+import { ToolSessionState, filterVisibleTools } from "./tool-session-state.js";
 import type { Router, CallToolResult } from "./router.js";
 
 // Read the version from package.json at runtime so `npm version` and the
@@ -42,13 +48,23 @@ import type { Router, CallToolResult } from "./router.js";
 const PACKAGE_VERSION = readPackageVersion();
 
 /**
- * ListTools handler. Returns the full tool registry; later phases (P8.2)
- * filter this through per-session tool-group visibility state before
- * returning. Exported so the contract can be unit-tested without going
- * through the SDK's private handler table.
+ * ListTools handler. Filters {@link ALL_TOOLS} through the per-session
+ * tool-group visibility store: a fresh session advertises only `core`
+ * (ping + the gate/verify safety surface) plus always-visible meta-tools
+ * (capabilities, bridge_status, pull_events, read_compile_errors). Activating
+ * an opt-in group via a direct store mutation (P8.2) or the future
+ * `godot_open_mcp_manage_tools` tool (P8.3) adds its tools to subsequent
+ * ListTools responses. Exported so the contract can be unit-tested without
+ * going through the SDK's private handler table.
+ *
+ * P8.2 contract — CallTool is NOT filtered by group: hiding is a prompt-size
+ * control, not an authorization boundary. A known-but-hidden tool name still
+ * routes when called (see {@link handleCallTool}).
  */
-export async function handleListTools(): Promise<{ tools: typeof ALL_TOOLS }> {
-  return { tools: ALL_TOOLS };
+export async function handleListTools(
+  sessionState: ToolSessionState,
+): Promise<{ tools: typeof ALL_TOOLS }> {
+  return { tools: filterVisibleTools(ALL_TOOLS, sessionState) };
 }
 
 /**
@@ -106,15 +122,38 @@ export async function handleCallTool(params: {
  * Build the MCP server. Kept as a factory so tests (and later multi-project
  * hosting) can construct a server without touching process state.
  *
+ * The factory constructs exactly one {@link ToolSessionState} per server
+ * process and threads it into the ListTools handler. The same instance is
+ * returned alongside the {@link Server} so `main()` can inject it into the
+ * `manage_tools` router without reconstructing the store (the stdio MCP
+ * server has exactly one client per process; a second store would desync
+ * ListTools and manage_tools).
+ *
  * @param serverName — base name reported in the MCP `initialize` response.
  * @param router — routes registered tool calls. Optional so tests that only
  *                 exercise handleListTools don't need one; the stdio `main()`
  *                 always supplies a fully-wired ToolRouter.
+ * @param options — optional injection points:
+ *   - `sessionState` — inject an existing {@link ToolSessionState} instead of
+ *     constructing a fresh one. Tests use this to drive a session through a
+ *     known mutation before the server reads it. Production callers omit it.
+ *
+ * @returns `{ server, sessionState }` — the wired {@link Server} and the
+ *   session store it consults. Callers that need to mutate visibility (P8.3
+ *   `manage_tools`) hold the returned `sessionState`; callers that only need
+ *   the {@link Server} (most tests) ignore it.
  */
 export function createServer(
   serverName = "godot-open-mcp",
   router?: Router,
-): Server {
+  options?: { sessionState?: ToolSessionState },
+): { server: Server; sessionState: ToolSessionState } {
+  // One session store per server process. Injected when supplied (tests);
+  // freshly constructed otherwise (production main()). The store is the
+  // single source of truth for ListTools visibility and (P8.3) manage_tools
+  // mutations, so it MUST be shared, not reconstructed per handler.
+  const sessionState = options?.sessionState ?? new ToolSessionState();
+
   const server = new Server(
     { name: serverName, version: PACKAGE_VERSION },
     {
@@ -125,13 +164,15 @@ export function createServer(
     },
   );
 
-  server.setRequestHandler(ListToolsRequestSchema, () => handleListTools());
+  server.setRequestHandler(ListToolsRequestSchema, () =>
+    handleListTools(sessionState),
+  );
 
   server.setRequestHandler(CallToolRequestSchema, (request) =>
     handleCallTool(request.params, router),
   );
 
-  return server;
+  return { server, sessionState };
 }
 
 /**
@@ -203,12 +244,31 @@ async function main(): Promise<void> {
     undefined,
     env.bridgeAuthToken,
   );
+  // P8.2/P8.3 — one ToolSessionState per server process, constructed up front
+  // so the same instance flows into both the ListTools handler (via
+  // createServer) and the manage_tools router (via ToolRouter). Constructing
+  // two stores would desync ListTools and manage_tools; the shared instance is
+  // the single source of truth for per-session tool-group visibility.
+  const sessionState = new ToolSessionState();
   // P7.1 — every registered call dispatches through ToolRouter. The router owns
-  // live/offline/local selection (capabilities / bridge_status / pull_events are
-  // local named handlers; everything else routes live) and the `_source` /
-  // `_route` metadata. index.ts only validates registration + normalizes args.
-  const router = new ToolRouter(liveClient, env.projectPath, eventStream);
-  const server = createServer("godot-open-mcp", router);
+  // live/offline/local selection (capabilities / bridge_status / pull_events /
+  // manage_tools are local named handlers; scene_get_data / filesystem_list are
+  // live-first; read_compile_errors is always-offline; everything else routes
+  // live) and the `_source` / `_route` metadata. index.ts only validates
+  // registration + normalizes args.
+  //
+  // P8.3 — `sessionState` is injected so `manage_tools` can mutate the same
+  // store ListTools reads. `notifyToolListChanged` is left unwired here — the
+  // tools/list_changed notification lands in P8.4 and will be plumbed through
+  // the SDK `Server.sendNotification` API; P8.3 only needs the router to fire
+  // the callback on a real change (and to be a no-op when none is supplied).
+  const router = new ToolRouter(
+    liveClient,
+    env.projectPath,
+    eventStream,
+    sessionState,
+  );
+  const { server } = createServer("godot-open-mcp", router, { sessionState });
   const transport = new StdioServerTransport();
 
   // Clean shutdown on disconnect. The SDK closes the transport when stdin

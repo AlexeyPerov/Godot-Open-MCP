@@ -53,6 +53,7 @@ import { reflectionMethodCall } from "./reflection-method-call.js";
 import { bridgeStatus } from "./bridge-status.js";
 import { pullEvents } from "./pull-events.js";
 import { readCompileErrors } from "./read-compile-errors.js";
+import { manageTools } from "./manage-tools.js";
 
 /** Ordered list of every tool exposed over stdio MCP. */
 export const ALL_TOOLS: Tool[] = [
@@ -168,4 +169,11 @@ export const ALL_TOOLS: Tool[] = [
   // data-dir defaults + the operator GODOT_OPEN_MCP_LOG_FILE env override (no per-call log_path —
   // no arbitrary file-read surface). Read-only, gate-free.
   readCompileErrors,
+  // P8.3 — manage_tools: per-session tool-group visibility mutator. Activates / deactivates /
+  // resets / lists groups in the per-session ToolSessionState that ListTools consults to filter
+  // tools. Always visible (capabilities + this tool + ping + bridge_status + pull_events +
+  // read_compile_errors survive any group teardown). Local-only — no POST /tools/manage_tools
+  // endpoint on the bridge. The router special-cases the name and mutates the shared session
+  // store; P8.4 wires the tools/list_changed notification that follows a visibility change.
+  manageTools,
 ];

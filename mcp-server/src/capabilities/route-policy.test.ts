@@ -24,6 +24,7 @@ import {
   CAPABILITIES_TOOL,
   BRIDGE_STATUS_TOOL,
   PULL_EVENTS_TOOL,
+  MANAGE_TOOLS_TOOL,
   SCENE_GET_DATA_TOOL,
   FILESYSTEM_LIST_TOOL,
   READ_COMPILE_ERRORS_TOOL,
@@ -42,6 +43,7 @@ const ROUTER_NAMED_HANDLERS: ReadonlySet<string> = new Set([
   CAPABILITIES_TOOL,
   BRIDGE_STATUS_TOOL,
   PULL_EVENTS_TOOL,
+  MANAGE_TOOLS_TOOL,
   SCENE_GET_DATA_TOOL,
   FILESYSTEM_LIST_TOOL,
   READ_COMPILE_ERRORS_TOOL,
@@ -125,10 +127,11 @@ test("every registered tool classifies under exactly one policy", () => {
   }
 });
 
-test("representative pins: capabilities/bridge_status/pull_events → local", () => {
+test("representative pins: capabilities/bridge_status/pull_events/manage_tools → local", () => {
   assert.equal(routePolicyFor("godot_open_mcp_capabilities"), "local");
   assert.equal(routePolicyFor("godot_open_mcp_bridge_status"), "local");
   assert.equal(routePolicyFor("godot_open_mcp_pull_events"), "local");
+  assert.equal(routePolicyFor("godot_open_mcp_manage_tools"), "local");
 });
 
 test("representative pin: read_compile_errors → offline", () => {
@@ -202,6 +205,7 @@ test("the router named-handler constants are the expected tool names", () => {
   assert.equal(CAPABILITIES_TOOL, "godot_open_mcp_capabilities");
   assert.equal(BRIDGE_STATUS_TOOL, "godot_open_mcp_bridge_status");
   assert.equal(PULL_EVENTS_TOOL, "godot_open_mcp_pull_events");
+  assert.equal(MANAGE_TOOLS_TOOL, "godot_open_mcp_manage_tools");
   assert.equal(SCENE_GET_DATA_TOOL, "godot_open_mcp_scene_get_data");
   assert.equal(FILESYSTEM_LIST_TOOL, "godot_open_mcp_filesystem_list");
   assert.equal(READ_COMPILE_ERRORS_TOOL, "godot_open_mcp_read_compile_errors");

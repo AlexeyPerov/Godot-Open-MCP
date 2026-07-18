@@ -30,6 +30,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { ToolRouter } from "./tool-router.js";
 import type { LiveClient } from "./live-client.js";
 import type { BridgeEventStream, PullResult } from "./event-stream.js";
+import { ToolSessionState } from "./tool-session-state.js";
 
 // ---------------------------------------------------------------------------
 // fakes
@@ -139,8 +140,16 @@ function makeRouter(
   live: LiveClient,
   eventStream: BridgeEventStream,
   projectPath = "/proj",
+  sessionState?: ToolSessionState,
+  notifyToolListChanged?: () => void | Promise<void>,
 ): ToolRouter {
-  return new ToolRouter(live, projectPath, eventStream);
+  return new ToolRouter(
+    live,
+    projectPath,
+    eventStream,
+    sessionState ?? new ToolSessionState(),
+    notifyToolListChanged,
+  );
 }
 
 function parseBody(result: CallToolResult): Record<string, unknown> {
@@ -1061,4 +1070,385 @@ test("route: read_compile_errors stale-log advisory flags when a cited source is
   } finally {
     clearLogEnvOverride();
   }
+});
+
+// ---------------------------------------------------------------------------
+// P8.3 — manage_tools routes local + mutates session state
+// ---------------------------------------------------------------------------
+
+test("route: manage_tools list_groups returns the catalog with session activation state", async () => {
+  const router = makeRouter(makeFakeLive(), makeFakeEventStream());
+  const result = await router.route("godot_open_mcp_manage_tools", {
+    action: "list_groups",
+  });
+  const body = parseBody(result);
+
+  assert.equal(result.isError, false);
+  assert.equal(body._source, "local");
+  assert.deepEqual(body._route, { route: "local" });
+  assert.ok(Array.isArray(body.groups), "groups must be an array");
+
+  // Catalog order is preserved — pin core first, typed-editor second.
+  const ids = (body.groups as Array<{ id: string }>).map((g) => g.id);
+  assert.equal(ids[0], "core");
+  assert.equal(ids[1], "typed-editor");
+
+  // Fresh session: core active + default-on; typed-editor inactive + opt-in.
+  const core = (body.groups as Array<{
+    id: string;
+    active: boolean;
+    defaultEnabled: boolean;
+    activationSource: string | null;
+    tools: string[];
+    toolCount: number;
+  }>).find((g) => g.id === "core");
+  assert.ok(core, "core must be in the catalog");
+  assert.equal(core!.active, true, "fresh session has core active");
+  assert.equal(core!.defaultEnabled, true);
+  assert.equal(core!.activationSource, "default");
+  assert.ok(core!.toolCount >= 1, "core has a non-empty roster");
+  assert.ok(
+    core!.tools.includes("godot_open_mcp_ping"),
+    "core roster includes ping",
+  );
+
+  const typed = (body.groups as Array<{
+    id: string;
+    active: boolean;
+    defaultEnabled: boolean;
+    activationSource: string | null;
+  }>).find((g) => g.id === "typed-editor");
+  assert.ok(typed, "typed-editor must be in the catalog");
+  assert.equal(typed!.active, false, "fresh session has typed-editor inactive");
+  assert.equal(typed!.defaultEnabled, false);
+  assert.equal(typed!.activationSource, null);
+
+  // Stub pack surfaces with toolCount 0 (catalog truth; no bridge inventory).
+  const stub = (body.groups as Array<{
+    id: string;
+    toolCount: number;
+    tools: string[];
+  }>).find((g) => g.id === "tilemap");
+  assert.ok(stub, "tilemap stub must be in the catalog");
+  assert.equal(stub!.toolCount, 0);
+  assert.deepEqual(stub!.tools, []);
+
+  // Active set snapshot.
+  assert.deepEqual(body.activeGroups, ["core"]);
+});
+
+test("route: manage_tools activate adds a group to the session", async () => {
+  const session = new ToolSessionState();
+  const router = makeRouter(
+    makeFakeLive(),
+    makeFakeEventStream(),
+    "/proj",
+    session,
+  );
+  const result = await router.route("godot_open_mcp_manage_tools", {
+    action: "activate",
+    group: "typed-editor",
+  });
+  const body = parseBody(result);
+
+  assert.equal(result.isError, false);
+  assert.equal(body._source, "local");
+  assert.equal(body.changed, true);
+  assert.equal(body.action, "activate");
+  assert.equal(body.group, "typed-editor");
+  assert.deepEqual(body.activeGroups, ["core", "typed-editor"]);
+  // The store reflects the change — the same instance ListTools reads.
+  assert.ok(session.isGroupActive("typed-editor"));
+  assert.equal(session.activationSource("typed-editor"), "manual");
+});
+
+test("route: manage_tools activate is idempotent (changed=false on second call)", async () => {
+  const session = new ToolSessionState();
+  const router = makeRouter(
+    makeFakeLive(),
+    makeFakeEventStream(),
+    "/proj",
+    session,
+  );
+  await router.route("godot_open_mcp_manage_tools", {
+    action: "activate",
+    group: "typed-editor",
+  });
+  const second = await router.route("godot_open_mcp_manage_tools", {
+    action: "activate",
+    group: "typed-editor",
+  });
+  const body = parseBody(second);
+  assert.equal(body.changed, false);
+});
+
+test("route: manage_tools activate rejects unknown group with structured error", async () => {
+  const router = makeRouter(makeFakeLive(), makeFakeEventStream());
+  const result = await router.route("godot_open_mcp_manage_tools", {
+    action: "activate",
+    group: "does-not-exist",
+  });
+  assert.equal(result.isError, true);
+  assert.equal(errCode(result), "unknown_group");
+  // The error body is still tagged local — manage_tools is always local.
+  assert.equal(parseBody(result)._source, "local");
+});
+
+test("route: manage_tools activate without group returns missing_parameter", async () => {
+  const router = makeRouter(makeFakeLive(), makeFakeEventStream());
+  const result = await router.route("godot_open_mcp_manage_tools", {
+    action: "activate",
+  });
+  assert.equal(result.isError, true);
+  assert.equal(errCode(result), "missing_parameter");
+});
+
+test("route: manage_tools deactivate removes a group", async () => {
+  const session = new ToolSessionState();
+  session.activate("typed-editor");
+  const router = makeRouter(
+    makeFakeLive(),
+    makeFakeEventStream(),
+    "/proj",
+    session,
+  );
+  const result = await router.route("godot_open_mcp_manage_tools", {
+    action: "deactivate",
+    group: "typed-editor",
+  });
+  const body = parseBody(result);
+  assert.equal(body.changed, true);
+  assert.equal(body.action, "deactivate");
+  assert.equal(body.group, "typed-editor");
+  assert.deepEqual(body.activeGroups, ["core"]);
+  assert.equal(session.isGroupActive("typed-editor"), false);
+});
+
+test("route: manage_tools deactivate is idempotent on an already-inactive group", async () => {
+  const router = makeRouter(makeFakeLive(), makeFakeEventStream());
+  const result = await router.route("godot_open_mcp_manage_tools", {
+    action: "deactivate",
+    group: "typed-editor",
+  });
+  const body = parseBody(result);
+  assert.equal(body.changed, false);
+});
+
+test("route: manage_tools reset restores the default-on groups (core only)", async () => {
+  const session = new ToolSessionState();
+  session.activate("typed-editor");
+  session.activate("navigation");
+  const router = makeRouter(
+    makeFakeLive(),
+    makeFakeEventStream(),
+    "/proj",
+    session,
+  );
+  const result = await router.route("godot_open_mcp_manage_tools", {
+    action: "reset",
+  });
+  const body = parseBody(result);
+  assert.equal(body.reset, true);
+  assert.equal(body.changed, true);
+  assert.deepEqual(body.activeGroups, ["core"]);
+});
+
+test("route: manage_tools reset reports changed=false when state is already at defaults", async () => {
+  // Fresh session is already at the defaults — reset must be a no-op for state
+  // AND for the notification.
+  const router = makeRouter(makeFakeLive(), makeFakeEventStream());
+  const result = await router.route("godot_open_mcp_manage_tools", {
+    action: "reset",
+  });
+  const body = parseBody(result);
+  assert.equal(body.reset, true);
+  assert.equal(body.changed, false, "reset on a fresh session is a no-op");
+});
+
+test("route: manage_tools unknown action returns structured error", async () => {
+  const router = makeRouter(makeFakeLive(), makeFakeEventStream());
+  const result = await router.route("godot_open_mcp_manage_tools", {
+    action: "bogus",
+  });
+  assert.equal(result.isError, true);
+  assert.equal(errCode(result), "unknown_action");
+});
+
+test("route: manage_tools does not hit the live bridge", async () => {
+  // manage_tools is server-only — it never touches the bridge even when live.
+  const live = makeFakeLive();
+  const router = makeRouter(live, makeFakeEventStream());
+  await router.route("godot_open_mcp_manage_tools", { action: "list_groups" });
+  await router.route("godot_open_mcp_manage_tools", {
+    action: "activate",
+    group: "typed-editor",
+  });
+  await router.route("godot_open_mcp_manage_tools", { action: "reset" });
+  assert.equal(live.calls.length, 0, "no POST /tools/{name} hop");
+  assert.equal(live.statusCalls, 0, "no bridge_status composition");
+  assert.equal(live.liveProbes, 0, "no isLiveAvailable probe");
+});
+
+test("route: manage_tools activate + ListTools filter expose typed-editor tools", async () => {
+  // End-to-end: the same session store mutates and is read by the filter, so
+  // an activate call makes node_find visible to the next ListTools response.
+  const session = new ToolSessionState();
+  const router = makeRouter(
+    makeFakeLive(),
+    makeFakeEventStream(),
+    "/proj",
+    session,
+  );
+  // Before activate: node_find is hidden (typed-editor is opt-in).
+  const { filterVisibleTools } = await import("./tool-session-state.js");
+  const { ALL_TOOLS } = await import("./tools/index.js");
+  const before = filterVisibleTools(ALL_TOOLS, session);
+  assert.ok(
+    !before.some((t) => t.name === "godot_open_mcp_node_find"),
+    "node_find must be hidden before typed-editor is activated",
+  );
+  // Activate via the tool.
+  await router.route("godot_open_mcp_manage_tools", {
+    action: "activate",
+    group: "typed-editor",
+  });
+  // After activate: node_find appears.
+  const after = filterVisibleTools(ALL_TOOLS, session);
+  assert.ok(
+    after.some((t) => t.name === "godot_open_mcp_node_find"),
+    "node_find must be visible after typed-editor is activated",
+  );
+});
+
+// ---------------------------------------------------------------------------
+// P8.3 — manage_tools notifies on visibility change (notifyToolListChanged)
+// ---------------------------------------------------------------------------
+
+test("route: manage_tools activate fires notifyToolListChanged when state changes", async () => {
+  let notifyCount = 0;
+  const router = makeRouter(
+    makeFakeLive(),
+    makeFakeEventStream(),
+    "/proj",
+    new ToolSessionState(),
+    () => {
+      notifyCount++;
+    },
+  );
+  await router.route("godot_open_mcp_manage_tools", {
+    action: "activate",
+    group: "typed-editor",
+  });
+  assert.equal(notifyCount, 1);
+});
+
+test("route: manage_tools activate does NOT notify when idempotent", async () => {
+  let notifyCount = 0;
+  const session = new ToolSessionState();
+  session.activate("typed-editor");
+  const router = makeRouter(
+    makeFakeLive(),
+    makeFakeEventStream(),
+    "/proj",
+    session,
+    () => {
+      notifyCount++;
+    },
+  );
+  await router.route("godot_open_mcp_manage_tools", {
+    action: "activate",
+    group: "typed-editor",
+  });
+  assert.equal(notifyCount, 0);
+});
+
+test("route: manage_tools deactivate fires notifyToolListChanged when state changes", async () => {
+  let notifyCount = 0;
+  const session = new ToolSessionState();
+  session.activate("typed-editor");
+  const router = makeRouter(
+    makeFakeLive(),
+    makeFakeEventStream(),
+    "/proj",
+    session,
+    () => {
+      notifyCount++;
+    },
+  );
+  await router.route("godot_open_mcp_manage_tools", {
+    action: "deactivate",
+    group: "typed-editor",
+  });
+  assert.equal(notifyCount, 1);
+});
+
+test("route: manage_tools reset fires notifyToolListChanged when state changes", async () => {
+  let notifyCount = 0;
+  const session = new ToolSessionState();
+  session.activate("typed-editor");
+  const router = makeRouter(
+    makeFakeLive(),
+    makeFakeEventStream(),
+    "/proj",
+    session,
+    () => {
+      notifyCount++;
+    },
+  );
+  await router.route("godot_open_mcp_manage_tools", { action: "reset" });
+  assert.equal(notifyCount, 1);
+});
+
+test("route: manage_tools reset does NOT notify when already at defaults", async () => {
+  let notifyCount = 0;
+  const router = makeRouter(
+    makeFakeLive(),
+    makeFakeEventStream(),
+    "/proj",
+    new ToolSessionState(),
+    () => {
+      notifyCount++;
+    },
+  );
+  await router.route("godot_open_mcp_manage_tools", { action: "reset" });
+  assert.equal(notifyCount, 0);
+});
+
+test("route: manage_tools list_groups does NOT notify", async () => {
+  let notifyCount = 0;
+  const router = makeRouter(
+    makeFakeLive(),
+    makeFakeEventStream(),
+    "/proj",
+    new ToolSessionState(),
+    () => {
+      notifyCount++;
+    },
+  );
+  await router.route("godot_open_mcp_manage_tools", { action: "list_groups" });
+  assert.equal(notifyCount, 0, "list_groups is read-only — no notification");
+});
+
+test("route: manage_tools error paths do NOT notify", async () => {
+  // Unknown group / missing group / unknown action must not fire the callback
+  // — the visible set is unchanged.
+  let notifyCount = 0;
+  const router = makeRouter(
+    makeFakeLive(),
+    makeFakeEventStream(),
+    "/proj",
+    new ToolSessionState(),
+    () => {
+      notifyCount++;
+    },
+  );
+  await router.route("godot_open_mcp_manage_tools", {
+    action: "activate",
+    group: "does-not-exist",
+  });
+  await router.route("godot_open_mcp_manage_tools", {
+    action: "activate",
+  });
+  await router.route("godot_open_mcp_manage_tools", { action: "bogus" });
+  assert.equal(notifyCount, 0);
 });

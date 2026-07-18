@@ -44,6 +44,7 @@ import { createServer as createMcpServer } from "./index.js";
 import { LiveClient, type PingResponse } from "./live-client.js";
 import { ToolRouter } from "./tool-router.js";
 import { BridgeEventStream } from "./event-stream.js";
+import { ToolSessionState } from "./tool-session-state.js";
 
 /**
  * The client-side return shape of `Client.callTool`. The SDK infers this from
@@ -148,12 +149,20 @@ async function setupHarness(
     undefined,
     undefined,
   );
+  // P8.3 — the session store is shared between the ListTools handler (via
+  // createMcpServer) and the manage_tools router (via ToolRouter). Constructing
+  // one instance here and passing it to both is the single-source-of-truth
+  // contract.
+  const sessionState = new ToolSessionState();
   const router = new ToolRouter(
     liveClient,
     projectPath ?? "/home/user/MyGame",
     eventStream,
+    sessionState,
   );
-  const server = createMcpServer("godot-open-mcp", router);
+  const { server } = createMcpServer("godot-open-mcp", router, {
+    sessionState,
+  });
   const [clientTransport, serverTransport] =
     InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);

@@ -1,10 +1,12 @@
-// Smoke test for the stdio MCP scaffold (P7.1 router-delegation contract).
+// Smoke test for the stdio MCP scaffold (P7.1 router-delegation contract,
+// P8.2 ListTools filter).
 //
 // Verifies the contracts this scaffold ships:
 //   1. `createServer` returns a Server instance whose backing package name and
 //      version match package.json — the values clients see in `initialize`.
-//   2. `handleListTools` returns the populated registry (ping is the first
-//      entry — P1.7).
+//   2. `handleListTools` filters `ALL_TOOLS` through the supplied session
+//      state: a fresh state advertises `core` (incl. ping) plus always-visible
+//      meta-tools and omits `typed-editor` tools like `node_find` (P8.2).
 //   3. `handleCallTool` returns a structured `isError` response for unknown
 //      tools instead of throwing, and dispatches REGISTERED tools through the
 //      supplied `Router` exactly once (P7.1). The router owns live/offline/
@@ -12,6 +14,9 @@
 //      validates registration + normalizes `arguments`.
 //   4. A registered call with no router wired (test-harness omission) returns
 //      a structured `isError` rather than throwing.
+//   5. P8.2 — CallTool does NOT filter by group: a hidden-but-registered tool
+//      name still reaches the router (regression guard against accidentally
+//      gating the call path).
 //
 // Lifecycle / clean-exit-on-disconnect behaviour is exercised by an integration
 // test (boot `dist/index.js`, send `initialize`, close stdin, assert exit 0),
@@ -27,6 +32,7 @@ import { fileURLToPath } from "node:url";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { createServer, handleListTools, handleCallTool } from "./index.js";
 import { ping } from "./tools/ping.js";
+import { ToolSessionState } from "./tool-session-state.js";
 import type { Router } from "./router.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -37,15 +43,71 @@ const pkg = JSON.parse(
 test("package identity is well-formed and createServer returns a Server", () => {
   assert.equal(pkg.name, "godot-open-mcp");
   assert.match(pkg.version, /^\d+\.\d+\.\d+/);
-  const server = createServer("godot-open-mcp");
+  const { server, sessionState } = createServer("godot-open-mcp");
   assert.ok(server, "createServer returned a Server instance");
+  assert.ok(sessionState, "createServer returned a ToolSessionState");
 });
 
-test("handleListTools returns the registry with ping as the first entry", async () => {
-  const result = await handleListTools();
-  assert.ok(result.tools.length >= 1, "registry must contain at least ping");
+test("createServer injects the supplied sessionState instead of constructing one", () => {
+  // The injected store must be the SAME instance — the stdio MCP server has
+  // exactly one client per process and one store; a second store would
+  // desync ListTools and (P8.3) manage_tools.
+  const injected = new ToolSessionState();
+  injected.activate("typed-editor");
+  const { sessionState } = createServer("godot-open-mcp", undefined, {
+    sessionState: injected,
+  });
+  assert.equal(
+    sessionState,
+    injected,
+    "createServer must use the injected sessionState",
+  );
+  assert.deepEqual(sessionState.activeGroups(), ["core", "typed-editor"]);
+});
+
+test("handleListTools with a fresh state includes ping + capabilities + omits node_find", async () => {
+  // P8.2 acceptance — a fresh session advertises only `core` plus the
+  // always-visible meta-tools. node_find is a typed-editor tool and must be
+  // hidden until the group is activated.
+  const state = new ToolSessionState();
+  const result = await handleListTools(state);
+  const names = result.tools.map((t) => t.name);
+  // Always-visible meta-tools + core (incl. ping as the first core entry).
+  assert.ok(
+    names.includes("godot_open_mcp_ping"),
+    "ping (core + always-visible) must be advertised",
+  );
+  assert.ok(
+    names.includes("godot_open_mcp_capabilities"),
+    "capabilities (always-visible) must be advertised",
+  );
+  // P8.3 — manage_tools is registered and always-visible so an agent can
+  // reach the visibility surface before any opt-in group is active.
+  assert.ok(
+    names.includes("godot_open_mcp_manage_tools"),
+    "manage_tools (always-visible) must be advertised",
+  );
+  assert.ok(
+    !names.includes("godot_open_mcp_node_find"),
+    "node_find (typed-editor) must NOT be advertised on a fresh state",
+  );
+  // ping is the first entry in ALL_TOOLS and survives the filter, so it stays
+  // first.
   assert.equal(result.tools[0].name, ping.name);
   assert.equal(result.tools[0].name, "godot_open_mcp_ping");
+});
+
+test("handleListTools after activate('typed-editor') advertises node_find", async () => {
+  // Activating an opt-in group adds its tools to subsequent ListTools
+  // responses — the contract manage_tools (P8.3) will surface to agents.
+  const state = new ToolSessionState();
+  state.activate("typed-editor");
+  const result = await handleListTools(state);
+  const names = result.tools.map((t) => t.name);
+  assert.ok(
+    names.includes("godot_open_mcp_node_find"),
+    "node_find must be advertised after typed-editor is activated",
+  );
 });
 
 test("handleCallTool returns a structured error for unknown tools", async () => {
@@ -118,6 +180,32 @@ test("handleCallTool returns the router's result verbatim for a registered tool"
   assert.deepEqual(router.calls[0], {
     tool: "godot_open_mcp_capabilities",
     args: { kind: "tools" },
+  });
+});
+
+test("P8.2 — handleCallTool reaches the router for a hidden-but-registered typed-editor tool", async () => {
+  // The P8.2 non-goal: CallTool is NOT filtered by group. node_find is hidden
+  // from ListTools on a fresh state, but calling it by name still dispatches
+  // to the router. This is the regression guard against accidentally gating
+  // the call path on session visibility — hiding is a prompt-size control,
+  // not an authorization boundary.
+  const router = makeFakeRouter();
+  const state = new ToolSessionState();
+  // Sanity: node_find is currently hidden on this state.
+  const listed = await handleListTools(state);
+  assert.ok(
+    !listed.tools.map((t) => t.name).includes("godot_open_mcp_node_find"),
+    "precondition: node_find is hidden on a fresh state",
+  );
+  // The hidden tool still reaches the router.
+  await handleCallTool(
+    { name: "godot_open_mcp_node_find", arguments: { name: "Foo" } },
+    router,
+  );
+  assert.equal(router.calls.length, 1, "hidden-but-registered tool must route");
+  assert.deepEqual(router.calls[0], {
+    tool: "godot_open_mcp_node_find",
+    args: { name: "Foo" },
   });
 });
 
