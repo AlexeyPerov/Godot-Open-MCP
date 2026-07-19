@@ -1,0 +1,68 @@
+{
+  "id": "m10-gate-fail",
+  "title": "Scoped validate reports a known issue",
+  "milestone": "m10",
+  "engineId": "godot",
+  "order": 2,
+  "requirementLevel": "required-core",
+  "tags": ["m10", "gate", "verify"],
+  "steps": [
+    {
+      "id": "info",
+      "type": "info",
+      "title": "Prerequisites",
+      "body": "demo/ open in Godot 4.3+ (mono), addon enabled, bridge running. This scenario proves the verify path reports a known demo issue code (not a flaky failure). It stages a copy of the committed broken-reference fixture under _ValidationSuite/m10-gate-fail/ and does NOT instantiate it as the main scene. validate_edit runs read-only on the live bridge."
+    },
+    {
+      "id": "setup-fixture",
+      "type": "setup",
+      "title": "Stage the broken-reference fixture",
+      "actions": [
+        {
+          "action": "fs_copy",
+          "from": "Fixtures/BrokenReference/BrokenReference.tscn",
+          "to": "{fixtureRoot}/BrokenReference.tscn"
+        }
+      ]
+    },
+    {
+      "id": "prompt-validate",
+      "type": "agent_prompt",
+      "title": "Run a scoped validate over the staged fixture",
+      "tool": "godot_open_mcp_validate_edit",
+      "payload": {
+        "paths": ["res://_ValidationSuite/m10-gate-fail/BrokenReference.tscn"]
+      }
+    },
+    {
+      "id": "expected",
+      "type": "expected",
+      "title": "Expected outcomes",
+      "items": [
+        "validate_edit returns isError: false and reports the scoped scan ran.",
+        "The issues list contains the code broken_scene_reference (from the broken_references rule).",
+        "Severity is Error, matching the shipped rule catalog.",
+        "No crash; a missing path returns a structured error rather than hanging."
+      ]
+    },
+    {
+      "id": "actual",
+      "type": "actual",
+      "title": "Paste the agent output"
+    },
+    {
+      "id": "done",
+      "type": "mark_done"
+    }
+  ],
+  "reset": {
+    "afterStep": {
+      "setup-fixture": {
+        "actions": [
+          { "action": "fs_delete", "paths": ["{fixtureRoot}"] }
+        ]
+      }
+    },
+    "note": "Deletes the staged fixture tree (_ValidationSuite/m10-gate-fail/). Canonical demo/Fixtures/ are untouched."
+  }
+}

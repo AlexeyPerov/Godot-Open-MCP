@@ -1,0 +1,93 @@
+{
+  "id": "m10-node-create",
+  "title": "Create a node under a staged scene",
+  "milestone": "m10",
+  "engineId": "godot",
+  "order": 1,
+  "requirementLevel": "required-core",
+  "tags": ["m10", "typed-editor", "node"],
+  "steps": [
+    {
+      "id": "info",
+      "type": "info",
+      "title": "Prerequisites",
+      "body": "demo/ open in Godot 4.3+ (mono), addon enabled, bridge running. node_* tools live in the typed-editor group (hidden by default). The setup step activates typed-editor via mcp_tool and stages a disposable copy of a healthy scene under _ValidationSuite/m10-node-create/ — the canonical demo/Scenes/ scene is never mutated in place."
+    },
+    {
+      "id": "setup-fixture",
+      "type": "setup",
+      "title": "Activate typed-editor and stage a disposable scene",
+      "actions": [
+        {
+          "action": "mcp_tool",
+          "tool": "godot_open_mcp_manage_tools",
+          "args": { "action": "activate", "group": "typed-editor" },
+          "timeoutMs": 15000
+        },
+        {
+          "action": "fs_copy",
+          "from": "Scenes/Healthy2D.tscn",
+          "to": "{fixtureRoot}/Scene.tscn"
+        },
+        {
+          "action": "mcp_tool",
+          "tool": "godot_open_mcp_scene_open",
+          "args": { "path": "res://_ValidationSuite/m10-node-create/Scene.tscn" },
+          "timeoutMs": 20000
+        }
+      ]
+    },
+    {
+      "id": "prompt-create",
+      "type": "agent_prompt",
+      "title": "Create a uniquely named node in the staged scene",
+      "tool": "godot_open_mcp_node_create",
+      "payload": {
+        "type_class_name": "Node2D",
+        "name": "M10_CreatedNode",
+        "parent_node_path": ".",
+        "paths_hint": ["res://_ValidationSuite/m10-node-create/Scene.tscn"],
+        "gate": "enforce"
+      }
+    },
+    {
+      "id": "prompt-find",
+      "type": "agent_prompt",
+      "title": "Find the node back",
+      "tool": "godot_open_mcp_node_find",
+      "payload": {
+        "name": "M10_CreatedNode"
+      }
+    },
+    {
+      "id": "expected",
+      "type": "expected",
+      "title": "Expected outcomes",
+      "items": [
+        "node_create returns isError: false and NodeData for M10_CreatedNode (type Node2D) owned by the edited scene root.",
+        "node_find locates M10_CreatedNode in the edited scene tree (single-node result).",
+        "With gate: enforce the mutation reports no new gate errors (or documents that node mutators are a forward-compat gate no-op until the gate flow lands).",
+        "The staged scene shows the new node in its tree / marked unsaved."
+      ]
+    },
+    {
+      "id": "actual",
+      "type": "actual",
+      "title": "Paste the agent output"
+    },
+    {
+      "id": "done",
+      "type": "mark_done"
+    }
+  ],
+  "reset": {
+    "afterStep": {
+      "setup-fixture": {
+        "actions": [
+          { "action": "fs_delete", "paths": ["{fixtureRoot}"] }
+        ]
+      }
+    },
+    "note": "Deletes the staged Validation Suite fixture tree (_ValidationSuite/m10-node-create/). Canonical demo/Scenes/ scenes are untouched; discard the unsaved edited scene without saving."
+  }
+}

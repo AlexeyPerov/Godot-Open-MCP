@@ -1,0 +1,94 @@
+{
+  "id": "m10-fix",
+  "title": "Preview and apply a safe fix",
+  "milestone": "m10",
+  "engineId": "godot",
+  "order": 3,
+  "requirementLevel": "required-core",
+  "tags": ["m10", "gate", "fix"],
+  "steps": [
+    {
+      "id": "info",
+      "type": "info",
+      "title": "Prerequisites",
+      "body": "demo/ open in Godot 4.3+ (mono), addon enabled, bridge running. Proves the mutate -> gate -> fix loop with the one shipped Safe:true provider, remove_missing_script (resolves missing_scripts|missing_script). It stages a copy of the committed missing-script fixture under _ValidationSuite/m10-fix/. Run validate first to obtain the exact issue_id, then dry-run the fix, then apply under gate: enforce."
+    },
+    {
+      "id": "setup-fixture",
+      "type": "setup",
+      "title": "Stage the missing-script fixture",
+      "actions": [
+        {
+          "action": "fs_copy",
+          "from": "Fixtures/MissingScript/MissingScript.tscn",
+          "to": "{fixtureRoot}/MissingScript.tscn"
+        }
+      ]
+    },
+    {
+      "id": "prompt-validate",
+      "type": "agent_prompt",
+      "title": "Validate to capture the issue_id",
+      "tool": "godot_open_mcp_validate_edit",
+      "payload": {
+        "paths": ["res://_ValidationSuite/m10-fix/MissingScript.tscn"]
+      }
+    },
+    {
+      "id": "prompt-fix-dry",
+      "type": "agent_prompt",
+      "title": "Preview the fix (dry-run)",
+      "tool": "godot_open_mcp_apply_fix",
+      "payload": {
+        "issue_id": "missing_scripts|Error|res://_ValidationSuite/m10-fix/MissingScript.tscn|missing_script",
+        "fix_id": "remove_missing_script",
+        "dry_run": true,
+        "paths_hint": ["res://_ValidationSuite/m10-fix/MissingScript.tscn"]
+      }
+    },
+    {
+      "id": "prompt-fix-apply",
+      "type": "agent_prompt",
+      "title": "Apply the fix under gate: enforce",
+      "tool": "godot_open_mcp_apply_fix",
+      "payload": {
+        "issue_id": "missing_scripts|Error|res://_ValidationSuite/m10-fix/MissingScript.tscn|missing_script",
+        "fix_id": "remove_missing_script",
+        "dry_run": false,
+        "gate": "enforce",
+        "paths_hint": ["res://_ValidationSuite/m10-fix/MissingScript.tscn"]
+      }
+    },
+    {
+      "id": "expected",
+      "type": "expected",
+      "title": "Expected outcomes",
+      "items": [
+        "validate_edit reports missing_script (Error); copy its issue_id verbatim into the fix prompts (the illustrative issue_id in the payload must match the real key).",
+        "Dry-run returns the fix description and Safe: true and makes no disk mutation.",
+        "Apply (dry_run: false, gate: enforce) removes the broken script attachment and the gate re-validation shows no new errors.",
+        "A follow-up validate_edit on the same path no longer reports missing_script.",
+        "Canonical demo/Fixtures/ remain unmodified."
+      ]
+    },
+    {
+      "id": "actual",
+      "type": "actual",
+      "title": "Paste the agent output"
+    },
+    {
+      "id": "done",
+      "type": "mark_done"
+    }
+  ],
+  "reset": {
+    "afterStep": {
+      "setup-fixture": {
+        "actions": [
+          { "action": "fs_delete", "paths": ["{fixtureRoot}"] }
+        ]
+      }
+    },
+    "note": "Deletes the staged fixture tree (_ValidationSuite/m10-fix/). Canonical demo/Fixtures/ are never modified."
+  }
+}

@@ -1,0 +1,66 @@
+{
+  "id": "m10-screenshot",
+  "title": "Capture editor viewport PNG",
+  "milestone": "m10",
+  "engineId": "godot",
+  "order": 4,
+  "requirementLevel": "required-core",
+  "tags": ["m10", "typed-editor", "screenshot"],
+  "steps": [
+    {
+      "id": "info",
+      "type": "info",
+      "title": "Prerequisites",
+      "body": "demo/ open in Godot 4.3+ (mono), addon enabled, bridge running. screenshot_* tools live in the typed-editor group (hidden by default). The setup step activates typed-editor and opens the healthy 3D scene so the viewport has drawn content. Click the 3D editor view first so it is the active viewport, then run the prompt. This scenario is operator-visual by design — no pixel-diff automation. No disposable fixture is staged (the tool returns an MCP image content block; it does not write project files)."
+    },
+    {
+      "id": "setup-open",
+      "type": "setup",
+      "title": "Activate typed-editor and open the healthy 3D scene",
+      "actions": [
+        {
+          "action": "mcp_tool",
+          "tool": "godot_open_mcp_manage_tools",
+          "args": { "action": "activate", "group": "typed-editor" },
+          "timeoutMs": 15000
+        },
+        {
+          "action": "mcp_tool",
+          "tool": "godot_open_mcp_scene_open",
+          "args": { "path": "res://Scenes/Healthy3D.tscn" },
+          "timeoutMs": 20000
+        }
+      ]
+    },
+    {
+      "id": "prompt",
+      "type": "agent_prompt",
+      "title": "Capture the 3D editor viewport",
+      "tool": "godot_open_mcp_screenshot_viewport",
+      "payload": {
+        "mode": "3d"
+      }
+    },
+    {
+      "id": "expected",
+      "type": "expected",
+      "title": "Expected outcomes",
+      "items": [
+        "screenshot_viewport returns isError: false.",
+        "The response includes an image/png MCP image content block (base64 payload never appears inside a text JSON block on success) — match docs/api/mcp-tools.md.",
+        "The image opens and shows the Healthy3D scene (human visual judgment).",
+        "No leaked temporary cameras/nodes: the scene tree is stable after capture.",
+        "If the viewport captures black, click the 3D editor view to focus it and retry (documented degraded path)."
+      ]
+    },
+    {
+      "id": "actual",
+      "type": "actual",
+      "title": "Paste the agent output (and attach/inspect the PNG)"
+    },
+    {
+      "id": "done",
+      "type": "mark_done"
+    }
+  ]
+}

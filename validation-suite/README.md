@@ -26,6 +26,7 @@ validation-suite/
     godot.json                 Godot profile (paths, CLI, companions, markers)
   scenarios/
     godot/sample/*.json        shipped sample scenario definitions
+    godot/m10/*.json            M10 closeout pack (5 required-core scenarios)
 ```
 
 ## Running
@@ -117,6 +118,28 @@ Use **Export…** in the top bar to produce a sign-off markdown summary of the c
 
 The summary includes the project path, engine profile id, timestamp, a requirement-tier breakdown, one status table per milestone (required grouped, optional folded under an "Optional" subheading), and the closeout-gate verdict (passes only when every `required-core` scenario is `done`). The builder is engine-neutral (`packages/core/src/export.ts`) and unit-tested.
 
+## M10 core scenario pack
+
+`scenarios/godot/m10/` ships the five **required-core** scenarios that gate the M10 Validation milestone closeout. All five target the bundled `demo/` project, stage disposable fixtures under `_ValidationSuite/<test-id>/`, and leave canonical `demo/Fixtures/` untouched.
+
+| Order | Scenario | Purpose | Primary tools |
+|---|---|---|---|
+| 0 | `m10-ping` | Live bridge connectivity smoke | `ping` |
+| 1 | `m10-node-create` | Typed mutator round-trip on a staged scene | `manage_tools`, `scene_open`, `node_create`, `node_find` |
+| 2 | `m10-gate-fail` | Scoped validate surfaces a known issue code | `validate_edit` |
+| 3 | `m10-fix` | Safe fix dry-run then apply under the gate | `validate_edit`, `apply_fix` |
+| 4 | `m10-screenshot` | Inspectable viewport PNG | `manage_tools`, `scene_open`, `screenshot_viewport` |
+
+To run the pack:
+
+1. `npm run tauri dev`, **Open project…** → select `../demo`.
+2. Filter to **Required · core** to isolate the five `m10-*` scenarios.
+3. Ensure the Godot 4.3+ (mono) editor has `demo/` open with the addon enabled and the bridge running; the typed-editor scenarios activate the `typed-editor` tool group automatically in setup.
+4. Run each scenario's setup, copy the prompt into your MCP client, paste the actual, and mark done.
+5. **Export…** → the closeout gate passes when all five `required-core` scenarios are `done`.
+
+Scenario ids are stable and indexed by the M10 manual checklist (see `specs/execution/M10/manual-checklist.md`, specs-only).
+
 ## Status
 
-This build ships the suite shell, the engine-neutral core (DTOs, loader, state, action runner, patch transform, export), the Godot engine profile, the MCP CLI subprocess runner, and sample smoke scenarios. Core scenario authoring for Godot tooling is ongoing.
+This build ships the suite shell, the engine-neutral core (DTOs, loader, state, action runner, patch transform, export), the Godot engine profile, the MCP CLI subprocess runner, sample smoke scenarios, and the five-scenario M10 required-core closeout pack.

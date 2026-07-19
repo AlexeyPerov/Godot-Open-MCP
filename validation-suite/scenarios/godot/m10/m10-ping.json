@@ -1,0 +1,56 @@
+{
+  "id": "m10-ping",
+  "title": "Bridge ping smoke",
+  "milestone": "m10",
+  "engineId": "godot",
+  "order": 0,
+  "requirementLevel": "required-core",
+  "tags": ["m10", "bridge", "ping"],
+  "steps": [
+    {
+      "id": "info",
+      "type": "info",
+      "title": "Prerequisites",
+      "body": "Open demo/ in Godot 4.3+ (mono) with the Godot Open MCP addon enabled and the bridge running. Your MCP client must point at this project. This is a read-only connectivity smoke — no fixtures are staged and no reset is required."
+    },
+    {
+      "id": "setup-ping",
+      "type": "setup",
+      "title": "Suite-side ping via mcp_tool",
+      "actions": [
+        {
+          "action": "mcp_tool",
+          "tool": "godot_open_mcp_ping",
+          "timeoutMs": 15000
+        }
+      ]
+    },
+    {
+      "id": "prompt",
+      "type": "agent_prompt",
+      "title": "Run ping in the MCP client",
+      "tool": "godot_open_mcp_ping",
+      "payload": {}
+    },
+    {
+      "id": "expected",
+      "type": "expected",
+      "title": "Expected outcomes",
+      "items": [
+        "Tool returns isError: false.",
+        "Response confirms the bridge is reachable (ping/health payload per the shipped godot_open_mcp_ping schema).",
+        "The setup-ping action log line also shows isError: false when the bridge is running.",
+        "With the bridge stopped, the tool surfaces an actionable error (isError: true) and the suite does not crash."
+      ]
+    },
+    {
+      "id": "actual",
+      "type": "actual",
+      "title": "Paste the agent output"
+    },
+    {
+      "id": "done",
+      "type": "mark_done"
+    }
+  ]
+}
