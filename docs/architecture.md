@@ -11,10 +11,11 @@ A desktop **Hub** app for guided setup is planned but deferred.
 
 ## Repository map
 
-- `mcp-server/` — MCP stdio server, tool registry, routing.
+- `mcp-server/` — MCP stdio server, tool registry, routing, and the `godot-open-mcp` CLI (`run-tool`).
 - `packages/bridge/` — Godot HTTP bridge and typed tool handlers (shipped as `addons/godot_open_mcp/`).
 - `packages/verify/` — validation rules and fixes used by gate flows (standalone; bridge depends on verify).
 - `cli/` — `godot-open-mcp-cli` command-line tooling.
+- `validation-suite/` — standalone Tauri + SvelteKit app that guides manual validation as repeatable scenario runs (engine-neutral core + a Godot engine profile).
 - `skills/` — agent playbooks (`SKILL.md`).
 - `demo/` — Godot C# demo project with fixtures.
 - `scripts/` — version sync and maintenance scripts.
@@ -91,6 +92,14 @@ P7.2 introduces the MCP-process offline scene reader — a bounded, read-only `.
 **Offline log channel (P7.4):** `godot-log.ts` + `compiler-errors.ts` back the always-offline `godot_open_mcp_read_compile_errors` diagnostic. `console_get_logs` is the bridge-fed addon collector and stops accumulating when the addon fails to compile or load; `read_compile_errors` is the one channel that survives a dead bridge — it reads the project's configured Godot log file straight from disk. The modules live at `mcp-server/src/` (not under `offline/`) because they are NOT a fallback for a live tool — they are the always-offline diagnostic surface. `godot-log.ts` resolves the log path from `project.godot`'s `debug/file_logging/*` settings + per-platform user-data-dir defaults + the operator `GODOT_OPEN_MCP_LOG_FILE` env override (no per-call `log_path` — no arbitrary file-read surface), reads a bounded tail, falls back to the newest rotated `godot.log.N` by mtime, and runs a stale-log mtime advisory. `compiler-errors.ts` extracts normalized C#/GDScript/script-load/addon-load diagnostics. The `dead_bridge` `bridge_status` recovery hint points here.
 
 **No-cache philosophy.** The offline-read path deliberately avoids persistent on-disk caches — scene text is parsed fresh per request and directory listings are re-walked per request. This keeps the reads cheap, side-effect-free, and always consistent with the files on disk. Adding a disk cache (a persistent full-project database, a session asset model, etc.) would require explicit approval and a change to this section. The per-request parsing model also means there is no stale-cache window: an offline read reflects the file at the instant of the call, and a subsequent edit + re-read sees the new content immediately.
+
+## MCP server CLI (`godot-open-mcp run-tool`)
+
+The `mcp-server/` bin (`godot-open-mcp`) is dual-role. With no recognized command it runs the stdio MCP server (MCP client mode). With a known subcommand — currently `run-tool`, plus `--help` / `--version` — it runs a one-shot CLI and exits with that command's code (`bootstrap()` in `index.ts` forks on `argv[2]`). This mirrors Unity Open MCP's single-bin fall-through and is the scripting entry point the Validation Suite's `mcp_tool` actions call.
+
+`run-tool <name> --project <path> [--json] [--args '<json>'] [--arg k=v]` resolves the bridge for the project (same `instance-discovery` precedence the stdio server uses), dispatches through the same `ToolRouter` an MCP client would, and prints `{ command, tool, isError, result }`. Exit codes: `0` success, `1` tool error (`isError: true`), `2` usage error (unknown tool / bad args / missing project path). The CLI lives in `mcp-server/src/cli/` (`args.ts` parser, `commands.ts` router-stack + command, `cli.ts` dispatcher) and adds no runtime dependencies.
+
+This is distinct from the `cli/` package below (`godot-open-mcp-cli`), which is the operator install/setup surface and never starts or wraps the tool router.
 
 ## CLI package (`cli/`)
 

@@ -41,6 +41,8 @@ import { BridgeEventStream } from "./event-stream.js";
 import { ToolRouter } from "./tool-router.js";
 import { ToolSessionState, filterVisibleTools } from "./tool-session-state.js";
 import type { Router, CallToolResult } from "./router.js";
+import { KNOWN_COMMANDS } from "./cli/args.js";
+import { runCli } from "./cli/cli.js";
 
 // Read the version from package.json at runtime so `npm version` and the
 // maintainer-panel version-bump keep the reported server version in sync
@@ -317,8 +319,34 @@ async function main(): Promise<void> {
 import { fileURLToPath } from "node:url";
 const isMain = fileURLToPath(import.meta.url) === process.argv[1];
 if (isMain) {
-  main().catch((err) => {
+  bootstrap().catch((err) => {
     console.error("godot-open-mcp fatal:", err);
     process.exit(1);
   });
+}
+
+/**
+ * Process entry fork. When argv[0] is a known CLI subcommand (`run-tool`) or an
+ * explicit `--help` / `--version`, run the thin CLI and exit with its code.
+ * Otherwise fall through to the stdio MCP server so a single `bin` works for
+ * both CI/scripting (`godot-open-mcp run-tool …`) and MCP clients (which spawn
+ * `node dist/index.js`). Mirrors Unity Open MCP's launcher fork.
+ */
+async function bootstrap(): Promise<void> {
+  const firstArg = process.argv[2];
+  const looksLikeCli =
+    firstArg !== undefined &&
+    ((KNOWN_COMMANDS as readonly string[]).includes(firstArg) ||
+      firstArg === "--help" ||
+      firstArg === "-h" ||
+      firstArg === "--version" ||
+      firstArg === "-V");
+  if (looksLikeCli) {
+    const outcome = await runCli({ version: PACKAGE_VERSION });
+    if (outcome.handled) {
+      process.exit(outcome.exitCode);
+    }
+    // handled === false only when argv had no recognized command; fall through.
+  }
+  await main();
 }

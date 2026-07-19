@@ -1,0 +1,26 @@
+{
+  "id": "sample-ping-smoke",
+  "title": "Bridge ping smoke check (automated-covered)",
+  "milestone": "sample",
+  "engineId": "godot",
+  "order": 1,
+  "requirementLevel": "optional",
+  "tags": ["sample", "bridge"],
+  "steps": [
+    {
+      "id": "info",
+      "type": "info",
+      "body": "Confirm the bridge answers a ping. Open the demo project in the Godot Editor with the Godot Open MCP addon enabled, then run the prompt below in your MCP client."
+    },
+    {
+      "id": "prompt",
+      "type": "agent_prompt",
+      "tool": "godot_open_mcp_ping",
+      "title": "Run ping in the MCP client"
+    },
+    {
+      "id": "done",
+      "type": "mark_done"
+    }
+  ]
+}

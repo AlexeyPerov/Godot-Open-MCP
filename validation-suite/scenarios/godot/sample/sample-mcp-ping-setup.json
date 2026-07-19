@@ -1,0 +1,40 @@
+{
+  "id": "sample-mcp-ping-setup",
+  "title": "mcp_tool setup action smoke check",
+  "milestone": "sample",
+  "engineId": "godot",
+  "order": 2,
+  "requirementLevel": "optional",
+  "tags": ["sample", "mcp_tool"],
+  "steps": [
+    {
+      "id": "info",
+      "type": "info",
+      "body": "Exercises the mcp_tool action handler. Run setup to invoke godot_open_mcp_ping via the engine CLI (godot-open-mcp run-tool); the result appears in the action log."
+    },
+    {
+      "id": "ping",
+      "type": "setup",
+      "title": "Run a bridge ping via mcp_tool",
+      "actions": [
+        {
+          "action": "mcp_tool",
+          "tool": "godot_open_mcp_ping",
+          "timeoutMs": 15000
+        }
+      ]
+    },
+    {
+      "id": "expected",
+      "type": "expected",
+      "items": [
+        "Action log shows mcp_tool result with isError=false when the bridge is running",
+        "Action log surfaces a tool error (isError=true) without crashing when the bridge is offline"
+      ]
+    },
+    {
+      "id": "done",
+      "type": "mark_done"
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "id": "godot",
+  "displayName": "Godot Open MCP",
+  "mcpCliBinary": "godot-open-mcp",
+  "paths": {
+    "fixtureRoot": "_ValidationSuite/<test-id>/",
+    "stateRoot": ".godot-open-mcp/ValidationSuite/",
+    "stateFile": ".godot-open-mcp/ValidationSuite/.state.json",
+    "actualsDir": ".godot-open-mcp/ValidationSuite/actuals/",
+    "exportsDir": ".godot-open-mcp/ValidationSuite/exports/"
+  },
+  "markers": {
+    "dirs": [],
+    "files": ["project.godot"]
+  },
+  "companions": [
+    { "primary": "*.png", "companion": "*.png.import" },
+    { "primary": "*.jpg", "companion": "*.jpg.import" },
+    { "primary": "*.svg", "companion": "*.svg.import" },
+    { "primary": "*.wav", "companion": "*.wav.import" },
+    { "primary": "*.ogg", "companion": "*.ogg.import" },
+    { "primary": "*.tres", "companion": "*.tres.uid" },
+    { "primary": "*.tscn", "companion": "*.tscn.uid" },
+    { "primary": "*.gd", "companion": "*.gd.uid" },
+    { "primary": "*.cs", "companion": "*.cs.uid" }
+  ],
+  "placeholders": ["{fixtureRoot}", "{projectRoot}"],
+  "toolNamePrefix": "godot_open_mcp_"
+}

@@ -36,6 +36,13 @@ demo/SmokeScratch/
 demo/*.sln
 demo/*.userprefs
 
+# Validation Suite (operator state + disposable staged fixtures). The suite
+# scopes everything under the target project: disposable fixtures under
+# _ValidationSuite/<test-id>/ and operator state under
+# .godot-open-mcp/ValidationSuite/ (the latter already covered by the
+# demo/.godot-open-mcp/ rule above; the fixture root is listed explicitly).
+demo/_ValidationSuite/
+
 # .NET / C#
 bin/
 obj/
