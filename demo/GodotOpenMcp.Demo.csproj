@@ -1,0 +1,31 @@
+<Project Sdk="Godot.NET.Sdk/4.3.0">
+  <!--
+    Minimal Godot 4.3+ C# integration fixture for Godot Open MCP — NOT a
+    product sample. The bridge addon (materialized under
+    `addons/godot_open_mcp/` by `scripts/prepare-demo-addon.mjs`) is compiled
+    into THIS assembly alongside the demo's own scripts, so this `.csproj` is
+    the single Godot project file for the whole fixture.
+
+    SDK pin: `Godot.NET.Sdk/4.3.0` is the engine floor the addon supports
+    (matches `packages/bridge`'s `Godot.NET.Sdk` pin). The .NET SDK package is
+    published to nuget.org and restores on any runner; the installed Godot
+    binary (4.3+) drives the actual build-solutions compile via its own bundled
+    GodotSharp, so a single floor pin works across the supported matrix.
+
+    No external NuGet pins — the bridge addon ships zero runtime NuGet
+    dependencies (ADR-004). Add one here ONLY if a future bridge change
+    genuinely requires it.
+
+    Intentional deltas from the behavior reference layout: no external
+    runtime/cloud-transport NuGet pins (those belong to reference projects'
+    runtime stacks, explicitly skipped per AGENTS.md ADR-004 — see
+    `specs/porting-map.md`).
+  -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <Nullable>enable</Nullable>
+    <RootNamespace>GodotOpenMcp.Demo</RootNamespace>
+    <AssemblyName>GodotOpenMcp.Demo</AssemblyName>
+  </PropertyGroup>
+</Project>

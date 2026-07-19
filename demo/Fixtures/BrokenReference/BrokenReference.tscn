@@ -1,0 +1,11 @@
+[gd_scene load_steps=2 format=3]
+
+; Broken-reference fixture for the broken_references verify rule.
+; The [ext_resource] below declares BOTH a uid and a path that point at nothing
+; on disk (no such script file exists, no such uid is registered). The rule
+; MUST emit `broken_scene_reference` for this file when scanned live.
+; See demo/Fixtures/README.md.
+[ext_resource type="Script" uid="uid://demobrokenref0000" path="res://Fixtures/BrokenReference/DoesNotExist.gd" id="1_broken"]
+
+[node name="BrokenReference" type="Node"]
+script = ExtResource("1_broken")

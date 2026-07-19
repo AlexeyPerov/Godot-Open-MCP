@@ -1,0 +1,16 @@
+[remap]
+
+importer="keep"
+type="Resource"
+uid="uid://demoduplicateuid00"
+path="res://.godot/imported/DupA.txt-deadbeef.keep"
+source="res://Fixtures/ImportHealth/DupA.txt"
+
+[deps]
+
+source_file="res://Fixtures/ImportHealth/DupA.txt"
+dest_files=["res://.godot/imported/DupA.txt-deadbeef.keep"]
+
+[params]
+
+compress/bc=1

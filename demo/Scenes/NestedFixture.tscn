@@ -1,0 +1,13 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://Scripts/ValidFixture.gd" id="1_valid"]
+[ext_resource type="Resource" path="res://Resources/DemoData.tres" id="2_data"]
+
+[node name="NestedFixture" type="Node"]
+
+[node name="Outer" type="Node" parent="."]
+script = ExtResource("1_valid")
+
+[node name="Inner" type="Node" parent="Outer"]
+
+[node name="Deep" type="Node" parent="Outer/Inner"]

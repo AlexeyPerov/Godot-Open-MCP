@@ -1,0 +1,16 @@
+[remap]
+
+importer="texture"
+type="ImageTexture"
+uid="uid://demoorphanimport01"
+path="res://.godot/imported/DoesNotExist.png-deadbeef.png"
+source="res://Fixtures/ImportHealth/DoesNotExist.png"
+
+[deps]
+
+source_file="res://Fixtures/ImportHealth/DoesNotExist.png"
+dest_files=["res://.godot/imported/DoesNotExist.png-deadbeef.png"]
+
+[params]
+
+compress/bc=1

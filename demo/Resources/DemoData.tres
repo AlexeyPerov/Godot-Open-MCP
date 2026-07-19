@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="DemoData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Resources/DemoData.gd" id="1_demo"]
+
+[resource]
+script = ExtResource("1_demo")
+title = "godot-open-mcp-demo-data"
+count = 7
+ratio = 1.5
+enabled = true
+tint = Color(0.2, 0.4, 0.6, 1)
+position = Vector2(12, 34)
+tags = PackedStringArray("demo", "fixture")

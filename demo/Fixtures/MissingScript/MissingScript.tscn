@@ -1,0 +1,13 @@
+[gd_scene load_steps=2 format=3]
+
+; Missing-script fixture for the missing_scripts verify rule.
+; The node attaches a script via `script = ExtResource("1_missing")` whose
+; [ext_resource type="Script"] header is declared, but the path/uid both point
+; at nothing on disk. The rule MUST emit `missing_script` (Error) for the
+; attaching node when scanned live. Distinct from broken_scene_reference
+; because the remove_missing_script fix matches this code specifically.
+; See demo/Fixtures/README.md.
+[ext_resource type="Script" uid="uid://demomissingscript0" path="res://Fixtures/MissingScript/GoneScript.gd" id="1_missing"]
+
+[node name="MissingScript" type="Node"]
+script = ExtResource("1_missing")

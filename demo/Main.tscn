@@ -1,0 +1,17 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://Scripts/ValidFixture.gd" id="1_valid"]
+
+[node name="Main" type="Node"]
+
+[node name="Player2D" type="Node2D" parent="."]
+
+[node name="Sprite2D" type="Sprite2D" parent="Player2D"]
+
+[node name="Player3D" type="Node3D" parent="."]
+
+[node name="Camera3D" type="Camera3D" parent="Player3D"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 5)
+
+[node name="ValidFixtureChild" type="Node" parent="."]
+script = ExtResource("1_valid")

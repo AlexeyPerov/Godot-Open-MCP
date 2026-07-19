@@ -1,0 +1,13 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Material" path="res://Resources/DemoMaterial.tres" id="1_mat"]
+
+[node name="Healthy3D" type="Node3D"]
+
+[node name="Player3D" type="Node3D" parent="."]
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Player3D"]
+material_override = ExtResource("1_mat")
+
+[node name="Camera3D" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 6)

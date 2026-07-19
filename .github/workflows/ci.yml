@@ -184,3 +184,143 @@ jobs:
         # that no internal phase/spec references or forbidden reference-project
         # names leak into the guide. See scripts/check-manual-setup.mjs.
         run: node scripts/check-manual-setup.mjs
+
+  # ---------------------------------------------------------------------------
+  # P9.4 — Demo integration fixture.
+  #
+  # demo-build: deterministic — materialize the addon from packages/bridge +
+  # packages/verify into demo/addons/godot_open_mcp via the CLI installer
+  # (single canonical path, no stale vendored copy), assert the materialized
+  # tree shape + idempotent re-run + broken-fixture patterns, then restore
+  # the demo's .NET deps to prove the .csproj + Godot.NET.Sdk pin resolve
+  # cleanly against NuGet. No Godot editor required — this is the
+  # milliseconds-fast deterministic gate.
+  #
+  # The full C# *compile* of the combined assembly (demo scripts + materialized
+  # bridge + verify source) happens INSIDE the Godot editor via its bundled
+  # GodotSharp / GodotSharpEditor. A raw `dotnet build` against NuGet
+  # GodotSharp 4.3.0 fails because the bridge C# uses APIs the published C#
+  # bindings do not expose (`EditorFileSystem.IsReady`, etc.) — the editor's
+  # in-tree bindings are the authoritative compile host. That compile is
+  # therefore a manual verification checklist item (demo/README.md), not a CI
+  # gate. See specs/execution/P9/P9.4.md for the recorded gap.
+  #
+  # demo-smoke: bounded OFFLINE MCP smoke — spawns the built mcp-server over
+  # stdio against the demo project and drives the MCP wire flow for the
+  # always-offline tools (capabilities, ping → bridge_offline, manage_tools,
+  # read_compile_errors) plus the live-first offline fallbacks (scene_get_data
+  # res://Main.tscn, filesystem_list res://Fixtures). No Godot editor, no
+  # bridge — the live-bridge path is documented as a manual checklist item in
+  # demo/README.md (headless CI cannot reliably bind the bridge listener).
+  # ---------------------------------------------------------------------------
+
+  demo-build:
+    name: Demo project materialize + fixture-shape check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build CLI
+        # The prepare-demo-addon script wraps `cli/dist/index.js install-plugin`.
+        working-directory: cli
+        run: |
+          npm ci
+          npm run build
+
+      - name: Materialize demo addon + assert fixture shapes
+        # Idempotent — wraps the CLI installer; --check also asserts the
+        # materialized tree contains plugin.cfg + Editor/ + Runtime/ + Verify/,
+        # that a second run is a no-op, and that each broken fixture exhibits
+        # the exact pattern its live verify rule keys on.
+        run: node scripts/prepare-demo-addon.mjs --check
+
+      - name: Runtime/Editor boundary guard
+        # Re-run the boundary check so a future bridge change that leaks an
+        # editor API into Runtime/ is caught at the demo build too, not just
+        # at the package-level gate.
+        run: python scripts/check-runtime-boundary.py --verbose
+
+      - name: Restore demo .NET deps
+        # `dotnet restore` proves the Godot.NET.Sdk/4.3.0 pin + net8.0
+        # target resolve cleanly against NuGet. The actual C# compile of the
+        # combined assembly runs inside the Godot editor (see P9.4 recorded
+        # gap above) — this step does NOT `dotnet build`, by design.
+        working-directory: demo
+        run: dotnet restore GodotOpenMcp.Demo.csproj
+
+      - name: Verify clean tree (no generated files committed)
+        # The materialized addon + .godot/ + bin/ + obj/ must NOT appear as
+        # tracked additions. If they do, .gitignore or the prepare script is
+        # broken.
+        run: |
+          if [ -n "$(git status --porcelain demo/addons demo/.godot demo/bin demo/obj demo/.mono demo/.godot-open-mcp)" ]; then
+            echo "Unexpected generated files surfaced in the working tree:"
+            git status --porcelain demo/
+            exit 1
+          fi
+
+  demo-smoke:
+    name: Demo offline MCP smoke
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: mcp-server/package-lock.json
+
+      - name: Build CLI
+        working-directory: cli
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build MCP server
+        working-directory: mcp-server
+        run: |
+          npm ci
+          npm run build
+
+      - name: Materialize demo addon
+        # Smoke needs the addon tree present so the demo project looks like a
+        # real consumer project. No --check here (demo-build covers that) —
+        # keep this job focused on the MCP smoke.
+        run: node scripts/prepare-demo-addon.mjs
+
+      - name: Run bounded offline MCP smoke
+        # Bounded — the script's own timeouts + the step timeout cap how long
+        # a hung stdio child can run. Exit 0 pass, 1 fail, 2 bootstrap.
+        # No .NET build needed — the offline readers parse the demo fixtures
+        # straight from disk; no Godot editor and no bridge are spawned.
+        timeout-minutes: 5
+        run: node mcp-server/scripts/demo-smoke.mjs --project demo
+
+      - name: Verify clean tree (no scratch left behind)
+        if: always()
+        run: |
+          if [ -n "$(git status --porcelain demo/SmokeScratch demo/addons demo/.godot demo/.godot-open-mcp)" ]; then
+            echo "Smoke left generated/scratch files behind:"
+            git status --porcelain demo/
+            exit 1
+          fi
+

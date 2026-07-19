@@ -14,6 +14,27 @@ dist-test/
 demo/.godot/
 *.import
 *.uid
+# Exception: the demo ships intentional broken-import fixtures under
+# demo/Fixtures/ImportHealth/ that the import_health verify rule keys on.
+# These ARE tracked source — never ignore them. The patterns above still
+# exclude real imported-asset sidecars everywhere else in the tree.
+!demo/Fixtures/ImportHealth/*.import
+
+# Demo integration fixture — generated addon tree, build output, scratch.
+# The addon is materialized by scripts/prepare-demo-addon.mjs; .godot/ holds
+# editor cache; .mono/ + mono/ hold Godot's C# state; bin/ + obj/ are .NET
+# build output (the global bin/ and obj/ rules above already exclude these,
+# repeated here for clarity under demo/); .godot-open-mcp/ holds bridge
+# project-local settings scratch; SmokeScratch/ is the smoke mutation target.
+demo/addons/
+demo/.mono/
+demo/mono/
+demo/bin/
+demo/obj/
+demo/.godot-open-mcp/
+demo/SmokeScratch/
+demo/*.sln
+demo/*.userprefs
 
 # .NET / C#
 bin/

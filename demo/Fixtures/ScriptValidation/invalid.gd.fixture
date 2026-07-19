@@ -1,0 +1,9 @@
+# Invalid-GDScript fixture source. Stored with the `.gd.fixture` extension so
+# the Godot editor's import step does not surface a permanent parse error in
+# the default startup log. The smoke copies this file to invalid.gd only for
+# the duration of a script_validate call, then removes it. See demo/README.md.
+#
+# The intentional error: `func` without a body and an unterminated statement.
+extends Node
+
+func broken(

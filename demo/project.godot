@@ -1,0 +1,25 @@
+; Engine configuration file.
+; It's best edited using the editor UI and not directly.
+;
+; Minimal Godot 4.3+ C# integration fixture for Godot Open MCP — NOT a product
+; sample. Used by `scripts/prepare-demo-addon.mjs`, `scripts/demo-smoke.mjs`,
+; and the `demo-build` / `demo-smoke` CI jobs to prove that a real Godot project
+; can materialize the addon, build the combined assembly, expose the offline
+; MCP tools, and reproduce the verify issue-code fixtures. See demo/README.md.
+
+config_version=5
+
+[application]
+
+config/name="Godot Open MCP Demo"
+config/description="Minimal Godot 4.3+ C# integration fixture for Godot Open MCP. Not a product sample."
+run/main_scene="res://Main.tscn"
+config/features=PackedStringArray("4.3", "C#")
+
+[dotnet]
+
+project/assembly_name="GodotOpenMcp.Demo"
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/godot_open_mcp/plugin.cfg")
