@@ -6,6 +6,9 @@
 # - skill-audit: drift + safety audit for skills/godot-open-mcp/SKILL.md and
 #   skills/client-paths.json (line budget, tool references, manifest cross-field
 #   rules, forbidden content).
+# - tool-docs-parity: drift audit for docs/api/mcp-tools.md against ALL_TOOLS +
+#   route-policy.ts + tool-groups.ts (set / route / group / required / enum /
+#   public-surface hygiene).
 # - mcp-server: typecheck + unit tests for the stdio MCP server package.
 
 name: ci
@@ -128,3 +131,27 @@ jobs:
         # matches the CLI agent registry, and no internal/forbidden content
         # leaks into the skill. See scripts/check-skill.mjs for the rule set.
         run: node scripts/check-skill.mjs
+
+  tool-docs-parity:
+    name: MCP tool catalog parity
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Verify docs/api/mcp-tools.md matches the registry
+        # No dependencies — pure node:fs. Parses the canonical inventory table
+        # in docs/api/mcp-tools.md (delimited by <!-- tool-docs:inventory -->
+        # markers) and asserts set/route/group/required/enum parity against
+        # ALL_TOOLS + route-policy.ts + tool-groups.ts. Fails the PR if a tool
+        # is shipped but missing from the docs, the docs claim an unregistered
+        # tool is shipped, a route/group diverges from the source, a required
+        # schema field or enum token is missing, or internal phase/spec
+        # references leak into the user-visible surface. See
+        # scripts/check-tool-docs.mjs for the rule set.
+        run: node scripts/check-tool-docs.mjs

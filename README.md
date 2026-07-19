@@ -8,12 +8,12 @@
 
 > **Status:** Pre-alpha — bootstrap in progress. Core bridge, tools, and CLI are not yet shipped.
 
-## Planned features
+## Features
 
 - **Gate + verify workflow** — automatic validation, checkpoints, deltas, and targeted fixes before and after mutations.
 - **Native stdio MCP** — no HTTP proxy or cloud dependency for Cursor and other native MCP clients.
-- **~40 core tool families** — node, scene, script, resource, filesystem, editor, console, screenshot, and reflection tools.
-- **Offline reads** — partial scene and resource introspection without a running editor.
+- **40+ tools across core families** — node, scene, resource, filesystem, editor, console, screenshot, and reflection tools, plus bridge health, capabilities, and tool-group management. See the [MCP tool catalog](docs/api/mcp-tools.md) for the complete inventory.
+- **Offline reads** — partial scene and filesystem introspection without a running editor.
 - **Tool groups + `manage_tools`** — keep the prompt surface small as tool count grows.
 - **Open MIT stack** — fully self-hostable, no vendor lock-in.
 
@@ -27,11 +27,11 @@ This project ports the architecture of [Unity Open MCP](https://github.com/Alexe
 
 - [Architecture](docs/architecture.md) — repository boundaries and runtime flow.
 - [API index](docs/api.md) — contract documentation map.
+- [MCP tool catalog](docs/api/mcp-tools.md) — every shipped tool, its route policy, visibility group, inputs, results, and errors.
+- [Bridge HTTP contract](docs/api/bridge-http.md) — `/ping`, `/tools/*`, `/events`, envelopes, and errors.
 - [Agent skills](docs/skills.md) — the canonical agent playbook and install-target map.
 - [Porting principles](docs/porting-principles.md) — Unity-first porting protocol for contributors.
 - CLI — `godot-open-mcp-cli` (`cli/`) for install, setup, open, and status. See `cli/AGENTS.md` for the package boundary.
-
-Detailed API docs (`docs/api/mcp-tools.md`, `docs/api/bridge-http.md`, setup guides) will be added as features ship.
 
 ## Contributing
 
