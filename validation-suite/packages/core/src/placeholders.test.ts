@@ -13,14 +13,14 @@ import {
 } from "./placeholders.ts";
 import { applyPatches, splitLines } from "./patch.ts";
 
-const CTX = { projectRoot: "/proj", fixtureRoot: "/proj/Assets/_ValidationSuite/m9-x" };
+const CTX = { projectRoot: "/proj", fixtureRoot: "/proj/_ValidationSuite/m9-x" };
 
 // ── placeholders ─────────────────────────────────────────────────────────────
 
 test("expandString replaces {fixtureRoot} and {projectRoot}", () => {
   assert.equal(
-    expandString("{fixtureRoot}/Player.prefab", CTX),
-    "/proj/Assets/_ValidationSuite/m9-x/Player.prefab",
+    expandString("{fixtureRoot}/Player.tscn", CTX),
+    "/proj/_ValidationSuite/m9-x/Player.tscn",
   );
   assert.equal(expandString("{projectRoot}/Assets", CTX), "/proj/Assets");
 });
@@ -35,8 +35,8 @@ test("expandValue recurses into objects and arrays", () => {
     CTX,
   );
   assert.deepEqual(out, {
-    path: "/proj/Assets/_ValidationSuite/m9-x/a",
-    items: ["/proj", 5, { nested: "/proj/Assets/_ValidationSuite/m9-x" }],
+    path: "/proj/_ValidationSuite/m9-x/a",
+    items: ["/proj", 5, { nested: "/proj/_ValidationSuite/m9-x" }],
   });
 });
 
@@ -54,10 +54,10 @@ test("splitLines keeps trailing newlines attached", () => {
 });
 
 test("applyPatches: replace_line_contains swaps the matched line", () => {
-  const out = applyPatches("  m_Name: Player\n  m_Script: 1\n", [
-    { op: "replace_line_contains", match: "m_Name:", replace: "  m_Name: PlayerPatched" },
+  const out = applyPatches('[node name="Player"]\nscript = 1\n', [
+    { op: "replace_line_contains", match: "name=", replace: '[node name="PlayerPatched"]' },
   ]);
-  assert.equal(out, "  m_Name: PlayerPatched\n  m_Script: 1\n");
+  assert.equal(out, '[node name="PlayerPatched"]\nscript = 1\n');
 });
 
 test("applyPatches: replace on a no-newline file preserves the missing newline", () => {

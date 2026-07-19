@@ -16,8 +16,7 @@ use crate::schemas::{EngineProfile, ProjectCheck};
 /// Validate a candidate project folder against an engine profile's
 /// markers. Never panics — returns a `ProjectCheck` with a clear,
 /// human-readable reason on rejection so the project bar can show
-/// actionable copy (phase-1 task 3: reject non-Unity folders with
-/// clear error).
+/// actionable copy (reject non-Godot folders with a clear error).
 pub fn check_project(path: &Path, profile: &EngineProfile) -> ProjectCheck {
     let path_str = path.to_string_lossy().to_string();
     if !path.is_dir() {

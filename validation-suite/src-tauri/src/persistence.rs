@@ -8,7 +8,7 @@
 //! unity.md → State file schema → robust load).
 //!
 //! The **state file** lives under the selected project
-//! (`UserSettings/ValidationSuite/.state.json`), not in the app config
+//! (`.godot-open-mcp/ValidationSuite/.state.json`), not in the app config
 //! dir, so it travels with the project. The **app config** (last
 //! project pointer) lives in the app config dir.
 
@@ -210,10 +210,10 @@ mod tests {
 
     #[test]
     fn atomic_write_creates_parent_dirs() {
-        // The state file lives under UserSettings/ValidationSuite/ which
+        // The state file lives under .godot-open-mcp/ValidationSuite/ which
         // may not exist on a fresh project — atomic_write must create it.
         let dir = tempfile::tempdir().unwrap();
-        let p = dir.path().join("UserSettings/ValidationSuite/.state.json");
+        let p = dir.path().join(".godot-open-mcp/ValidationSuite/.state.json");
         atomic_write(&p, "{}").unwrap();
         assert!(p.exists());
     }
@@ -221,7 +221,7 @@ mod tests {
     #[test]
     fn load_state_reports_missing_when_absent() {
         let dir = tempfile::tempdir().unwrap();
-        match load_state(dir.path(), "UserSettings/ValidationSuite/.state.json") {
+        match load_state(dir.path(), ".godot-open-mcp/ValidationSuite/.state.json") {
             StateLoad::Missing => {}
             other => panic!("expected Missing, got {other:?}", other = match other {
                 StateLoad::Ok(_) => "Ok",
@@ -235,13 +235,13 @@ mod tests {
     #[test]
     fn load_state_roundtrips_a_valid_state() {
         let dir = tempfile::tempdir().unwrap();
-        let rel = "UserSettings/ValidationSuite/.state.json";
-        let state = empty_state(dir.path().to_str().unwrap(), "unity");
+        let rel = ".godot-open-mcp/ValidationSuite/.state.json";
+        let state = empty_state(dir.path().to_str().unwrap(), "godot");
         save_state(dir.path(), rel, &state).unwrap();
         match load_state(dir.path(), rel) {
             StateLoad::Ok(loaded) => {
                 assert_eq!(loaded.version, STATE_VERSION);
-                assert_eq!(loaded.project.engine_profile_id, "unity");
+                assert_eq!(loaded.project.engine_profile_id, "godot");
             }
             other => panic!("expected Ok, got {:?}", other_kind(&other)),
         }
@@ -250,7 +250,7 @@ mod tests {
     #[test]
     fn load_state_reports_malformed_on_bad_json() {
         let dir = tempfile::tempdir().unwrap();
-        let rel = "UserSettings/ValidationSuite/.state.json";
+        let rel = ".godot-open-mcp/ValidationSuite/.state.json";
         atomic_write(&state_file_path(dir.path(), rel), "{not json").unwrap();
         match load_state(dir.path(), rel) {
             StateLoad::Malformed { reason } => assert!(reason.contains("JSON")),
@@ -267,10 +267,10 @@ mod tests {
     #[test]
     fn load_state_reports_incompatible_on_version_mismatch() {
         let dir = tempfile::tempdir().unwrap();
-        let rel = "UserSettings/ValidationSuite/.state.json";
+        let rel = ".godot-open-mcp/ValidationSuite/.state.json";
         let bad = serde_json::json!({
             "version": 99,
-            "project": { "path": "/p", "engine_profile_id": "unity", "last_opened_at": "x" },
+            "project": { "path": "/p", "engine_profile_id": "godot", "last_opened_at": "x" },
             "tests": {}
         });
         atomic_write(

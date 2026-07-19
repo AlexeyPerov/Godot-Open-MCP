@@ -42,7 +42,7 @@ fn resource_dir(handle: &AppHandle) -> Option<PathBuf> {
     handle.path().resource_dir().ok()
 }
 
-/// Return the bundled engine profile. v1 always returns the `unity`
+/// Return the bundled engine profile. v1 always returns the `godot`
 /// profile; the indirection keeps the command shape ready for a future
 /// multi-engine app.
 #[tauri::command]
@@ -266,9 +266,9 @@ pub fn resolve_fixture_root(
 }
 
 /// Build the absolute fixture root for a scenario id. `fixtureRoot` is a
-/// profile-relative pattern with a `<test-id>` token (unity.md).
+/// profile-relative pattern with a `<test-id>` token.
 pub fn fixture_root_abs(fixture_root_pattern: &str, scenario_id: &str) -> String {
-    // Pattern is project-relative (e.g. `Assets/_ValidationSuite/<test-id>/`);
+    // Pattern is project-relative (e.g. `_ValidationSuite/<test-id>/`);
     // we return it relative to the project root (the caller prepends the
     // root) — keep the trailing slash stripped for path-join ergonomics.
     let rel = fixture_root_pattern.replace("<test-id>", scenario_id);
@@ -363,7 +363,7 @@ pub fn mcp_health_action(
 
 /// Persist a step manifest blob and return its id (phase-2: manifest
 /// recording on every mutating setup action). Stored under the project's
-/// `UserSettings/ValidationSuite/manifests/`.
+/// `.godot-open-mcp/ValidationSuite/manifests/`.
 #[tauri::command]
 pub fn save_step_manifest(
     state: State<'_, AppState>,

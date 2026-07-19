@@ -147,9 +147,9 @@ mod tests {
     #[test]
     fn relative_path_under_root_resolves() {
         let root = root();
-        let p = resolve_within(&root, "Assets/_ValidationSuite/x.prefab").unwrap();
+        let p = resolve_within(&root, "_ValidationSuite/x.tscn").unwrap();
         assert!(p.starts_with(&root));
-        assert!(p.ends_with("Assets/_ValidationSuite/x.prefab"));
+        assert!(p.ends_with("_ValidationSuite/x.tscn"));
     }
 
     #[test]
@@ -162,9 +162,9 @@ mod tests {
     #[test]
     fn traversal_into_existing_target_under_root_is_ok() {
         let root = root();
-        let sub = root.join("Assets/_VS");
+        let sub = root.join("_VS");
         std::fs::create_dir_all(&sub).unwrap();
-        let p = resolve_within(&root, "Assets/_VS/x.prefab").unwrap();
+        let p = resolve_within(&root, "_VS/x.tscn").unwrap();
         assert!(p.starts_with(&root));
     }
 
@@ -183,7 +183,7 @@ mod tests {
     #[test]
     fn absolute_path_inside_root_is_accepted() {
         let root = root();
-        let inside = root.join("Assets/a.prefab");
+        let inside = root.join("a.tscn");
         let p = resolve_within(&root, &inside.to_string_lossy()).unwrap();
         assert!(p.starts_with(&root));
     }
@@ -192,16 +192,16 @@ mod tests {
     fn nested_dotdot_collapses_to_within_root() {
         let root = root();
         // a/../b -> b, still under root.
-        let p = resolve_within(&root, "Assets/../Assets/x.prefab").unwrap();
+        let p = resolve_within(&root, "../x.tscn").unwrap();
         assert!(p.starts_with(&root));
-        assert!(p.ends_with("Assets/x.prefab"));
+        assert!(p.ends_with("x.tscn"));
     }
 
     #[test]
     fn to_relative_strips_root_with_forward_slashes() {
         let root = root();
-        let abs = root.join("Assets/_VS/x.prefab");
+        let abs = root.join("_VS/x.tscn");
         let rel = to_relative(&root, &abs);
-        assert_eq!(rel, "Assets/_VS/x.prefab");
+        assert_eq!(rel, "_VS/x.tscn");
     }
 }

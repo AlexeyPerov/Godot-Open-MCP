@@ -1,7 +1,7 @@
 //! Run-summary export persistence (phase-5 deliverable: export).
 //!
 //! Exports are sign-off markdown files written under the project's
-//! `exportsDir` (`UserSettings/ValidationSuite/exports/`). The markdown
+//! `exportsDir` (`.godot-open-mcp/ValidationSuite/exports/`). The markdown
 //! body is built by the frontend (`packages/core/src/export.ts`); the
 //! backend only owns the atomic disk write + a timestamped filename so
 //! the export travels with the project and survives app restarts.
@@ -79,10 +79,10 @@ mod tests {
     fn save_writes_under_exports_dir_and_returns_relative_path() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        let rel = save(root, "UserSettings/ValidationSuite/exports/", "m9-2026-06-25T00-00-00-000Z.md", "# export").unwrap();
-        assert_eq!(rel, "UserSettings/ValidationSuite/exports/m9-2026-06-25T00-00-00-000Z.md");
+        let rel = save(root, ".godot-open-mcp/ValidationSuite/exports/", "m9-2026-06-25T00-00-00-000Z.md", "# export").unwrap();
+        assert_eq!(rel, ".godot-open-mcp/ValidationSuite/exports/m9-2026-06-25T00-00-00-000Z.md");
         let written = std::fs::read_to_string(
-            root.join("UserSettings/ValidationSuite/exports/m9-2026-06-25T00-00-00-000Z.md"),
+            root.join(".godot-open-mcp/ValidationSuite/exports/m9-2026-06-25T00-00-00-000Z.md"),
         )
         .unwrap();
         assert_eq!(written, "# export");
@@ -92,9 +92,9 @@ mod tests {
     fn save_creates_exports_dir_if_missing() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        assert!(!root.join("UserSettings/ValidationSuite/exports").exists());
-        save(root, "UserSettings/ValidationSuite/exports/", "x.md", "body").unwrap();
-        assert!(root.join("UserSettings/ValidationSuite/exports").exists());
+        assert!(!root.join(".godot-open-mcp/ValidationSuite/exports").exists());
+        save(root, ".godot-open-mcp/ValidationSuite/exports/", "x.md", "body").unwrap();
+        assert!(root.join(".godot-open-mcp/ValidationSuite/exports").exists());
     }
 
     #[test]
@@ -107,7 +107,7 @@ mod tests {
     fn repeated_exports_stack_not_clobber() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        let exports_dir = "UserSettings/ValidationSuite/exports/";
+        let exports_dir = ".godot-open-mcp/ValidationSuite/exports/";
         let f1 = export_filename("m9", "2026-06-25T00:00:00.000Z");
         let f2 = export_filename("m9", "2026-06-25T00:00:01.000Z");
         save(root, exports_dir, &f1, "first").unwrap();

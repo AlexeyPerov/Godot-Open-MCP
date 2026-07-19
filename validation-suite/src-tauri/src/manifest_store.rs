@@ -1,7 +1,7 @@
 //! Manifest blob persistence (phase-2 deliverable: manifest recording).
 //!
 //! Each mutating setup step records the artifacts it created/modified as
-//! a [`StepManifest`] blob under `UserSettings/ValidationSuite/manifests/`.
+//! a [`StepManifest`] blob under `.godot-open-mcp/ValidationSuite/manifests/`.
 //! The state file only keeps the blob id (per-step `manifestRefs`); the
 //! full entries live here so reset can revert deterministically.
 //!
@@ -15,8 +15,8 @@ use std::path::{Path, PathBuf};
 use crate::persistence::atomic_write;
 use crate::schemas::StepManifest;
 
-/// Where manifest blobs live for a project: `<root>/UserSettings/ValidationSuite/manifests/`.
-/// The base dir (`UserSettings/ValidationSuite/`) comes from the profile
+/// Where manifest blobs live for a project: `<root>/.godot-open-mcp/ValidationSuite/manifests/`.
+/// The base dir (`.godot-open-mcp/ValidationSuite/`) comes from the profile
 /// `stateRoot`; we append `manifests/` to keep state file + blobs together.
 pub fn manifests_dir(project_root: &Path, state_root: &str) -> PathBuf {
     project_root.join(state_root).join("manifests")
@@ -118,8 +118,8 @@ mod tests {
             step_id: step.to_string(),
             entries: vec![ManifestEntry {
                 kind: ManifestEntryKind::Created,
-                path: "Assets/_VS/x.prefab".to_string(),
-                companion_path: Some("Assets/_VS/x.prefab.meta".to_string()),
+                path: "_VS/x.tscn".to_string(),
+                companion_path: Some("_VS/x.tscn.uid".to_string()),
                 snapshot: None,
             }],
         }
@@ -129,19 +129,19 @@ mod tests {
     fn save_load_roundtrip() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        let state_root = "UserSettings/ValidationSuite/";
+        let state_root = ".godot-open-mcp/ValidationSuite/";
         let id = make_id("m9-x", "setup", 1);
         save(root, state_root, &id, &manifest("m9-x", "setup")).unwrap();
         let loaded = load(root, state_root, &id).unwrap().unwrap();
         assert_eq!(loaded.scenario_id, "m9-x");
         assert_eq!(loaded.entries.len(), 1);
-        assert_eq!(loaded.entries[0].companion_path.as_deref(), Some("Assets/_VS/x.prefab.meta"));
+        assert_eq!(loaded.entries[0].companion_path.as_deref(), Some("_VS/x.tscn.uid"));
     }
 
     #[test]
     fn load_returns_none_when_absent() {
         let dir = tempfile::tempdir().unwrap();
-        let res = load(dir.path(), "UserSettings/ValidationSuite/", "nope").unwrap();
+        let res = load(dir.path(), ".godot-open-mcp/ValidationSuite/", "nope").unwrap();
         assert!(res.is_none());
     }
 
@@ -149,7 +149,7 @@ mod tests {
     fn delete_removes_blob_and_is_idempotent() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        let state_root = "UserSettings/ValidationSuite/";
+        let state_root = ".godot-open-mcp/ValidationSuite/";
         let id = make_id("m9-x", "setup", 1);
         save(root, state_root, &id, &manifest("m9-x", "setup")).unwrap();
         delete(root, state_root, &id).unwrap();
@@ -161,7 +161,7 @@ mod tests {
     fn count_for_disambiguates_repeated_runs() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        let state_root = "UserSettings/ValidationSuite/";
+        let state_root = ".godot-open-mcp/ValidationSuite/";
         assert_eq!(count_for(root, state_root, "m9-x", "setup"), 0);
         let id1 = make_id("m9-x", "setup", count_for(root, state_root, "m9-x", "setup") + 1);
         save(root, state_root, &id1, &manifest("m9-x", "setup")).unwrap();

@@ -89,7 +89,7 @@
             </button>
             <button type="button" class="export-item" role="menuitem" onclick={onSaveExport}>
               <span class="export-item-title">Save summary as file…</span>
-              <span class="export-item-hint">UserSettings/ValidationSuite/exports/</span>
+              <span class="export-item-hint">.godot-open-mcp/ValidationSuite/exports/</span>
             </button>
           </div>
         {/if}

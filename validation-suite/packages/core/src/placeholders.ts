@@ -1,17 +1,16 @@
 /**
- * Placeholder expansion for scenario params (phase-2 task 7).
+ * Placeholder expansion for scenario params.
  *
- * The Unity profile declares two placeholders (unity.md → Path
- * conventions):
+ * The Godot profile declares two placeholders:
  *  - `{fixtureRoot}` → the test's fixture directory under the project:
- *    `Assets/_ValidationSuite/<test-id>/`.
+ *    `_ValidationSuite/<test-id>/`.
  *  - `{projectRoot}` → the selected project root.
  *
  * Expansion is pure + total: given a `ProjectPaths` (resolved, absolute)
  * context, a placeholder token is replaced everywhere it occurs in a
  * string. Unknown placeholders are left untouched so a future profile
  * can introduce its own without the core needing an update. This keeps
- * the loader/runner engine-neutral (idea.md → Multi-engine reuse).
+ * the loader/runner engine-neutral.
  *
  * The runtime (Tauri/Rust) resolves absolute paths; the core only does
  * the string substitution on already-resolved context, so there is no

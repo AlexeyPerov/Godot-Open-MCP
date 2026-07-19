@@ -30,7 +30,7 @@ function makeScenario(
     id,
     title: `Scenario ${id}`,
     milestone,
-    engineId: "unity",
+    engineId: "godot",
     order,
     requirementLevel: level,
     steps: [
@@ -56,7 +56,7 @@ const scenarios: Scenario[] = [
 ];
 
 function baseState(): SuiteState {
-  return emptyState("/proj", "unity");
+  return emptyState("/proj", "godot");
 }
 
 // ── rollup + tierCounts ────────────────────────────────────────────────────
@@ -128,13 +128,13 @@ test("buildExportMarkdown includes meta, breakdown, milestone tables, verdict", 
     scenarios,
     state: baseState(),
     projectPath: "/proj",
-    engineProfileId: "unity",
+    engineProfileId: "godot",
     generatedAt: "2026-06-25T00:00:00.000Z",
   });
   assert.match(md, /# Validation Suite — run summary/);
   assert.match(md, /\*\*Generated:\*\* 2026-06-25T00:00:00\.000Z/);
   assert.match(md, /\*\*Project:\*\* `\/proj`/);
-  assert.match(md, /\*\*Engine profile:\*\* unity/);
+  assert.match(md, /\*\*Engine profile:\*\* godot/);
   assert.match(md, /## Requirement-tier breakdown/);
   assert.match(md, /\| Required · core \| 2 \| 0 \| 0 \| 2 \|/);
   assert.match(md, /\| Optional \| 2 \| 0 \| 0 \| 2 \|/);
@@ -147,7 +147,7 @@ test("buildExportMarkdown groups optional scenarios under an Optional subheading
     scenarios,
     state: baseState(),
     projectPath: "/proj",
-    engineProfileId: "unity",
+    engineProfileId: "godot",
     generatedAt: "2026-06-25T00:00:00.000Z",
   });
   // Optional subheading appears once per milestone; m9 optional row ids present.
@@ -163,7 +163,7 @@ test("buildExportMarkdown lists automated coverage refs and a dash when none", (
     scenarios,
     state,
     projectPath: "/proj",
-    engineProfileId: "unity",
+    engineProfileId: "godot",
     generatedAt: "2026-06-25T00:00:00.000Z",
   });
   assert.match(md, /ReserializeAssetsToolTests\.X/);
@@ -179,7 +179,7 @@ test("buildExportMarkdown shows PASS verdict and done status when core is comple
     scenarios,
     state,
     projectPath: "/proj",
-    engineProfileId: "unity",
+    engineProfileId: "godot",
     generatedAt: "2026-06-25T00:00:00.000Z",
   });
   assert.match(md, /\*\*Closeout gate \(required-core\):\*\* PASS/);
@@ -209,7 +209,7 @@ test("buildExportMarkdown separates multiple milestones into their own sections"
     scenarios: multi,
     state: baseState(),
     projectPath: "/proj",
-    engineProfileId: "unity",
+    engineProfileId: "godot",
     generatedAt: "2026-06-25T00:00:00.000Z",
   });
   // Milestones are sorted lexically (m10 before m9); both sections appear.

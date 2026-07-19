@@ -19,7 +19,7 @@ function sampleScenario(overrides: Record<string, unknown> = {}): unknown {
     id: "m9-reserialize-happy-path",
     title: "Reserialize happy path",
     milestone: "m9",
-    engineId: "unity",
+    engineId: "godot",
     order: 0,
     requirementLevel: "required-core",
     steps: [
@@ -27,7 +27,7 @@ function sampleScenario(overrides: Record<string, unknown> = {}): unknown {
       {
         id: "setup-fixture",
         type: "setup",
-        actions: [{ action: "fs_copy", from: "a.prefab", to: "{fixtureRoot}/a.prefab" }],
+        actions: [{ action: "fs_copy", from: "a.tscn", to: "{fixtureRoot}/a.tscn" }],
       },
       { id: "done", type: "mark_done" },
     ],
@@ -194,7 +194,7 @@ test("parseScenario accepts all five action verbs", () => {
           { action: "fs_copy", from: "a", to: "b" },
           { action: "fs_patch", path: "b", patches: [{ op: "trim_trailing_whitespace" }] },
           { action: "fs_delete", paths: ["b"] },
-          { action: "mcp_tool", tool: "unity_open_mcp_ping" },
+          { action: "mcp_tool", tool: "godot_open_mcp_ping" },
           { action: "manual", note: "do it" },
         ],
       },
@@ -241,7 +241,7 @@ test("loadScenarios orders by milestone then order then id", () => {
       id,
       title: id,
       milestone,
-      engineId: "unity",
+      engineId: "godot",
       order,
       requirementLevel: "optional" as const,
       steps: [{ id: "info", type: "info" as const }],
@@ -260,40 +260,40 @@ test("loadScenarios orders by milestone then order then id", () => {
 
 // ── parseProfile ──────────────────────────────────────────────────────────────
 
-function unityProfile(): unknown {
+function godotProfile(): unknown {
   return {
-    id: "unity",
-    displayName: "Unity Open MCP",
-    mcpCliBinary: "unity-open-mcp",
+    id: "godot",
+    displayName: "Godot Open MCP",
+    mcpCliBinary: "godot-open-mcp",
     paths: {
-      fixtureRoot: "Assets/_ValidationSuite/<test-id>/",
-      stateRoot: "UserSettings/ValidationSuite/",
-      stateFile: "UserSettings/ValidationSuite/.state.json",
-      actualsDir: "UserSettings/ValidationSuite/actuals/",
-      exportsDir: "UserSettings/ValidationSuite/exports/",
+      fixtureRoot: "_ValidationSuite/<test-id>/",
+      stateRoot: ".godot-open-mcp/ValidationSuite/",
+      stateFile: ".godot-open-mcp/ValidationSuite/.state.json",
+      actualsDir: ".godot-open-mcp/ValidationSuite/actuals/",
+      exportsDir: ".godot-open-mcp/ValidationSuite/exports/",
     },
     markers: { dirs: ["Assets", "ProjectSettings"], files: ["ProjectSettings/ProjectVersion.txt"] },
-    companions: [{ primary: "*.prefab", companion: "*.prefab.meta" }],
+    companions: [{ primary: "*.tscn", companion: "*.tscn.uid" }],
     placeholders: ["{fixtureRoot}", "{projectRoot}"],
-    toolNamePrefix: "unity_open_mcp_",
+    toolNamePrefix: "godot_open_mcp_",
   };
 }
 
-test("parseProfile accepts the unity profile", () => {
-  const p = parseProfile(unityProfile());
-  assert.equal(p.id, "unity");
-  assert.equal(p.paths.fixtureRoot, "Assets/_ValidationSuite/<test-id>/");
+test("parseProfile accepts the godot profile", () => {
+  const p = parseProfile(godotProfile());
+  assert.equal(p.id, "godot");
+  assert.equal(p.paths.fixtureRoot, "_ValidationSuite/<test-id>/");
   assert.equal(p.companions.length, 1);
 });
 
 test("parseProfile throws on missing paths block", () => {
-  const raw = unityProfile() as Record<string, unknown>;
+  const raw = godotProfile() as Record<string, unknown>;
   delete raw.paths;
   assert.throws(() => parseProfile(raw), /paths/);
 });
 
 test("parseProfile throws on bad companion entry", () => {
-  const raw = unityProfile() as Record<string, unknown>;
+  const raw = godotProfile() as Record<string, unknown>;
   (raw as { companions: unknown[] }).companions = [{ primary: "x" }];
   assert.throws(() => parseProfile(raw), /companions/);
 });

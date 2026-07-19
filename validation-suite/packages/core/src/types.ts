@@ -154,7 +154,7 @@ export interface Scenario {
   title: string;
   /** Milestone key for grouping, e.g. `m9`. */
   milestone: string;
-  /** Profile key this scenario targets, e.g. `unity`. */
+  /** Profile key this scenario targets, e.g. `godot`. */
   engineId: string;
   /** Sort order within the milestone. */
   order: number;
@@ -194,7 +194,7 @@ export interface ManifestEntry {
   kind: ManifestEntryKind;
   /** Project-relative path (forward-slash) of the primary artifact. */
   path: string;
-  /** True when a companion (e.g. `.meta`) was also touched. */
+  /** True when a companion (e.g. `.uid`) was also touched. */
   companionPath?: string;
   /** Pre-patch file contents (utf-8) for `modified` entries; else absent. */
   snapshot?: string;
@@ -204,7 +204,7 @@ export interface ManifestEntry {
  * A per-step manifest: the ordered list of artifacts a step's setup
  * actions produced. Reverse-order reset walks this list from the back so
  * later operations unwind before earlier ones (phase-2 task 6). The
- * backend persists manifests as blobs in `UserSettings/ValidationSuite/`;
+ * backend persists manifests as blobs in `.godot-open-mcp/ValidationSuite/`;
  * the state file only keeps the blob id reference per step.
  */
 export interface StepManifest {
@@ -348,11 +348,11 @@ export interface ProfilePaths {
   exportsDir: string;
 }
 
-/** Companion-artifact rule (unity.md → Companion artifacts), e.g. `.meta`. */
+/** Companion-artifact rule (e.g. a `.tscn` scene and its `.tscn.uid` sidecar). */
 export interface CompanionRule {
-  /** Glob-like primary extension, e.g. `*.prefab`. */
+  /** Glob-like primary extension, e.g. `*.tscn`. */
   primary: string;
-  /** Companion extension, e.g. `*.prefab.meta`. */
+  /** Companion extension, e.g. `*.tscn.uid`. */
   companion: string;
 }
 
@@ -368,7 +368,7 @@ export interface ProjectMarkers {
 export type PlaceholderToken = "{fixtureRoot}" | "{projectRoot}";
 
 /**
- * An engine profile (unity.md). v1 ships `unity`; the core is shaped to
+ * An engine profile (unity.md). v1 ships `godot`; the core is shaped to
  * be *extractable* for a second engine, but no abstraction is built
  * ahead of time (idea.md → Multi-engine reuse strategy).
  */

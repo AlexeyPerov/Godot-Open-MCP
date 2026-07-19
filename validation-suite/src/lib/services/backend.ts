@@ -98,7 +98,7 @@ export interface StepManifest {
 
 // ── Command wrappers ─────────────────────────────────────────────────────────
 
-/** The bundled active engine profile (v1: always `unity`). */
+/** The bundled active engine profile (v1: always `godot`). */
 export function getEngineProfile(): Promise<BackendProfile> {
   return invoke<BackendProfile>("get_engine_profile");
 }
@@ -215,7 +215,7 @@ export function deleteStepManifest(id: string): Promise<void> {
 
 /**
  * Write a run-summary export markdown body to the project's `exportsDir`
- * (`UserSettings/ValidationSuite/exports/`). Returns the project-relative
+ * (`.godot-open-mcp/ValidationSuite/exports/`). Returns the project-relative
  * path the file landed at. `stem` is a short label (e.g. `m9`);
  * `generatedAt` is the ISO-8601 timestamp already baked into the body.
  */

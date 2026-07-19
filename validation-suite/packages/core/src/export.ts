@@ -10,7 +10,7 @@
  * Pure functions: the caller supplies all inputs (scenarios, state,
  * project path, profile id, and an optional `generatedAt` timestamp for
  * deterministic tests). The UI wires this to a clipboard copy + optional
- * file write under `UserSettings/ValidationSuite/exports/`.
+ * file write under `.godot-open-mcp/ValidationSuite/exports/`.
  */
 
 import type {
@@ -28,7 +28,7 @@ export interface ExportInput {
   state: SuiteState | null;
   /** Absolute selected project root, for the "Project" line. */
   projectPath: string | null;
-  /** Active engine profile id, e.g. `unity`. */
+  /** Active engine profile id, e.g. `godot`. */
   engineProfileId: string | null;
   /**
    * ISO-8601 timestamp for the "Generated" line. Defaults to now; tests

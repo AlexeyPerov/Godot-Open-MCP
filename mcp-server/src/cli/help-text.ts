@@ -5,8 +5,13 @@
 // plus `--help` / `--version`. When invoked with no recognized command,
 // the same `bin` falls through to the stdio MCP server (MCP client mode).
 
+import { PORT_OVERRIDE_ENV_VAR } from "../instance-discovery.js";
+
 export const PROJECT_PATH_ENV_VAR = "GODOT_PROJECT_PATH";
-export const PORT_ENV_VAR = "GODOT_OPEN_MCP_BRIDGE_PORT";
+// Single source of truth: the bridge port override name lives in
+// instance-discovery.ts (mirrored by the bridge). Re-exported here so the CLI
+// help + arg layer reference one canonical constant, never a duplicate literal.
+export const PORT_ENV_VAR = PORT_OVERRIDE_ENV_VAR;
 
 export function helpText(binName: string): string {
   return [

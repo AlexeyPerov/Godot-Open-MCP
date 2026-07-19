@@ -146,9 +146,13 @@ export async function runRunToolCommand(
   opts: RunToolCommandOptions,
 ): Promise<CliCommandResult> {
   if (!TOOL_BY_NAME.has(opts.toolName)) {
+    // `isError: true` keeps the envelope uniform with the tool-error branch so
+    // the Validation Suite's Rust runner (which keys off `isError` and defaults
+    // it to false) never reports an unknown tool as a successful action.
     const json = {
       command: "run-tool",
       tool: opts.toolName,
+      isError: true,
       error: {
         code: "unknown_tool",
         message: `Unknown tool '${opts.toolName}'.`,

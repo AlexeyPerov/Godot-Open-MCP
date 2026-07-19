@@ -41,7 +41,7 @@ import { expandValue } from "./placeholders.ts";
 export interface ActionContext {
   /** Absolute selected project root. */
   projectRoot: string;
-  /** Absolute fixture root for the active test (`<project>/Assets/_ValidationSuite/<id>/`). */
+  /** Absolute fixture root for the active test (`<project>/_ValidationSuite/<id>/`). */
   fixtureRoot: string;
   /** The active engine profile (companions, CLI binary, tool prefix). */
   profile: EngineProfile;
@@ -89,7 +89,7 @@ export interface McpToolArgs {
  * converts to a failed {@link ActionResult}.
  */
 export interface ActionBackend {
-  /** Copy a file or directory tree, tracking companions (e.g. `.meta`). */
+  /** Copy a file or directory tree, tracking companions (e.g. `.uid`). */
   fsCopy(args: FsCopyArgs, ctx: ActionContext): Promise<ActionResult>;
   /** Apply deterministic patches; snapshots the pre-patch file. */
   fsPatch(args: FsPatchArgs, ctx: ActionContext): Promise<ActionResult>;

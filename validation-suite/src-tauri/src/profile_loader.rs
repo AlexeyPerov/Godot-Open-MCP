@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use crate::paths;
 use crate::schemas::EngineProfile;
 
-/// Load a profile by id (e.g. `"unity"`). Returns an error string on a
+/// Load a profile by id (e.g. `"godot"`). Returns an error string on a
 /// missing or malformed file so the Tauri command can forward it to
 /// the UI as a readable message.
 pub fn load_profile(

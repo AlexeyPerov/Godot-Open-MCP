@@ -442,121 +442,121 @@ mod tests {
     #[test]
     fn fs_copy_file_records_created_entry() {
         let root = mkroot();
-        write(&root, "Assets/Src.prefab", "data");
-        let res = fs_copy(&root, "Assets/Src.prefab", "Assets/_VS/Dst.prefab", &[rule(".prefab", ".prefab.meta")]).unwrap();
+        write(&root, "Src.tscn", "data");
+        let res = fs_copy(&root, "Src.tscn", "_VS/Dst.tscn", &[rule(".tscn", ".tscn.uid")]).unwrap();
         assert!(res.ok);
         assert_eq!(res.entries.len(), 1);
         assert_eq!(res.entries[0].kind, ManifestEntryKind::Created);
-        assert!(root.join("Assets/_VS/Dst.prefab").is_file());
+        assert!(root.join("_VS/Dst.tscn").is_file());
     }
 
     #[test]
     fn fs_copy_tracks_companion_when_source_exists() {
         let root = mkroot();
-        write(&root, "Assets/Src.prefab", "data");
-        write(&root, "Assets/Src.prefab.meta", "guid");
-        let res = fs_copy(&root, "Assets/Src.prefab", "Assets/_VS/Dst.prefab", &[rule(".prefab", ".prefab.meta")]).unwrap();
-        assert_eq!(res.entries[0].companion_path.as_deref(), Some("Assets/_VS/Dst.prefab.meta"));
-        assert!(root.join("Assets/_VS/Dst.prefab.meta").is_file());
+        write(&root, "Src.tscn", "data");
+        write(&root, "Src.tscn.uid", "guid");
+        let res = fs_copy(&root, "Src.tscn", "_VS/Dst.tscn", &[rule(".tscn", ".tscn.uid")]).unwrap();
+        assert_eq!(res.entries[0].companion_path.as_deref(), Some("_VS/Dst.tscn.uid"));
+        assert!(root.join("_VS/Dst.tscn.uid").is_file());
     }
 
     #[test]
     fn fs_copy_skips_companion_when_source_absent() {
         let root = mkroot();
-        write(&root, "Assets/Src.prefab", "data");
-        let res = fs_copy(&root, "Assets/Src.prefab", "Assets/_VS/Dst.prefab", &[rule(".prefab", ".prefab.meta")]).unwrap();
+        write(&root, "Src.tscn", "data");
+        let res = fs_copy(&root, "Src.tscn", "_VS/Dst.tscn", &[rule(".tscn", ".tscn.uid")]).unwrap();
         assert!(res.entries[0].companion_path.is_none());
-        assert!(!root.join("Assets/_VS/Dst.prefab.meta").exists());
+        assert!(!root.join("_VS/Dst.tscn.uid").exists());
     }
 
     #[test]
     fn fs_copy_rejects_traversal_outside_root() {
         let root = mkroot();
-        write(&root, "Assets/Src.prefab", "data");
-        let err = fs_copy(&root, "Assets/Src.prefab", "../../outside.prefab", &[rule(".prefab", ".prefab.meta")]).unwrap_err();
+        write(&root, "Src.tscn", "data");
+        let err = fs_copy(&root, "Src.tscn", "../../outside.tscn", &[rule(".tscn", ".tscn.uid")]).unwrap_err();
         assert!(err.contains("outside the project root"));
     }
 
     #[test]
     fn fs_copy_directory_tree() {
         let root = mkroot();
-        write(&root, "Assets/Src/a.prefab", "a");
-        write(&root, "Assets/Src/b.prefab", "b");
-        let res = fs_copy(&root, "Assets/Src", "Assets/_VS/Dst", &[]).unwrap();
+        write(&root, "Src/a.tscn", "a");
+        write(&root, "Src/b.tscn", "b");
+        let res = fs_copy(&root, "Src", "_VS/Dst", &[]).unwrap();
         assert!(res.ok);
-        assert!(root.join("Assets/_VS/Dst/a.prefab").is_file());
-        assert!(root.join("Assets/_VS/Dst/b.prefab").is_file());
+        assert!(root.join("_VS/Dst/a.tscn").is_file());
+        assert!(root.join("_VS/Dst/b.tscn").is_file());
     }
 
     #[test]
     fn fs_patch_snapshots_and_applies_replace() {
         let root = mkroot();
-        write(&root, "Assets/_VS/x.prefab", "  m_Name: Player\n  m_Script: 1\n");
-        let patches = vec![json!({ "op": "replace_line_contains", "match": "m_Name:", "replace": "  m_Name: PlayerPatched" })];
-        let res = fs_patch(&root, "Assets/_VS/x.prefab", &patches, None).unwrap();
+        write(&root, "_VS/x.tscn", "[node name=\"Player\"]\nscript = 1\n");
+        let patches = vec![json!({ "op": "replace_line_contains", "match": "name=", "replace": "[node name=\"PlayerPatched\"]" })];
+        let res = fs_patch(&root, "_VS/x.tscn", &patches, None).unwrap();
         assert!(res.ok);
         assert_eq!(res.entries[0].kind, ManifestEntryKind::Modified);
-        assert_eq!(res.entries[0].snapshot.as_deref(), Some("  m_Name: Player\n  m_Script: 1\n"));
-        assert_eq!(fs::read_to_string(root.join("Assets/_VS/x.prefab")).unwrap(), "  m_Name: PlayerPatched\n  m_Script: 1\n");
+        assert_eq!(res.entries[0].snapshot.as_deref(), Some("[node name=\"Player\"]\nscript = 1\n"));
+        assert_eq!(fs::read_to_string(root.join("_VS/x.tscn")).unwrap(), "[node name=\"PlayerPatched\"]\nscript = 1\n");
     }
 
     #[test]
     fn fs_patch_insert_after_and_before() {
         let root = mkroot();
-        write(&root, "Assets/_VS/x.prefab", "%YAML 1.1\n---\n");
+        write(&root, "_VS/x.tscn", "%YAML 1.1\n---\n");
         let after = vec![json!({ "op": "insert_after_line_contains", "match": "%YAML", "insert": "# after" })];
-        fs_patch(&root, "Assets/_VS/x.prefab", &after, None).unwrap();
-        assert_eq!(fs::read_to_string(root.join("Assets/_VS/x.prefab")).unwrap(), "%YAML 1.1\n# after\n---\n");
+        fs_patch(&root, "_VS/x.tscn", &after, None).unwrap();
+        assert_eq!(fs::read_to_string(root.join("_VS/x.tscn")).unwrap(), "%YAML 1.1\n# after\n---\n");
 
-        write(&root, "Assets/_VS/x.prefab", "%YAML 1.1\n---\n");
+        write(&root, "_VS/x.tscn", "%YAML 1.1\n---\n");
         let before = vec![json!({ "op": "insert_before_line_contains", "match": "---", "insert": "# before" })];
-        fs_patch(&root, "Assets/_VS/x.prefab", &before, None).unwrap();
-        assert_eq!(fs::read_to_string(root.join("Assets/_VS/x.prefab")).unwrap(), "%YAML 1.1\n# before\n---\n");
+        fs_patch(&root, "_VS/x.tscn", &before, None).unwrap();
+        assert_eq!(fs::read_to_string(root.join("_VS/x.tscn")).unwrap(), "%YAML 1.1\n# before\n---\n");
     }
 
     #[test]
     fn fs_patch_trim_trailing_whitespace() {
         let root = mkroot();
-        write(&root, "Assets/_VS/x.prefab", "a   \nb\t\n");
+        write(&root, "_VS/x.tscn", "a   \nb\t\n");
         let patches = vec![json!({ "op": "trim_trailing_whitespace" })];
-        fs_patch(&root, "Assets/_VS/x.prefab", &patches, None).unwrap();
-        assert_eq!(fs::read_to_string(root.join("Assets/_VS/x.prefab")).unwrap(), "a\nb\n");
+        fs_patch(&root, "_VS/x.tscn", &patches, None).unwrap();
+        assert_eq!(fs::read_to_string(root.join("_VS/x.tscn")).unwrap(), "a\nb\n");
     }
 
     #[test]
     fn fs_patch_restore_overwrites_from_snapshot() {
         let root = mkroot();
-        write(&root, "Assets/_VS/x.prefab", "patched\n");
-        fs_patch(&root, "Assets/_VS/x.prefab", &[], Some("original\n")).unwrap();
-        assert_eq!(fs::read_to_string(root.join("Assets/_VS/x.prefab")).unwrap(), "original\n");
+        write(&root, "_VS/x.tscn", "patched\n");
+        fs_patch(&root, "_VS/x.tscn", &[], Some("original\n")).unwrap();
+        assert_eq!(fs::read_to_string(root.join("_VS/x.tscn")).unwrap(), "original\n");
     }
 
     #[test]
     fn fs_patch_missing_match_is_a_clean_error() {
         let root = mkroot();
-        write(&root, "Assets/_VS/x.prefab", "a\n");
+        write(&root, "_VS/x.tscn", "a\n");
         let patches = vec![json!({ "op": "replace_line_contains", "match": "zzz", "replace": "b" })];
-        let err = fs_patch(&root, "Assets/_VS/x.prefab", &patches, None).unwrap_err();
+        let err = fs_patch(&root, "_VS/x.tscn", &patches, None).unwrap_err();
         assert!(err.contains("no line matched"));
         // File untouched on failure.
-        assert_eq!(fs::read_to_string(root.join("Assets/_VS/x.prefab")).unwrap(), "a\n");
+        assert_eq!(fs::read_to_string(root.join("_VS/x.tscn")).unwrap(), "a\n");
     }
 
     #[test]
     fn fs_delete_removes_files_and_dirs() {
         let root = mkroot();
-        write(&root, "Assets/_VS/a.prefab", "a");
-        write(&root, "Assets/_VS/sub/b.prefab", "b");
-        let res = fs_delete(&root, &["Assets/_VS/a.prefab".into(), "Assets/_VS/sub".into()]).unwrap();
+        write(&root, "_VS/a.tscn", "a");
+        write(&root, "_VS/sub/b.tscn", "b");
+        let res = fs_delete(&root, &["_VS/a.tscn".into(), "_VS/sub".into()]).unwrap();
         assert!(res.ok);
-        assert!(!root.join("Assets/_VS/a.prefab").exists());
-        assert!(!root.join("Assets/_VS/sub").exists());
+        assert!(!root.join("_VS/a.tscn").exists());
+        assert!(!root.join("_VS/sub").exists());
     }
 
     #[test]
     fn fs_delete_tolerates_missing_paths() {
         let root = mkroot();
-        let res = fs_delete(&root, &["Assets/_VS/missing.prefab".into()]).unwrap();
+        let res = fs_delete(&root, &["_VS/missing.tscn".into()]).unwrap();
         assert!(res.ok);
     }
 
@@ -574,35 +574,35 @@ mod tests {
         assert_eq!(out, "head\nx\ny\n");
     }
 
-    /// End-to-end phase-2 flow: copy a prefab + `.meta`, patch the copy,
+    /// End-to-end flow: copy a scene + `.uid` companion, patch the copy,
     /// record a manifest, then reset restores the patched file and deletes
-    /// the created artifacts. Mirrors the sample-happy-path scenario.
+    /// the created artifacts. Mirrors the sample happy-path scenario.
     #[test]
     fn copy_patch_reset_roundtrip_restores_and_cleans_up() {
         use crate::manifest_store;
         use crate::schemas::StepManifest;
 
         let root = mkroot();
-        let companions = vec![rule(".prefab", ".prefab.meta")];
-        let state_root = "UserSettings/ValidationSuite/";
+        let companions = vec![rule(".tscn", ".tscn.uid")];
+        let state_root = ".godot-open-mcp/ValidationSuite/";
 
         // 1. fs_copy fixture prefab + companion into the fixture root.
-        write(&root, "Assets/Prefabs/Player.prefab", "  m_Name: Player\n  m_Script: 1\n");
-        write(&root, "Assets/Prefabs/Player.prefab.meta", "guid: abc\n");
+        write(&root, "Prefabs/Player.tscn", "[node name=\"Player\"]\nscript = 1\n");
+        write(&root, "Prefabs/Player.tscn.uid", "guid: abc\n");
         let copy = fs_copy(
             &root,
-            "Assets/Prefabs/Player.prefab",
-            "Assets/_ValidationSuite/sample/Player.prefab",
+            "Prefabs/Player.tscn",
+            "_ValidationSuite/sample/Player.tscn",
             &companions,
         )
         .unwrap();
         assert!(copy.ok);
         // 2. fs_patch the copy.
-        let patches = vec![json!({ "op": "replace_line_contains", "match": "m_Name:", "replace": "  m_Name: PlayerPatched" })];
-        let patch = fs_patch(&root, "Assets/_ValidationSuite/sample/Player.prefab", &patches, None).unwrap();
+        let patches = vec![json!({ "op": "replace_line_contains", "match": "name=", "replace": "[node name=\"PlayerPatched\"]" })];
+        let patch = fs_patch(&root, "_ValidationSuite/sample/Player.tscn", &patches, None).unwrap();
         assert_eq!(
-            fs::read_to_string(root.join("Assets/_ValidationSuite/sample/Player.prefab")).unwrap(),
-            "  m_Name: PlayerPatched\n  m_Script: 1\n",
+            fs::read_to_string(root.join("_ValidationSuite/sample/Player.tscn")).unwrap(),
+            "[node name=\"PlayerPatched\"]\nscript = 1\n",
         );
         // 3. Record a combined manifest (created copy + modified patch).
         let mut entries = copy.entries.clone();
@@ -633,7 +633,7 @@ mod tests {
                     // original content (before the created-delete runs).
                     assert_eq!(
                         fs::read_to_string(root.join(&entry.path)).unwrap(),
-                        "  m_Name: Player\n  m_Script: 1\n",
+                        "[node name=\"Player\"]\nscript = 1\n",
                     );
                     snapshot_restored = true;
                 }
@@ -653,8 +653,8 @@ mod tests {
 
         // Snapshot restore ran; the created copy + companion are gone.
         assert!(snapshot_restored, "modified entry was reverted from its snapshot");
-        assert!(!root.join("Assets/_ValidationSuite/sample/Player.prefab").exists());
-        assert!(!root.join("Assets/_ValidationSuite/sample/Player.prefab.meta").exists());
+        assert!(!root.join("_ValidationSuite/sample/Player.tscn").exists());
+        assert!(!root.join("_ValidationSuite/sample/Player.tscn.uid").exists());
         assert!(manifest_store::load(&root, state_root, &id).unwrap().is_none());
     }
 }

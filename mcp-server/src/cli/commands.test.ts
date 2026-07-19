@@ -34,8 +34,16 @@ test("unknown tool returns a structured error with exit code 2", async () => {
     toolArgs: {},
   });
   assert.equal(res.exitCode, 2);
-  const json = res.json as { command: string; tool: string; error?: { code: string } };
+  const json = res.json as {
+    command: string;
+    tool: string;
+    isError?: boolean;
+    error?: { code: string };
+  };
   assert.equal(json.command, "run-tool");
+  // Uniform envelope: unknown tool is flagged isError so the Rust runner (and
+  // the suite's action log) never treat it as a successful action.
+  assert.equal(json.isError, true);
   assert.equal(json.error?.code, "unknown_tool");
 });
 
@@ -69,6 +77,34 @@ test("tool error surfaces isError:true and exit code 1", async () => {
   assert.equal(res.exitCode, 1);
   const json = res.json as { isError: boolean };
   assert.equal(json.isError, true);
+});
+
+test("result body falls back to the whole result for non-text content", async () => {
+  const raw: CallToolResult = {
+    content: [{ type: "image", data: "abc", mimeType: "image/png" }],
+    isError: false,
+  };
+  const stack = fakeStack(async () => raw);
+  const res = await runRunToolCommand(stack, {
+    toolName: "godot_open_mcp_ping",
+    toolArgs: {},
+  });
+  const json = res.json as { result: unknown };
+  // Non-text first content → extractResultBody returns the entire result.
+  assert.deepEqual(json.result, raw);
+});
+
+test("result body is the raw string when text content is not JSON", async () => {
+  const stack = fakeStack(async () => ({
+    content: [{ type: "text", text: "not json at all" }],
+    isError: false,
+  }));
+  const res = await runRunToolCommand(stack, {
+    toolName: "godot_open_mcp_ping",
+    toolArgs: {},
+  });
+  const json = res.json as { result: unknown };
+  assert.equal(json.result, "not json at all");
 });
 
 test("resolveEnv throws ResolveEnvError when no project path is set", () => {

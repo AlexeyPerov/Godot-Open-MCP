@@ -110,7 +110,7 @@ pub struct ManifestEntry {
 }
 
 /// A per-step manifest blob: the ordered list of artifacts a step's
-/// setup actions produced. Persisted under `UserSettings/ValidationSuite/`
+/// setup actions produced. Persisted under `.godot-open-mcp/ValidationSuite/`
 /// and referenced from `.state.json` by blob id.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

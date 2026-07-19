@@ -11,23 +11,23 @@ import type { ManifestRef, Scenario, StepManifest } from "./types.ts";
 
 const CTX: ActionContext = {
   projectRoot: "/proj",
-  fixtureRoot: "/proj/Assets/_ValidationSuite/m9-x",
+  fixtureRoot: "/proj/_ValidationSuite/m9-x",
   // Minimal profile: only companions/toolPrefix matter for the runner.
   profile: {
-    id: "unity",
-    displayName: "Unity",
-    mcpCliBinary: "unity-open-mcp",
+    id: "godot",
+    displayName: "Godot",
+    mcpCliBinary: "godot-open-mcp",
     paths: {
-      fixtureRoot: "Assets/_ValidationSuite/<test-id>/",
-      stateRoot: "UserSettings/ValidationSuite/",
-      stateFile: "UserSettings/ValidationSuite/.state.json",
-      actualsDir: "UserSettings/ValidationSuite/actuals/",
-      exportsDir: "UserSettings/ValidationSuite/exports/",
+      fixtureRoot: "_ValidationSuite/<test-id>/",
+      stateRoot: ".godot-open-mcp/ValidationSuite/",
+      stateFile: ".godot-open-mcp/ValidationSuite/.state.json",
+      actualsDir: ".godot-open-mcp/ValidationSuite/actuals/",
+      exportsDir: ".godot-open-mcp/ValidationSuite/exports/",
     },
     markers: { dirs: ["Assets"], files: [] },
-    companions: [{ primary: "*.prefab", companion: "*.prefab.meta" }],
+    companions: [{ primary: "*.tscn", companion: "*.tscn.uid" }],
     placeholders: ["{fixtureRoot}", "{projectRoot}"],
-    toolNamePrefix: "unity_open_mcp_",
+    toolNamePrefix: "godot_open_mcp_",
   },
 };
 
@@ -100,7 +100,7 @@ function scenario(steps: Scenario["steps"], reset?: Scenario["reset"]): Scenario
     id: "m9-x",
     title: "T",
     milestone: "m9",
-    engineId: "unity",
+    engineId: "godot",
     order: 0,
     requirementLevel: "required-core",
     steps,
@@ -117,13 +117,13 @@ test("runStep expands placeholders and records a manifest id", async () => {
       id: "setup",
       type: "setup",
       actions: [
-        { action: "fs_copy", from: "Assets/P.prefab", to: "{fixtureRoot}/P.prefab" },
+        { action: "fs_copy", from: "P.tscn", to: "{fixtureRoot}/P.tscn" },
       ],
     },
   ]);
   const res = await runStep(scn, scn.steps[0], CTX, backend);
   assert.equal(res.ok, true);
-  assert.equal(backend.calls[0], `fsCopy Assets/P.prefab→${CTX.fixtureRoot}/P.prefab`);
+  assert.equal(backend.calls[0], `fsCopy P.tscn→${CTX.fixtureRoot}/P.tscn`);
   assert.equal(res.manifestId, "m1");
   assert.equal(backend.manifests.get("m1")!.entries.length, 1);
 });
@@ -177,7 +177,7 @@ test("resetStep restores created artifacts then runs declared reset actions", as
       {
         id: "setup",
         type: "setup",
-        actions: [{ action: "fs_copy", from: "a", to: "{fixtureRoot}/P.prefab" }],
+        actions: [{ action: "fs_copy", from: "a", to: "{fixtureRoot}/P.tscn" }],
       },
     ],
     {
@@ -191,7 +191,7 @@ test("resetStep restores created artifacts then runs declared reset actions", as
   // created artifact deleted, declared fs_delete ran, manifest consumed.
   assert.ok(res.warnings.length === 0, JSON.stringify(res.warnings));
   // The manifest entry holds the expanded (absolute) dest path.
-  assert.ok(backend.calls.includes(`fsDelete ${CTX.fixtureRoot}/P.prefab`));
+  assert.ok(backend.calls.includes(`fsDelete ${CTX.fixtureRoot}/P.tscn`));
   assert.ok(backend.calls.includes(`fsDelete ${CTX.fixtureRoot}`));
   assert.ok(backend.calls.includes("deleteManifest(m1)"));
 });
@@ -202,7 +202,7 @@ test("resetStep restores a modified file from its snapshot", async () => {
     {
       id: "setup",
       type: "setup",
-      actions: [{ action: "fs_patch", path: "{fixtureRoot}/P.prefab", patches: [{ op: "trim_trailing_whitespace" }] }],
+      actions: [{ action: "fs_patch", path: "{fixtureRoot}/P.tscn", patches: [{ op: "trim_trailing_whitespace" }] }],
     },
   ]);
   const runRes = await runStep(scn, scn.steps[0], CTX, backend);

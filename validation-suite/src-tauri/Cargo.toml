@@ -1,8 +1,8 @@
 [package]
 name = "validation-suite"
 version = "0.1.0"
-description = "Validation Suite — guided milestone validation runner"
-authors = ["Unity AI Hub"]
+description = "Validation Suite — guided validation runner for Godot Open MCP"
+authors = ["Godot Open MCP"]
 edition = "2021"
 
 [lib]

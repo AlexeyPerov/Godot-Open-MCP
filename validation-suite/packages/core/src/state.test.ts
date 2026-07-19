@@ -20,7 +20,7 @@ const scenario: Scenario = {
   id: "m9-x",
   title: "X",
   milestone: "m9",
-  engineId: "unity",
+  engineId: "godot",
   order: 0,
   requirementLevel: "required-core",
   steps: [
@@ -39,7 +39,7 @@ test("defaultTestState marks all steps awaiting with null manifest refs", () => 
 });
 
 test("setStepStatus completes the test only when every step is done", () => {
-  let state = emptyState("/p", "unity");
+  let state = emptyState("/p", "godot");
   state = ensureTestState(state, scenario);
   state = setStepStatus(state, scenario, "info", "done");
   assert.equal(state.tests[scenario.id].status, "awaiting");
@@ -50,13 +50,13 @@ test("setStepStatus completes the test only when every step is done", () => {
 });
 
 test("setStepStatus flips test to blocked when a step is blocked", () => {
-  let state = emptyState("/p", "unity");
+  let state = emptyState("/p", "godot");
   state = setStepStatus(state, scenario, "info", "blocked");
   assert.equal(state.tests[scenario.id].status, "blocked");
 });
 
 test("resetTestState returns all steps to awaiting and clears completion", () => {
-  let state = emptyState("/p", "unity");
+  let state = emptyState("/p", "godot");
   state = setStepStatus(state, scenario, "info", "done");
   state = setStepStatus(state, scenario, "done", "done");
   assert.equal(state.tests[scenario.id].status, "done");
@@ -67,7 +67,7 @@ test("resetTestState returns all steps to awaiting and clears completion", () =>
 });
 
 test("ensureTestState adds step entries when scenario gains a step", () => {
-  let state = emptyState("/p", "unity");
+  let state = emptyState("/p", "godot");
   state = ensureTestState(state, scenario);
   const grown: Scenario = {
     ...scenario,
@@ -103,7 +103,7 @@ test("checkShape returns malformed when project/tests blocks are absent", () => 
 });
 
 test("checkShape returns compatible for a valid state", () => {
-  const state = emptyState("/p", "unity");
+  const state = emptyState("/p", "godot");
   const res = checkShape(state);
   assert.equal(res.kind, "compatible");
   if (res.kind === "compatible") {
