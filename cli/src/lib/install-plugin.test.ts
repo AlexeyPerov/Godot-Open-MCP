@@ -144,6 +144,94 @@ test("installPlugin: excludes Tests/, obj/, bin/ + dev files from the addon copy
 });
 
 // ---------------------------------------------------------------------------
+// verify bundling (P9.3 packaging audit)
+// ---------------------------------------------------------------------------
+
+test("installPlugin: bundles sibling verify Editor/ source into addons/godot_open_mcp/Verify/", async () => {
+  const dir = scratchDir();
+  try {
+    // Mirror the monorepo layout: <root>/packages/bridge + <root>/packages/verify.
+    const packagesDir = path.join(dir, "packages");
+    const bridgeDir = path.join(packagesDir, "bridge");
+    const verifyDir = path.join(packagesDir, "verify");
+    fs.mkdirSync(path.join(bridgeDir, "Editor"), { recursive: true });
+    fs.writeFileSync(
+      path.join(bridgeDir, "plugin.cfg"),
+      '[plugin]\n\nname="Godot Open MCP"\nscript="Editor/GodotOpenMcpPlugin.cs"\n',
+    );
+    fs.writeFileSync(
+      path.join(bridgeDir, "Editor", "GodotOpenMcpPlugin.cs"),
+      "// stub\n",
+    );
+    // Sibling verify package with an Editor/ subtree (the bridge addon's
+    // `using GodotOpenMcp.Verify.*` resolves against this).
+    fs.mkdirSync(path.join(verifyDir, "Editor", "Core"), { recursive: true });
+    fs.mkdirSync(path.join(verifyDir, "Tests"), { recursive: true });
+    fs.writeFileSync(
+      path.join(verifyDir, "Editor", "Core", "VerifyRunner.cs"),
+      "namespace GodotOpenMcp.Verify.Core { class VerifyRunner {} }\n",
+    );
+    fs.writeFileSync(
+      path.join(verifyDir, "Tests", "Smoke.cs"),
+      "// test stub — must NOT ship into the consumer\n",
+    );
+
+    const project = buildGodotProject(dir, MINIMAL_PROJECT_GODOT);
+    const result = await installPlugin({
+      godotProjectPath: project,
+      source: bridgeDir,
+    });
+    assert.equal(result.kind, "success");
+
+    const addonDir = path.join(project, "addons", "godot_open_mcp");
+    // The verify Core source is bundled at <addon>/Verify/Core/.
+    assert.ok(
+      fs.existsSync(path.join(addonDir, "Verify", "Core", "VerifyRunner.cs")),
+    );
+    // Verify's Tests/ subtree is excluded by the same COPY_EXCLUDE_DIRS rule
+    // that scrubs the bridge's Tests/.
+    assert.ok(!fs.existsSync(path.join(addonDir, "Verify", "Tests")));
+    // No verify-missing warning — the sibling package was found.
+    if (result.kind === "success") {
+      assert.ok(
+        !result.warnings.some((w) => w.includes("verify package")),
+        `expected no verify-missing warning, got: ${result.warnings.join("; ")}`,
+      );
+    }
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("installPlugin: warns when sibling verify package is absent (addon will not compile)", async () => {
+  const dir = scratchDir();
+  try {
+    // Addon source with NO sibling verify package.
+    const source = buildAddonSource(dir, /* withTests */ false);
+    const project = buildGodotProject(dir, MINIMAL_PROJECT_GODOT);
+
+    const result = await installPlugin({
+      godotProjectPath: project,
+      source,
+    });
+    assert.equal(result.kind, "success");
+    if (result.kind !== "success") return;
+    // The install succeeds (bridge addon ships) but a warning flags that the
+    // verify-coupled code paths will not compile until verify is bundled.
+    assert.ok(
+      result.warnings.some((w) => w.includes("verify package")),
+      `expected a verify-missing warning, got: ${result.warnings.join("; ")}`,
+    );
+    // No Verify/ dir was created.
+    assert.ok(
+      !fs.existsSync(path.join(project, "addons", "godot_open_mcp", "Verify")),
+    );
+  } finally {
+    cleanup(dir);
+  }
+});
+
+// ---------------------------------------------------------------------------
 // idempotency
 // ---------------------------------------------------------------------------
 

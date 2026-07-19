@@ -9,6 +9,13 @@
 // success/failure union shape are the parts that carry over. The bridge addon's
 // `Tests/` subtree is excluded so consumer projects never receive test code.
 //
+// P9.3 packaging audit: the bridge editor code references
+// `GodotOpenMcp.Verify.*` namespaces, which the verify package owns
+// (`packages/verify/Editor/**`). The installer therefore bundles the verify
+// package's `Editor/` source into the addon tree at `addons/godot_open_mcp/Verify/`
+// so the consumer's single Godot C# assembly resolves both the bridge and the
+// verify namespaces. One plugin, one assembly, one install step.
+//
 // Library-safe: no stdout noise, no `process.exit`, no throws past the public
 // boundary; returns a `{ kind: "success" | "failure" }` union. Idempotent: a
 // re-run that finds the addon present and the plugin already enabled reports
@@ -36,6 +43,18 @@ import type {
 
 /** Relative path of the addon dir inside a Godot project. */
 const ADDON_REL_DIR = path.join("addons", "godot_open_mcp");
+
+/**
+ * Relative path inside the addon tree where the bundled verify source lives.
+ * The bridge editor code references `GodotOpenMcp.Verify.*` namespaces, and the
+ * verify package owns those namespaces (`packages/verify/Editor/**`). Godot's
+ * `Godot.NET.Sdk` compiles every `.cs` under the project root into one C#
+ * assembly, so bundling verify's `Editor/**` source here lets the bridge's
+ * `using GodotOpenMcp.Verify.*` resolve without a second addon or assembly
+ * reference. This is the "bundled into the bridge addon" layout option from
+ * the P9.3 packaging audit: one plugin, one assembly, one install step.
+ */
+const VERIFY_REL_DIR = path.join("Verify");
 
 /**
  * Directories at the addon root that are never copied into a user project. The
@@ -168,6 +187,16 @@ function materializeAddon(
     throw structuredFailure(resolved.errorLabel, resolved.message);
   }
 
+  // Surface a warning up-front when the sibling verify package cannot be
+  // located — the install still proceeds but the bridge's verify-coupled code
+  // (GatePolicy, VerifyGateAdapter, the MetaTools) will not compile until the
+  // verify source is bundled into the addon tree.
+  if (resolveBundledVerifyEditor(resolved.path) === null) {
+    warnings.push(
+      `Could not locate the sibling verify package (looked for packages/verify/Editor next to ${resolved.path}). The bridge addon references GodotOpenMcp.Verify.* and will not compile until verify source is bundled under addons/godot_open_mcp/Verify/.`,
+    );
+  }
+
   const changed = copyAddonFromLocal(resolved.path, projectPath, addonDir);
   return { source: "local", addonDir, sourceDir: resolved.path, changed };
 }
@@ -234,7 +263,47 @@ function copyAddonFromLocal(
         `Copy completed but ${path.join(sourceDir, "plugin.cfg")} did not yield a plugin.cfg in the staging dir.`,
       );
     }
+    // Bundle the verify package's Editor/ source into the addon tree at
+    // `Verify/`. The bridge editor code (GatePolicy, VerifyGateAdapter, the
+    // MetaTools) references `GodotOpenMcp.Verify.*` namespaces, which the verify
+    // package owns; without this copy the addon does not compile standalone
+    // (confirmed by the P9.3 clean-project build audit).
+    const verifyEditor = resolveBundledVerifyEditor(sourceDir);
+    if (verifyEditor !== null) {
+      copyDirFiltered(verifyEditor, path.join(staging, VERIFY_REL_DIR));
+    }
   });
+}
+
+/**
+ * Resolve the verify package's `Editor/` directory relative to a bridge addon
+ * source. The canonical layout is `<monorepo>/packages/bridge` (the addon
+ * source) sitting next to `<monorepo>/packages/verify` (the verify package), so
+ * the resolver walks up from the source root looking for a sibling
+ * `packages/verify/Editor/` directory. Returns null when no verify source is
+ * found — the install still succeeds (the bridge addon is shipped) but the
+ * bridge's verify-coupled code paths will not compile, which the caller surfaces
+ * via a warning.
+ *
+ * Also handles the nested-source form where `--source` points at a parent of
+ * `addons/godot_open_mcp/` (e.g. the bridge package dir from a checkout), so
+ * `../verify/Editor` resolves the same way.
+ */
+function resolveBundledVerifyEditor(addonSourceDir: string): string | null {
+  const candidates: string[] = [];
+  // 1. `<source>/../verify/Editor` — sibling verify package next to the bridge
+  //    addon source (canonical checkout layout: packages/bridge + packages/verify).
+  candidates.push(path.resolve(addonSourceDir, "..", "verify", "Editor"));
+  // 2. `<source>/../../packages/verify/Editor` — when the source is the nested
+  //    addon root under `addons/godot_open_mcp/` (the install layout), walk one
+  //    more level up to find the sibling packages tree.
+  candidates.push(
+    path.resolve(addonSourceDir, "..", "..", "packages", "verify", "Editor"),
+  );
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return null;
 }
 
 /**

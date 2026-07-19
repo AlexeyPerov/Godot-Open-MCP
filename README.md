@@ -26,12 +26,13 @@ This project ports the architecture of [Unity Open MCP](https://github.com/Alexe
 ## Documentation
 
 - [Architecture](docs/architecture.md) — repository boundaries and runtime flow.
+- [Manual setup](docs/manual-setup.md) — install the editor addon and configure an MCP client by hand.
 - [API index](docs/api.md) — contract documentation map.
 - [MCP tool catalog](docs/api/mcp-tools.md) — every shipped tool, its route policy, visibility group, inputs, results, and errors.
 - [Bridge HTTP contract](docs/api/bridge-http.md) — `/ping`, `/tools/*`, `/events`, envelopes, and errors.
 - [Agent skills](docs/skills.md) — the canonical agent playbook and install-target map.
 - [Porting principles](docs/porting-principles.md) — Unity-first porting protocol for contributors.
-- CLI — `godot-open-mcp-cli` (`cli/`) for install, setup, open, and status. See `cli/AGENTS.md` for the package boundary.
+- CLI — `godot-open-mcp-cli` (`cli/`) for install, setup, open, and status. See [`cli/README.md`](cli/README.md) for the command matrix and `cli/AGENTS.md` for the package boundary.
 
 ## Contributing
 

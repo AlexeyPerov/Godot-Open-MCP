@@ -12,6 +12,7 @@ This file is the index for external interfaces and protocol contracts exposed by
 
 ## Related surfaces
 
+- [Manual setup](manual-setup.md) — install the editor addon and configure an MCP client by hand (the CLI-free path). Required stdio config snippets for Cursor, Claude Desktop, and Claude Code live there.
 - [Agent skills](skills.md) — operational playbook installed into game projects (`skills/godot-open-mcp/SKILL.md`) and the per-client install-target manifest. Indexes the agent-facing guidance that complements the API tables above.
 
 ## Contract boundaries

@@ -9,6 +9,10 @@
 # - tool-docs-parity: drift audit for docs/api/mcp-tools.md against ALL_TOOLS +
 #   route-policy.ts + tool-groups.ts (set / route / group / required / enum /
 #   public-surface hygiene).
+# - manual-setup-parity: drift audit for docs/manual-setup.md against the CLI
+#   agent registry (required Cursor/Claude snippets match the canonical
+#   stdio envelope, absolute GODOT_PROJECT_PATH, no HTTP/token keys, no
+#   internal/forbidden content leaks).
 # - mcp-server: typecheck + unit tests for the stdio MCP server package.
 
 name: ci
@@ -47,6 +51,7 @@ jobs:
             README.md \
             docs/architecture.md \
             docs/api.md \
+            docs/manual-setup.md \
             AGENTS.md; do
             test -e "$path" || { echo "Missing required path: $path"; exit 1; }
           done
@@ -155,3 +160,27 @@ jobs:
         # references leak into the user-visible surface. See
         # scripts/check-tool-docs.mjs for the rule set.
         run: node scripts/check-tool-docs.mjs
+
+  manual-setup-parity:
+    name: Manual setup snippet parity
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Verify docs/manual-setup.md snippets match the registry
+        # No dependencies — pure node:fs. Parses every ```json block in
+        # docs/manual-setup.md and asserts that each stdio server entry matches
+        # the canonical shape the CLI agent registry (cli/src/utils/agents.ts)
+        # produces for that client, that required clients (Cursor, Claude
+        # Desktop, Claude Code) are each represented, that every entry carries
+        # an absolute GODOT_PROJECT_PATH, that no entry carries a url/headers/
+        # token/HTTP type key, that the version pin matches version.json, and
+        # that no internal phase/spec references or forbidden reference-project
+        # names leak into the guide. See scripts/check-manual-setup.mjs.
+        run: node scripts/check-manual-setup.mjs
