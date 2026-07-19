@@ -1,0 +1,39 @@
+[package]
+name = "godot-open-mcp-hub"
+version = "0.0.1"
+description = "Godot Open MCP Hub — guided AI setup + maintainer panel over the godot-open-mcp-cli contracts"
+authors = ["Godot Open MCP"]
+edition = "2021"
+
+[lib]
+# The `_lib` suffix avoids a lib/bin name collision on Windows
+# (https://github.com/rust-lang/cargo/issues/8519).
+name = "godot_open_mcp_hub_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+# preserve_order keeps sibling MCP server keys in their original order when we
+# merge our entry into an existing client config (mirrors the CLI writer).
+serde_json = { version = "1", features = ["preserve_order"] }
+dirs = "6"
+log = "0.4"
+env_logger = "0.11"
+chrono = { version = "0.4", features = ["serde", "clock"], default-features = false }
+sha2 = "0.10"
+uuid = { version = "1", features = ["v4"] }
+
+# PID liveness for the bridge-port lock precedence (mirrors isPidAlive in
+# instance-discovery.ts). Unix-only; other platforms fall back to the
+# deterministic hash (see bridge_port.rs).
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"

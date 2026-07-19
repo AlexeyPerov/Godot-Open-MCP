@@ -1,0 +1,76 @@
+/* Godot Open MCP Hub — global styles + design tokens.
+ *
+ * A small, dark-first token set for a functional desktop tool (same
+ * spirit as the Validation Suite shell). Kept intentionally minimal:
+ * the Hub is a utility app, not a marketing surface. */
+
+:root {
+  --gom-bg: #14171c;
+  --gom-bg-elevated: #1b1f26;
+  --gom-bg-inset: #0f1216;
+  --gom-border: #2a303a;
+  --gom-border-strong: #3a4250;
+  --gom-text: #e6e9ef;
+  --gom-text-dim: #9aa3b2;
+  --gom-text-faint: #6b7280;
+  --gom-accent: #478cbf; /* Godot blue */
+  --gom-accent-hover: #5ba0d4;
+  --gom-ok: #4ec37a;
+  --gom-warn: #e0b13a;
+  --gom-err: #e06a5a;
+  --gom-radius: 8px;
+  --gom-radius-sm: 5px;
+  --gom-mono: ui-monospace, "SF Mono", "Cascadia Code", "Fira Code", monospace;
+  --gom-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--gom-bg);
+  color: var(--gom-text);
+  font-family: var(--gom-font);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  margin: 0 0 0.4em;
+  font-weight: 600;
+}
+
+a {
+  color: var(--gom-accent);
+  text-decoration: none;
+}
+a:hover {
+  color: var(--gom-accent-hover);
+  text-decoration: underline;
+}
+
+code,
+pre {
+  font-family: var(--gom-mono);
+  font-size: 12.5px;
+}
+
+button {
+  font-family: inherit;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--gom-accent) 40%, transparent);
+}

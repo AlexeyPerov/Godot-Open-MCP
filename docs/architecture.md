@@ -7,7 +7,8 @@ Godot Open MCP has four runtime parts:
 - **MCP server** — TypeScript stdio server, tool registry, routing.
 - **CLI** — install, setup-mcp, open, wait-for-ready, ping, status, configure.
 
-A desktop **Hub** app for guided setup is planned but deferred.
+A desktop **Hub** app (`hub/`) provides guided setup as a GUI over the CLI
+contracts — it does not add a new runtime path.
 
 ## Repository map
 
@@ -16,6 +17,7 @@ A desktop **Hub** app for guided setup is planned but deferred.
 - `packages/verify/` — validation rules and fixes used by gate flows (standalone; bridge depends on verify).
 - `cli/` — `godot-open-mcp-cli` command-line tooling.
 - `validation-suite/` — standalone Tauri + SvelteKit app that guides manual validation as repeatable scenario runs (engine-neutral core + a Godot engine profile).
+- `hub/` — desktop Hub app (Tauri + SvelteKit): guided AI setup wizard (install addon, write MCP client config, launch editor, wait-for-ready) and a maintainer npm panel. A GUI over the CLI contracts; its Rust `config` modules mirror the CLI algorithms (and the deterministic bridge-port formula) so the Hub never diverges from the CLI.
 - `skills/` — agent playbooks (`SKILL.md`).
 - `demo/` — Godot C# demo project with fixtures.
 - `scripts/` — version sync and maintenance scripts.

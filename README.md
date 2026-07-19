@@ -92,12 +92,17 @@ For contributors:
 - [Architecture](docs/architecture.md) — repository boundaries and runtime flow.
 - [Porting principles](docs/porting-principles.md) — Unity-first porting protocol.
 - [Demo project](demo/README.md) — Godot C# integration fixture for bridge, verify, CLI, and MCP smoke.
+- [Hub app](hub/README.md) — desktop guided AI setup + maintainer panel (GUI over the CLI contracts).
 
-## Godot Hub Pro
+## Hub app
 
-Godot Hub Pro — a desktop companion for project management and AI setup,
-mirroring [Unity Hub Pro](https://github.com/AlexeyPerov/Unity-Open-MCP) — is
-**planned**. The MCP path does not depend on it.
+The [Hub](hub/README.md) is an optional desktop app (Tauri + SvelteKit) that
+turns the CLI into a clickable path: add a Godot project, then run **AI Setup**
+to install the addon, write your MCP client config, launch the editor, and wait
+for the bridge — no terminal required. It also has a maintainer panel for the
+npm package. It's a GUI over the CLI contracts and never diverges from them; the
+MCP path does not depend on it. Concept mirrors
+[Unity Hub Pro](https://github.com/AlexeyPerov/Unity-Open-MCP).
 
 ## Contributing
 
