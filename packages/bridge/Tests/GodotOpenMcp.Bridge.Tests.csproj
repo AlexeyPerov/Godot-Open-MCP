@@ -222,6 +222,15 @@
          headless Godot smoke / gate integration tests. -->
     <Compile Include="..\Editor\Reflection\ReflectionMethodFindBody.cs" Link="Source\Reflection\ReflectionMethodFindBody.cs" />
     <Compile Include="..\Editor\Reflection\ReflectionMethodCallBody.cs" Link="Source\Reflection\ReflectionMethodCallBody.cs" />
+    <!-- P12.1 — tilemap domain pack. The pure-managed body parsers (TilemapCreateBody /
+         TilemapSetTilesetBody / TilemapSetCellBody / TilemapEraseCellBody / TilemapGetUsedCellsBody /
+         TilemapClearBody, sharing one JsonScalar extractor) and the TilemapCellData DTO are linked for
+         unit testing (same hand-rolled scalar extraction style as the other *Body parsers). The
+         editor-only handler (TilemapTools.Create / SetTileset / SetCell / EraseCell / GetUsedCells /
+         Clear — EditorInterface/TileMapLayer-coupled) is #if TOOLS and verified via the headless Godot
+         smoke / live call path, not here. -->
+    <Compile Include="..\Editor\Tools\Extensions\Tilemap\TilemapCellData.cs" Link="Source\Tilemap\TilemapCellData.cs" />
+    <Compile Include="..\Editor\Tools\Extensions\Tilemap\TilemapBodies.cs" Link="Source\Tilemap\TilemapBodies.cs" />
     <!-- P3.5 — gate on mutators. The gate types (GateMode/GateOutcome/DeltaData/GateDispatchResult/
          GatePolicy/GateDefaultPolicy) and the VerifyGateAdapter are pure-managed for the parts the unit
          tests exercise (decision matrix, next-step hints, delta math, gate-mode parsing). GatePolicy

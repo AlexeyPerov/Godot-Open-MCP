@@ -297,18 +297,29 @@ function parseRoutePolicies() {
 function parseToolGroups() {
   const body = readText(TOOL_GROUPS_PATH);
   const out = new Map();
-  // `assign("<group>", [ "suffix_a", "suffix_b", ... ])`. The group may also
-  // be assigned via `.map((suffix) => \`godot_open_mcp_${suffix}\`)` so the
-  // raw strings are short suffixes.
-  const assignRe = /assign\(\s*"([^"]+)"\s*,\s*(?:\[[\s\S]*?\])\s*(?:\.map\([\s\S]*?\))?\s*\)/g;
-  let m;
-  while ((m = assignRe.exec(body)) !== null) {
-    const group = m[0];
-    const groupId = m[1];
+  // Split on `assign(` call boundaries so backtracking can never cross into the
+  // next block. A single regex over the whole file suffers catastrophic
+  // backtracking across the `.map((suffix) => ...)` arrow when a second assign
+  // call follows (the non-greedy `\)` expands past the assign close) — splitting
+  // first sidesteps that entirely (caught when P12.1 added the tilemap assign
+  // after typed-editor). Only chunks that start (after optional whitespace) with
+  // a quoted group-id literal are real assign calls; this skips `assign(`
+  // mentions in comments/prose. The group may be assigned via full `godot_open_mcp_*`
+  // ids OR via `.map((suffix) => ...)` over short suffixes — both surface as quoted
+  // literals inside the call body.
+  const chunks = body.split(/\bassign\(/).slice(1);
+  for (const chunk of chunks) {
+    if (!/^\s*"/.test(chunk)) continue;
+    const idMatch = chunk.match(/"([^"]+)"/);
+    if (!idMatch) continue;
+    const groupId = idMatch[1];
+    // Take the chunk up to the first `);` that closes the call.
+    const callEnd = chunk.indexOf(");");
+    const callBody = callEnd > 0 ? chunk.slice(0, callEnd) : chunk;
     // Pull every "..." literal inside this assign() call.
     const litRe = /"([a-z0-9_]+)"/g;
     let lm;
-    while ((lm = litRe.exec(group)) !== null) {
+    while ((lm = litRe.exec(callBody)) !== null) {
       const val = lm[1];
       if (val === groupId) continue;
       // If the literal is already a full tool id, register it directly;

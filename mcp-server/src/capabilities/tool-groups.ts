@@ -80,7 +80,8 @@ export const TOOL_GROUPS: ToolGroup[] = [
   {
     id: "tilemap",
     description:
-      "TileMapLayer tools (domain pack). Empty until the pack ships.",
+      "TileMapLayer tools (Godot 4.3+): create a layer, assign a TileSet, " +
+      "set/erase/clear cells, and list used cells.",
     defaultEnabled: false,
   },
   {
@@ -215,6 +216,23 @@ assign(
 
 // Domain stub groups (tilemap / navigation / particles / animation / csg)
 // carry no assign() calls in P8 — they are reserved ids with empty rosters.
+// P12.1 fills the tilemap stub: six TileMapLayer tools. The other four stubs
+// remain empty until their packs ship.
+
+// --- tilemap (P12.1 — Godot 4.3+ TileMapLayer domain pack) ------------------
+// Six tools: create / set_tileset / set_cell / erase_cell / get_used_cells
+// (read-only) / clear. Hidden until activated via manage_tools.
+assign(
+  "tilemap",
+  [
+    "tilemap_create",
+    "tilemap_set_tileset",
+    "tilemap_set_cell",
+    "tilemap_erase_cell",
+    "tilemap_get_used_cells",
+    "tilemap_clear",
+  ].map((suffix) => `godot_open_mcp_${suffix}`),
+);
 
 // ---------------------------------------------------------------------------
 // Read API

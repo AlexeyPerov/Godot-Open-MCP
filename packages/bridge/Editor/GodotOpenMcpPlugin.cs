@@ -158,6 +158,13 @@ namespace GodotOpenMcp.Bridge.Editor
                 // Godot/.NET assemblies. Idempotent re-register refreshes the handler references after a
                 // domain reload.
                 ReflectionTools.RegisterReflectionTools();
+                // P12.1 — tilemap domain pack: six TileMapLayer tools (create / set_tileset /
+                // set_cell / erase_cell / get_used_cells / clear), group tilemap. The first Phase 12
+                // domain pack and the reference implementation for P12.2–P12.5. The five mutators
+                // register defaultGate:"enforce" and validate paths_hint themselves; the read-only
+                // get_used_cells is gate-free. Idempotent re-register refreshes the handler references
+                // after a domain reload.
+                TilemapTools.RegisterTilemapTools();
 
                 // Start the HTTP listener serving /ping and POST /tools/{name}. Stays down
                 // (and connected:false) if the bind fails — the editor remains usable, the

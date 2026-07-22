@@ -1123,15 +1123,27 @@ test("route: manage_tools list_groups returns the catalog with session activatio
   assert.equal(typed!.defaultEnabled, false);
   assert.equal(typed!.activationSource, null);
 
-  // Stub pack surfaces with toolCount 0 (catalog truth; no bridge inventory).
-  const stub = (body.groups as Array<{
+  // P12.1 filled the tilemap stub with six TileMapLayer tools. The other domain
+  // stubs (navigation / particles / animation / csg) still surface toolCount 0.
+  const tilemap = (body.groups as Array<{
     id: string;
     toolCount: number;
     tools: string[];
+    active: boolean;
   }>).find((g) => g.id === "tilemap");
-  assert.ok(stub, "tilemap stub must be in the catalog");
-  assert.equal(stub!.toolCount, 0);
-  assert.deepEqual(stub!.tools, []);
+  assert.ok(tilemap, "tilemap group must be in the catalog");
+  assert.equal(tilemap!.toolCount, 6);
+  assert.equal(tilemap!.tools.length, 6);
+  assert.equal(tilemap!.active, false, "fresh session has tilemap inactive");
+
+  const navStub = (body.groups as Array<{
+    id: string;
+    toolCount: number;
+    tools: string[];
+  }>).find((g) => g.id === "navigation");
+  assert.ok(navStub, "navigation stub must be in the catalog");
+  assert.equal(navStub!.toolCount, 0);
+  assert.deepEqual(navStub!.tools, []);
 
   // Active set snapshot.
   assert.deepEqual(body.activeGroups, ["core"]);

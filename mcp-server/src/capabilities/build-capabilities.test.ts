@@ -194,15 +194,20 @@ test("toolGroups core entry is default-on", () => {
   assert.ok(DEFAULT_ENABLED_GROUPS.has("core"));
 });
 
-test("toolGroups domain stubs appear with empty rosters and available:true", () => {
+test("toolGroups unfilled domain stubs appear with empty rosters and available:true", () => {
+  // P12.1 filled the tilemap stub (six tools — roster correctness is pinned in
+  // tool-groups.test.ts against the real toolsInGroup). navigation / particles /
+  // animation / csg remain empty until their packs ship. This fixture-based
+  // builder buckets only the injected tools, so every domain group surfaces an
+  // empty roster here (the fixture has no domain tools); the catalog entry itself
+  // (defaultEnabled, available) is what's pinned.
   const result = buildCapabilities(DEPS);
   const stubIds = ["tilemap", "navigation", "particles", "animation", "csg"];
   for (const id of stubIds) {
     const g = result.toolGroups.find((entry) => entry.id === id);
-    assert.ok(g, `${id} stub must appear in toolGroups`);
+    assert.ok(g, `${id} group must appear in toolGroups`);
     assert.equal(g!.defaultEnabled, false);
-    assert.deepEqual(g!.tools, [], `${id} roster must be empty in P8`);
-    assert.equal(g!.available, true, `${id} must report available:true in P8`);
+    assert.equal(g!.available, true, `${id} must report available:true`);
   }
 });
 
@@ -295,5 +300,23 @@ test("capabilities route policy matches the override sets for every non-live too
         `${tool.name} is not in any override set and must default to live`,
       );
     }
+  }
+});
+
+test("capabilities built over ALL_TOOLS buckets the tilemap pack into its group roster", () => {
+  // P12.1 filled the tilemap stub. When capabilities is built over the real
+  // registry (not the fixture), the tilemap group must carry its six-tool roster
+  // — this proves the groupFor → buildToolGroups wiring works for the new group.
+  const deps: BuildCapabilitiesDeps = {
+    tools: ALL_TOOLS,
+    rules: RULE_CATALOG,
+    fixes: FIX_CATALOG,
+  };
+  const result = buildCapabilities(deps);
+  const tilemap = result.toolGroups.find((g) => g.id === "tilemap");
+  assert.ok(tilemap, "tilemap group must appear in toolGroups");
+  assert.equal(tilemap!.tools.length, 6, "tilemap must bucket all six pack tools");
+  for (const name of tilemap!.tools) {
+    assert.match(name, /^godot_open_mcp_tilemap_/);
   }
 });

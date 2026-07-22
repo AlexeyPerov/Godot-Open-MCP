@@ -50,6 +50,12 @@ import { screenshotCamera } from "./screenshot-camera.js";
 import { screenshotIsolated } from "./screenshot-isolated.js";
 import { reflectionMethodFind } from "./reflection-method-find.js";
 import { reflectionMethodCall } from "./reflection-method-call.js";
+import { tilemapCreate } from "./tilemap-create.js";
+import { tilemapSetTileset } from "./tilemap-set-tileset.js";
+import { tilemapSetCell } from "./tilemap-set-cell.js";
+import { tilemapEraseCell } from "./tilemap-erase-cell.js";
+import { tilemapGetUsedCells } from "./tilemap-get-used-cells.js";
+import { tilemapClear } from "./tilemap-clear.js";
 import { bridgeStatus } from "./bridge-status.js";
 import { pullEvents } from "./pull-events.js";
 import { readCompileErrors } from "./read-compile-errors.js";
@@ -146,6 +152,18 @@ export const ALL_TOOLS: Tool[] = [
   // node_path — Activator is used only for pure POCOs.
   reflectionMethodFind,
   reflectionMethodCall,
+  // P12.1 — tilemap domain pack: six TileMapLayer tools (group `tilemap`, hidden until activated
+  // via manage_tools). create makes a Godot 4.3+ TileMapLayer node; set_tileset assigns an existing
+  // TileSet resource; set_cell / erase_cell paint/remove single cells via Godot's atlas addressing
+  // quadruple; get_used_cells lists used cells (read-only, bounded); clear empties every cell while
+  // keeping the TileSet. The five mutators default to gate "enforce" and require paths_hint scoped
+  // to the edited scene. First Phase 12 domain pack and the reference implementation for P12.2+.
+  tilemapCreate,
+  tilemapSetTileset,
+  tilemapSetCell,
+  tilemapEraseCell,
+  tilemapGetUsedCells,
+  tilemapClear,
   // P5.3 — bridge_status: operator-oriented health snapshot. Composes the instance-lock classifier
   // (instance-discovery.ts#classifyInstance) with one /ping probe and returns a coarse status token
   // (running | compiling | stopped | unreachable | dead_bridge) + classification + recoveryHint.

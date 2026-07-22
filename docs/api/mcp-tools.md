@@ -70,6 +70,12 @@ The table below is the published view of `ALL_TOOLS`. The `scripts/check-tool-do
 | `godot_open_mcp_screenshot_camera` | screenshot | live | typed-editor | no | n/a | Off-screen render from a `Camera2D`/`Camera3D` in the edited scene (image content block). |
 | `godot_open_mcp_screenshot_isolated` | screenshot | live | typed-editor | no | n/a | Render a `Node3D` alone in an isolated world from one of six directions (image content block). |
 | `godot_open_mcp_screenshot_viewport` | screenshot | live | typed-editor | no | n/a | Capture the active editor 2D/3D viewport (image content block). |
+| `godot_open_mcp_tilemap_clear` | tilemap | live | tilemap | editor state | enforce | Clear every cell on a `TileMapLayer` while keeping its TileSet. |
+| `godot_open_mcp_tilemap_create` | tilemap | live | tilemap | editor state | enforce | Create a Godot 4.3+ `TileMapLayer` node in the edited scene (returns NodeData). |
+| `godot_open_mcp_tilemap_erase_cell` | tilemap | live | tilemap | editor state | enforce | Erase one cell from a `TileMapLayer`. |
+| `godot_open_mcp_tilemap_get_used_cells` | tilemap | live | tilemap | no | n/a | List used cells on a `TileMapLayer` (bounded by `max_results`). |
+| `godot_open_mcp_tilemap_set_cell` | tilemap | live | tilemap | editor state | enforce | Paint one cell via Godot's atlas addressing quadruple (source/atlas/alternative). |
+| `godot_open_mcp_tilemap_set_tileset` | tilemap | live | tilemap | editor state | enforce | Assign an existing `TileSet` resource (`res://`) to a `TileMapLayer`. |
 | `godot_open_mcp_validate_edit` | core | live | core | no | n/a | Run a scoped read-only verify pass over res:// paths and return the health verdict. |
 <!-- /tool-docs:inventory -->
 
@@ -113,7 +119,8 @@ The MCP server filters `ListTools` through a per-session `ToolSessionState` so t
 |---|---|---|
 | `core` | yes | Essential entry points + the gate/verify safety surface (`ping`, `validate_edit`, `checkpoint_create`, `delta`, `apply_fix`). The only group visible in a fresh session. |
 | `typed-editor` | no | The whole typed editor surface: nodes, scenes, resources, filesystem, editor state/selection, console, screenshots, reflection. One activate brings up the full typed surface. |
-| `tilemap` / `navigation` / `particles` / `animation` / `csg` | no | Domain pack stubs. Reserved ids with empty tool rosters — empty until the packs ship. |
+| `tilemap` | no | Godot 4.3+ `TileMapLayer` tools: create a layer, assign a `TileSet`, set/erase/clear cells, list used cells. |
+| `navigation` / `particles` / `animation` / `csg` | no | Domain pack stubs. Reserved ids with empty tool rosters — empty until the packs ship. |
 
 The catalog source of truth is `mcp-server/src/capabilities/tool-groups.ts`. Activate or deactivate groups with `godot_open_mcp_manage_tools`; on a successful change the server emits the MCP `notifications/tools/list_changed` notification so clients that support `listChanged` refresh `ListTools` automatically. Hiding a tool is a prompt-size control, not an authorization boundary — a hidden tool name still routes when called directly.
 
@@ -1551,6 +1558,151 @@ Invoke a C# method via reflection — static or instance — and return a JSON-s
 **Result:** `{ ok, returnValue, durationMs, gate }`. `Godot.Object` instances in the return value are summarized (type + path/id), not walked.
 
 **Errors:** `validation_error` (missing `type_name`/`method_name`), `type_not_found`, `method_not_found`, `ambiguous_match` (multiple overloads, no `arg_type_names`), `invalid_argument` (count/type coercion), `missing_target`, `unsupported_target` (`object_id` without a handle registry), `instantiation_error`, `invoke_failed` (target threw — message includes exception type + message, no large stacks).
+
+## Tilemap tools
+
+Tilemap tools author 2D tile levels on Godot 4.3+ `TileMapLayer` nodes. The deprecated `TileMap` multi-layer node is not supported — use one `TileMapLayer` per layer. Every tool takes a `node_path` (scene-tree path relative to the edited scene root, same vocabulary as `node_find` / `node_create`) that must resolve to a `TileMapLayer`; a different node type returns `wrong_node_type`.
+
+This is a **`tilemap` group** family — hidden from `ListTools` until an agent activates it via `godot_open_mcp_manage_tools({ action: "activate", group: "tilemap" })`. As with every group, hiding is a prompt-size control, not an authorization boundary — a hidden tool name still routes when called directly.
+
+**Cell addressing.** Godot tiles are addressed by an atlas quadruple inside the layer's `TileSet`: `source_id` (which atlas source), `atlas_x` / `atlas_y` (the tile inside the atlas), and `alternative_tile` (an alternative variant). This differs from Unity's `TileBase` asset-path model — there is no `tile_asset_path`. The quadruple defaults to `(0, 0, 0, 0)` so a single-source single-tile `TileSet` can omit every optional field.
+
+### `godot_open_mcp_tilemap_create`
+
+- Route: `live`
+- Visibility group: `tilemap`
+- Read-only/mutating: mutating (editor state; marks the scene unsaved)
+- Live editor requirement: requires the bridge
+
+Create a Godot 4.3+ `TileMapLayer` node in the currently edited scene and return its NodeData (same shape as `node_create`) so an agent can chain `node_path` straight into `tilemap_set_tileset` / `tilemap_set_cell`. The new node's owner is set to the edited scene root so it persists in the `.tscn` on save.
+
+**Input:**
+
+- `name` (optional) — Node name. When omitted, Godot assigns the default (`TileMapLayer`).
+- `parent_node_path` (optional, default edited scene root) — scene-tree path of the parent.
+- `position` (optional) — `'x,y'`. Applied because `TileMapLayer` derives from `Node2D`.
+- `paths_hint` (required) — mutation scope (the edited scene `res://` path). Mandatory even when `gate` is `off`.
+- `gate` (optional, default `enforce`) — `enforce` | `warn` | `off`.
+
+**Result:** a NodeData object (`{ instanceId, name, path, type, scriptResourcePath, childCount, children }`) plus the standard `gate` block. Tagged with the standard gate block when `gate` is not `off`.
+
+**Errors:** `paths_hint_required`, `edited_scene_unavailable`, `parent_not_found`, `create_failed`.
+
+### `godot_open_mcp_tilemap_set_tileset`
+
+- Route: `live`
+- Visibility group: `tilemap`
+- Read-only/mutating: mutating (editor state; marks the scene unsaved)
+- Live editor requirement: requires the bridge
+
+Assign an existing Godot `TileSet` resource to a `TileMapLayer`. No TileSet authoring is bundled — point this at an existing `.tres`/`.res` `TileSet` (use `resource_create` to build one first if needed). After assignment the layer can be painted with `tilemap_set_cell`.
+
+**Input:**
+
+- `node_path` (required) — scene-tree path of the target `TileMapLayer`.
+- `tileset_path` (required) — `res://` (or `uid://`) path to an existing `TileSet` resource. Must exist and be a `TileSet`.
+- `paths_hint` (required) — mutation scope (the edited scene path). Mandatory even when `gate` is `off`.
+- `gate` (optional, default `enforce`) — `enforce` | `warn` | `off`.
+
+**Result:** `{ nodePath, tilesetPath }` plus the standard `gate` block.
+
+**Errors:** `paths_hint_required`, `missing_parameter`, `edited_scene_unavailable`, `node_not_found`, `wrong_node_type`, `resource_not_found`, `resource_load_failed`.
+
+### `godot_open_mcp_tilemap_set_cell`
+
+- Route: `live`
+- Visibility group: `tilemap`
+- Read-only/mutating: mutating (editor state; marks the scene unsaved)
+- Live editor requirement: requires the bridge
+
+Paint one cell on a `TileMapLayer` using Godot's atlas addressing quadruple. The layer must already have a `TileSet` assigned (call `tilemap_set_tileset` first) — Godot's `SetCell` silently no-ops without one, so this tool surfaces that as a structured error. A `source_id` not present in the `TileSet` is also rejected.
+
+**Input:**
+
+- `node_path` (required) — scene-tree path of the target `TileMapLayer`.
+- `x` (required) — map cell x coordinate.
+- `y` (required) — map cell y coordinate.
+- `source_id` (optional, default `0`) — `TileSet` source id. Must be valid in the layer's `TileSet`.
+- `atlas_x` (optional, default `0`) — atlas x coordinate inside the source.
+- `atlas_y` (optional, default `0`) — atlas y coordinate inside the source.
+- `alternative_tile` (optional, default `0`) — alternative tile id inside the source.
+- `paths_hint` (required) — mutation scope (the edited scene path). Mandatory even when `gate` is `off`.
+- `gate` (optional, default `enforce`) — `enforce` | `warn` | `off`.
+
+**Result:** `{ nodePath, x, y, sourceId, atlasX, atlasY, alternativeTile }` echoing the cell written, plus the standard `gate` block.
+
+**Errors:** `paths_hint_required`, `missing_parameter`, `edited_scene_unavailable`, `node_not_found`, `wrong_node_type`, `tileset_required` (no `TileSet` assigned), `invalid_parameter` (`source_id` not present in the `TileSet`).
+
+### `godot_open_mcp_tilemap_erase_cell`
+
+- Route: `live`
+- Visibility group: `tilemap`
+- Read-only/mutating: mutating (editor state; marks the scene unsaved)
+- Live editor requirement: requires the bridge
+
+Erase one cell from a `TileMapLayer`. Erasing an already-empty cell is a no-op success. Only `node_path` + `x` + `y` are needed — erase does not care which tile occupied the cell.
+
+**Input:**
+
+- `node_path` (required) — scene-tree path of the target `TileMapLayer`.
+- `x` (required) — map cell x coordinate.
+- `y` (required) — map cell y coordinate.
+- `paths_hint` (required) — mutation scope (the edited scene path). Mandatory even when `gate` is `off`.
+- `gate` (optional, default `enforce`) — `enforce` | `warn` | `off`.
+
+**Result:** `{ nodePath, x, y, erased: true }` plus the standard `gate` block.
+
+**Errors:** `paths_hint_required`, `missing_parameter`, `edited_scene_unavailable`, `node_not_found`, `wrong_node_type`.
+
+### `godot_open_mcp_tilemap_get_used_cells`
+
+- Route: `live`
+- Visibility group: `tilemap`
+- Read-only/mutating: read-only
+- Live editor requirement: requires the bridge
+
+List the used cells on a `TileMapLayer`, bounded by `max_results`. Each cell carries the full addressing quadruple (`x`, `y`, `sourceId`, `atlasX`, `atlasY`, `alternativeTile`) so an agent can echo it back into `tilemap_set_cell`. Read-only — no `paths_hint`, no gate.
+
+**Input:**
+
+- `node_path` (required) — scene-tree path of the target `TileMapLayer`.
+- `max_results` (optional, default `256`, minimum `1`, hard cap `2000`) — max cells returned. A non-positive value falls back to the default. The remainder is reported in `truncated`.
+
+**Result:**
+
+```json
+{
+  "cells": [
+    { "x": 0, "y": 0, "sourceId": 0, "atlasX": 0, "atlasY": 0, "alternativeTile": 0 },
+    { "x": 1, "y": 0, "sourceId": 0, "atlasX": 1, "atlasY": 0, "alternativeTile": 0 }
+  ],
+  "count": 2,
+  "truncated": 0
+}
+```
+
+`count` is the number of cells returned (the page); `truncated` is the remainder beyond `max_results` so an agent knows whether to page.
+
+**Errors:** `missing_parameter`, `edited_scene_unavailable`, `node_not_found`, `wrong_node_type`.
+
+### `godot_open_mcp_tilemap_clear`
+
+- Route: `live`
+- Visibility group: `tilemap`
+- Read-only/mutating: mutating (editor state; marks the scene unsaved)
+- Live editor requirement: requires the bridge
+
+Clear every cell on a `TileMapLayer` while keeping its `TileSet` assignment. Idempotent on an empty layer. Use `tilemap_erase_cell` to remove a single cell.
+
+**Input:**
+
+- `node_path` (required) — scene-tree path of the target `TileMapLayer`.
+- `paths_hint` (required) — mutation scope (the edited scene path). Mandatory even when `gate` is `off`.
+- `gate` (optional, default `enforce`) — `enforce` | `warn` | `off`.
+
+**Result:** `{ nodePath, tilesetPath, cleared: true }` plus the standard `gate` block. `tilesetPath` echoes the retained `TileSet` resource path (or `null` when the layer had no `TileSet`) so an agent can confirm the contract held.
+
+**Errors:** `paths_hint_required`, `missing_parameter`, `edited_scene_unavailable`, `node_not_found`, `wrong_node_type`.
 
 ## Offline fidelity limitations
 

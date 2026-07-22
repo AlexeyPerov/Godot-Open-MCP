@@ -116,10 +116,11 @@ test("typed-editor group is registered, opt-in, with a non-empty roster", () => 
   );
 });
 
-test("the five domain stub groups are present with empty rosters", () => {
-  // Reserved ids so Phase 12 packs reuse them without a rename. Empty in P8
-  // (no assign() calls) and always `available: true` in capabilities.
-  const stubIds = ["tilemap", "navigation", "particles", "animation", "csg"];
+test("the four unfilled domain stub groups are present with empty rosters", () => {
+  // Reserved ids so Phase 12 packs reuse them without a rename. P12.1 filled the
+  // `tilemap` stub (six tools); navigation / particles / animation / csg remain
+  // empty until their packs ship.
+  const stubIds = ["navigation", "particles", "animation", "csg"];
   for (const id of stubIds) {
     const g = getGroup(id);
     assert.ok(g, `${id} stub group must exist`);
@@ -127,9 +128,24 @@ test("the five domain stub groups are present with empty rosters", () => {
     assert.deepEqual(
       toolsInGroup(id),
       [],
-      `${id} roster must be empty in P8`,
+      `${id} roster must be empty until its pack ships`,
     );
   }
+});
+
+test("the tilemap group is present, opt-in, and carries the P12.1 six-tool roster", () => {
+  // P12.1 filled the tilemap stub. The roster is the six TileMapLayer tools.
+  const tilemap = getGroup("tilemap");
+  assert.ok(tilemap, "tilemap group must exist");
+  assert.equal(tilemap!.defaultEnabled, false, "tilemap must be opt-in");
+  assert.deepEqual(toolsInGroup("tilemap"), [
+    "godot_open_mcp_tilemap_clear",
+    "godot_open_mcp_tilemap_create",
+    "godot_open_mcp_tilemap_erase_cell",
+    "godot_open_mcp_tilemap_get_used_cells",
+    "godot_open_mcp_tilemap_set_cell",
+    "godot_open_mcp_tilemap_set_tileset",
+  ]);
 });
 
 test("getGroup returns undefined for unknown ids", () => {
@@ -325,16 +341,19 @@ test("no tool is assigned to more than one group", () => {
   }
 });
 
-test("every registered tool is either meta, core, or typed-editor", () => {
-  // P8-specific regression guard: the only groups that carry tools in P8 are
-  // `core` and `typed-editor`. If a tool ends up in a domain stub group,
-  // either the stub shipped early or the assign() landed in the wrong place.
+test("every registered tool is meta, core, typed-editor, or a shipped domain group", () => {
+  // Regression guard: the only groups that carry tools are `core`, `typed-editor`,
+  // and the Phase 12 domain packs as they ship (tilemap landed in P12.1). The four
+  // unfilled stubs (navigation / particles / animation / csg) must stay empty — if
+  // a tool ends up there, either a stub shipped early or the assign() landed in the
+  // wrong place.
+  const shippedDomainGroups = new Set(["tilemap"]);
   for (const tool of ALL_TOOLS) {
     const g = groupFor(tool.name);
     if (g === null) continue; // meta-tool
     assert.ok(
-      g === "core" || g === "typed-editor",
-      `${tool.name} is in group '${g}' — P8 only populates core + typed-editor`,
+      g === "core" || g === "typed-editor" || shippedDomainGroups.has(g),
+      `${tool.name} is in group '${g}' — only core, typed-editor, and shipped domain packs (tilemap) carry tools`,
     );
   }
 });
