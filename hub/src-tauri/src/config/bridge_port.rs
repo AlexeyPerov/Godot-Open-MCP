@@ -197,6 +197,28 @@ mod tests {
         assert_eq!(compute_port("/opt/games/demo"), 26256);
     }
 
+    // ── three-way cross-side parity (TS + C# + Rust lock the SAME values) ───
+    // These constants are the canonical fixtures shared across:
+    //   - mcp-server/src/instance-discovery.test.ts (TypeScript, source of truth)
+    //   - packages/bridge/Tests/Editor/Bridge/InstancePortResolverTests.cs (C#)
+    //   - this file (Rust Hub mirror)
+    // If any side changes, update all three in the same task. This is the
+    // whole point of deterministic per-project ports: zero shared config, all
+    // three languages compute the same port for the same path.
+    #[test]
+    fn compute_port_pins_cross_side_canonical_fixtures() {
+        // /Users/foo/MyGame → port 22028, hash prefix dca5061f6f21537c
+        assert_eq!(compute_port("/Users/foo/MyGame"), 22028);
+        assert_eq!(&project_hash("/Users/foo/MyGame")[..16], "dca5061f6f21537c");
+        // /some/path → port 29602, hash prefix eda6cf0b63f1a1d2
+        assert_eq!(compute_port("/some/path"), 29602);
+        assert_eq!(&project_hash("/some/path")[..16], "eda6cf0b63f1a1d2");
+        // Same path expressed three ways must hash identically (no lowercasing,
+        // backslash + trailing slash normalize away).
+        assert_eq!(compute_port("/Users/foo/MyGame"), compute_port("\\Users\\foo\\MyGame"));
+        assert_eq!(compute_port("/Users/foo/MyGame"), compute_port("/Users/foo/MyGame/"));
+    }
+
     #[test]
     fn compute_port_backslash_and_forwardslash_agree() {
         assert_eq!(
