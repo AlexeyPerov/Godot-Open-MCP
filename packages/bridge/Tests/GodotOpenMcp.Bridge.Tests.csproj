@@ -231,6 +231,16 @@
          smoke / live call path, not here. -->
     <Compile Include="..\Editor\Tools\Extensions\Tilemap\TilemapCellData.cs" Link="Source\Tilemap\TilemapCellData.cs" />
     <Compile Include="..\Editor\Tools\Extensions\Tilemap\TilemapBodies.cs" Link="Source\Tilemap\TilemapBodies.cs" />
+    <!-- P12.2 — navigation domain pack. The pure-managed body parsers
+         (NavigationDefaultsBody / NavigationRegionCreateBody / NavigationRegionSetMeshBody /
+         NavigationAgentCreateBody / NavigationAgentConfigureBody / NavigationLinkCreateBody /
+         NavigationGetBody, the NavDimension enum, and the NavigationDimensionParser) are linked for
+         unit testing. They reuse the P12.1 JsonScalar extractor (linked above), which P12.2 extends
+         with ExtractFloat / ExtractBool for the navigation agent scalars. The editor-only handler
+         (NavigationTools.Defaults / RegionCreate / RegionSetMesh / AgentCreate / AgentConfigure /
+         LinkCreate / Get — EditorInterface/NavigationRegion/Agent/Link-coupled) is #if TOOLS and
+         verified via the headless Godot smoke / live call path, not here. -->
+    <Compile Include="..\Editor\Tools\Extensions\Navigation\NavigationBodies.cs" Link="Source\Navigation\NavigationBodies.cs" />
     <!-- P3.5 — gate on mutators. The gate types (GateMode/GateOutcome/DeltaData/GateDispatchResult/
          GatePolicy/GateDefaultPolicy) and the VerifyGateAdapter are pure-managed for the parts the unit
          tests exercise (decision matrix, next-step hints, delta math, gate-mode parsing). GatePolicy

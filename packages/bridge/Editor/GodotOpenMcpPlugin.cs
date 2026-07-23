@@ -165,6 +165,13 @@ namespace GodotOpenMcp.Bridge.Editor
                 // get_used_cells is gate-free. Idempotent re-register refreshes the handler references
                 // after a domain reload.
                 TilemapTools.RegisterTilemapTools();
+                // P12.2 — navigation domain pack: seven navigation tools (defaults / region_create /
+                // region_set_mesh / agent_create / agent_configure / link_create / get), group
+                // navigation. The second Phase 12 domain pack. The five mutators register
+                // defaultGate:"enforce" and validate paths_hint themselves; the read-only defaults
+                // and get are gate-free. Idempotent re-register refreshes the handler references
+                // after a domain reload.
+                NavigationTools.RegisterNavigationTools();
 
                 // Start the HTTP listener serving /ping and POST /tools/{name}. Stays down
                 // (and connected:false) if the bind fails — the editor remains usable, the

@@ -45,6 +45,13 @@ The table below is the published view of `ALL_TOOLS`. The `scripts/check-tool-do
 | `godot_open_mcp_filesystem_list` | filesystem | live-first | typed-editor | no | n/a | List immediate children of a `res://` directory; live reads authoritative importer metadata. |
 | `godot_open_mcp_filesystem_reimport` | filesystem | live | typed-editor | disk | enforce | Reimport exact files or trigger a full scan; blocks until the import pipeline settles. |
 | `godot_open_mcp_manage_tools` | core | local | always visible | ephemeral | n/a | Per-session tool-group visibility mutator (activate/deactivate/reset/list_groups). |
+| `godot_open_mcp_navigation_agent_configure` | navigation | live | navigation | editor state | enforce | Patch clamped scalar properties on a `NavigationAgent2D`/`3D`. |
+| `godot_open_mcp_navigation_agent_create` | navigation | live | navigation | editor state | enforce | Create a `NavigationAgent2D`/`3D` node (pathfinding + avoidance) in the edited scene. |
+| `godot_open_mcp_navigation_defaults` | navigation | live | navigation | no | n/a | Recommended starter scalars for a 2D/3D agent (pure helper, no scene). |
+| `godot_open_mcp_navigation_get` | navigation | live | navigation | no | n/a | Read a navigation node's scalar config + resolved type/dimension (read-only). |
+| `godot_open_mcp_navigation_link_create` | navigation | live | navigation | editor state | enforce | Create a `NavigationLink2D`/`3D` (off-mesh connection) with start/end. |
+| `godot_open_mcp_navigation_region_create` | navigation | live | navigation | editor state | enforce | Create a `NavigationRegion2D`/`3D` node (navigable area) in the edited scene. |
+| `godot_open_mcp_navigation_region_set_mesh` | navigation | live | navigation | editor state | enforce | Assign a region's navigation resource (`NavigationPolygon` 2D / `NavigationMesh` 3D). |
 | `godot_open_mcp_node_create` | node | live | typed-editor | editor state | warn/off capable | Create a Node in the edited scene (typed ClassDB instantiate or PackedScene instance). |
 | `godot_open_mcp_node_delete` | node | live | typed-editor | editor state | warn/off capable | Delete one or more Nodes (and their sub-trees) synchronously via `Node.Free`. |
 | `godot_open_mcp_node_duplicate` | node | live | typed-editor | editor state | warn/off capable | Duplicate a Node sub-tree via `Node.Duplicate`, optionally cross-parent and renamed. |
@@ -120,7 +127,8 @@ The MCP server filters `ListTools` through a per-session `ToolSessionState` so t
 | `core` | yes | Essential entry points + the gate/verify safety surface (`ping`, `validate_edit`, `checkpoint_create`, `delta`, `apply_fix`). The only group visible in a fresh session. |
 | `typed-editor` | no | The whole typed editor surface: nodes, scenes, resources, filesystem, editor state/selection, console, screenshots, reflection. One activate brings up the full typed surface. |
 | `tilemap` | no | Godot 4.3+ `TileMapLayer` tools: create a layer, assign a `TileSet`, set/erase/clear cells, list used cells. |
-| `navigation` / `particles` / `animation` / `csg` | no | Domain pack stubs. Reserved ids with empty tool rosters — empty until the packs ship. |
+| `navigation` | no | Godot 4.3+ navigation tools (2D + 3D): starter defaults, create `NavigationRegion`/`Agent`/`Link`, assign a region's navigation resource, configure agent scalars, inspect any navigation node. |
+| `particles` / `animation` / `csg` | no | Domain pack stubs. Reserved ids with empty tool rosters — empty until the packs ship. |
 
 The catalog source of truth is `mcp-server/src/capabilities/tool-groups.ts`. Activate or deactivate groups with `godot_open_mcp_manage_tools`; on a successful change the server emits the MCP `notifications/tools/list_changed` notification so clients that support `listChanged` refresh `ListTools` automatically. Hiding a tool is a prompt-size control, not an authorization boundary — a hidden tool name still routes when called directly.
 
@@ -1703,6 +1711,164 @@ Clear every cell on a `TileMapLayer` while keeping its `TileSet` assignment. Ide
 **Result:** `{ nodePath, tilesetPath, cleared: true }` plus the standard `gate` block. `tilesetPath` echoes the retained `TileSet` resource path (or `null` when the layer had no `TileSet`) so an agent can confirm the contract held.
 
 **Errors:** `paths_hint_required`, `missing_parameter`, `edited_scene_unavailable`, `node_not_found`, `wrong_node_type`.
+
+## Navigation tools
+
+Navigation tools author Godot 4.3+ navigation nodes — `NavigationRegion2D/3D` (navigable areas), `NavigationAgent2D/3D` (pathfinding + avoidance), and `NavigationLink2D/3D` (off-mesh connections such as jump pads or ladders). Every tool that creates or configures a node takes a `dimension` arg (`"2d"` | `"3d"`) to select the parallel class hierarchy; the read/assign tools infer the dimension from the resolved node's class.
+
+This is a **`navigation` group** family — hidden from `ListTools` until an agent activates it via `godot_open_mcp_manage_tools({ action: "activate", group: "navigation" })`. As with every group, hiding is a prompt-size control, not an authorization boundary — a hidden tool name still routes when called directly.
+
+**Scope.** Built-in Godot navigation nodes only — no third-party nav addons. No baking surface in v1: the pack is create + assign resource + configure + inspect. Author a `NavigationPolygon` / `NavigationMesh` resource via the editor's bake UI or `resource_create`, then assign it with `navigation_region_set_mesh`. `navigation_get` reports a navigation resource's path only (no vertex arrays).
+
+**Shared contracts.** `node_path` follows the same scene-tree vocabulary as `node_find` / `node_create`. `paths_hint` is the edited scene `res://` path (mandatory on every mutator, even when `gate` is `off`). The five mutators run the gate cycle by default (`enforce`); the two read-only tools (`defaults`, `get`) are gate-free.
+
+### `godot_open_mcp_navigation_defaults`
+
+- Route: `live`
+- Visibility group: `navigation`
+- Read-only/mutating: read-only (pure helper — no scene required)
+- Live editor requirement: requires the bridge
+
+Return recommended starter scalars (radius, height, max_speed, path_desired_distance, target_desired_distance, avoidance_enabled) for a 2D or 3D agent as a JSON object an agent can spread into `navigation_agent_configure`. The 2D defaults are in pixels (radius 10, max_speed 200, distances 20); the 3D defaults are in meters (radius 0.5, height 1.8, max_speed 5, distances 1).
+
+**Input:**
+
+- `dimension` (required) — `"2d"` | `"3d"`.
+
+**Result:** `{ dimension, agent: { radius, height, maxSpeed, pathDesiredDistance, targetDesiredDistance, avoidanceEnabled } }`.
+
+**Errors:** `invalid_parameter` (`dimension` not `"2d"`/`"3d"`).
+
+### `godot_open_mcp_navigation_region_create`
+
+- Route: `live`
+- Visibility group: `navigation`
+- Read-only/mutating: mutating (editor state; marks the scene unsaved)
+- Live editor requirement: requires the bridge
+
+Create a `NavigationRegion2D` (`dimension: "2d"`) or `NavigationRegion3D` (`dimension: "3d"`) node in the currently edited scene and return its NodeData (same shape as `node_create`). A navigation region defines a navigable area; assign its navigation resource afterwards with `navigation_region_set_mesh`.
+
+**Input:**
+
+- `dimension` (required) — `"2d"` | `"3d"`.
+- `name` (optional) — Node name. When omitted, Godot assigns the default.
+- `parent_node_path` (optional, default edited scene root) — scene-tree path of the parent.
+- `position` (optional) — `'x,y'` (2D) or `'x,y,z'` (3D), applied because the region derives from `Node2D` / `Node3D`.
+- `paths_hint` (required) — mutation scope (the edited scene `res://` path). Mandatory even when `gate` is `off`.
+- `gate` (optional, default `enforce`) — `enforce` | `warn` | `off`.
+
+**Result:** a NodeData object (`{ instanceId, name, path, type, scriptResourcePath, childCount, children }`) plus the standard `gate` block.
+
+**Errors:** `paths_hint_required`, `invalid_parameter` (bad `dimension`), `edited_scene_unavailable`, `parent_not_found`, `create_failed`.
+
+### `godot_open_mcp_navigation_region_set_mesh`
+
+- Route: `live`
+- Visibility group: `navigation`
+- Read-only/mutating: mutating (editor state; marks the scene unsaved)
+- Live editor requirement: requires the bridge
+
+Assign an existing navigation resource to a `NavigationRegion2D` or `NavigationRegion3D`. The resource type must match the region dimension: `NavigationPolygon` for a 2D region, `NavigationMesh` for a 3D region. No baking is bundled — supply a pre-authored resource (use the editor's bake UI or `resource_create` to build one first).
+
+**Input:**
+
+- `node_path` (required) — scene-tree path of the target `NavigationRegion2D/3D`.
+- `mesh_path` (required) — `res://` (or `uid://`) path to an existing `NavigationPolygon` (2D) or `NavigationMesh` (3D).
+- `paths_hint` (required) — mutation scope (the edited scene path). Mandatory even when `gate` is `off`.
+- `gate` (optional, default `enforce`) — `enforce` | `warn` | `off`.
+
+**Result:** `{ nodePath, dimension, meshPath }` plus the standard `gate` block.
+
+**Errors:** `paths_hint_required`, `missing_parameter`, `edited_scene_unavailable`, `node_not_found`, `wrong_node_type`, `resource_not_found`, `resource_load_failed`.
+
+### `godot_open_mcp_navigation_agent_create`
+
+- Route: `live`
+- Visibility group: `navigation`
+- Read-only/mutating: mutating (editor state; marks the scene unsaved)
+- Live editor requirement: requires the bridge
+
+Create a `NavigationAgent2D` (`dimension: "2d"`) or `NavigationAgent3D` (`dimension: "3d"`) node in the currently edited scene and return its NodeData. A navigation agent provides pathfinding and avoidance for a moving body — parent it under the `CharacterBody2D`/`3D` or `RigidBody` it steers, and set the agent's `target_position` from the parent's script each frame.
+
+**Input:**
+
+- `dimension` (required) — `"2d"` | `"3d"`.
+- `name` (optional) — Node name.
+- `parent_node_path` (optional) — parent the agent under the body it steers (a `CharacterBody2D`/`3D` or `RigidBody`).
+- `position` (optional) — `'x,y'` (2D) or `'x,y,z'` (3D), in the parent's local space. Usually left at the origin.
+- `paths_hint` (required) — mutation scope (the edited scene path). Mandatory even when `gate` is `off`.
+- `gate` (optional, default `enforce`) — `enforce` | `warn` | `off`.
+
+**Result:** a NodeData object plus the standard `gate` block.
+
+**Errors:** `paths_hint_required`, `invalid_parameter` (bad `dimension`), `edited_scene_unavailable`, `parent_not_found`, `create_failed`.
+
+### `godot_open_mcp_navigation_agent_configure`
+
+- Route: `live`
+- Visibility group: `navigation`
+- Read-only/mutating: mutating (editor state; marks the scene unsaved)
+- Live editor requirement: requires the bridge
+
+Patch clamped scalar properties on a `NavigationAgent2D` or `NavigationAgent3D`. Only the fields you send are applied — omitted scalars are left unchanged. `radius` and the distance fields are clamped to strictly positive; `height` and `max_speed` are clamped to non-negative. A non-numeric value is silently skipped (non-aborting). The same property names apply to both the 2D and 3D agent classes.
+
+**Input:**
+
+- `node_path` (required) — scene-tree path of the target `NavigationAgent2D/3D`.
+- `radius` (optional) — agent radius (avoidance cylinder). Clamped to strictly positive. In pixels (2D) / meters (3D).
+- `height` (optional) — agent height (meaningful in 3D). Clamped to non-negative.
+- `max_speed` (optional) — maximum speed to reach the target. Clamped to non-negative. Set `0` to stop at the target.
+- `path_desired_distance` (optional) — distance to consider the next path position reached. Clamped to strictly positive.
+- `target_desired_distance` (optional) — distance to consider the target reached (sets `is_target_reached`). Clamped to strictly positive.
+- `avoidance_enabled` (optional) — enable RVO avoidance so the agent steers around other avoidance-enabled agents.
+- `paths_hint` (required) — mutation scope (the edited scene path). Mandatory even when `gate` is `off`.
+- `gate` (optional, default `enforce`) — `enforce` | `warn` | `off`.
+
+**Result:** `{ nodePath, applied: { …only the keys written, clamped… } }` plus the standard `gate` block.
+
+**Errors:** `paths_hint_required`, `missing_parameter`, `edited_scene_unavailable`, `node_not_found`, `wrong_node_type`.
+
+### `godot_open_mcp_navigation_link_create`
+
+- Route: `live`
+- Visibility group: `navigation`
+- Read-only/mutating: mutating (editor state; marks the scene unsaved)
+- Live editor requirement: requires the bridge
+
+Create a `NavigationLink2D` (`dimension: "2d"`) or `NavigationLink3D` (`dimension: "3d"`) node — an off-mesh connection between two points (a jump pad, a ladder, a teleport). The start/end positions are **local to the link node** (Godot exposes them in local space, relative to the node's own position).
+
+**Input:**
+
+- `dimension` (required) — `"2d"` | `"3d"`.
+- `name` (optional) — Node name.
+- `parent_node_path` (optional, default edited scene root) — scene-tree path of the parent.
+- `position` (optional) — node position as `'x,y'` (2D) or `'x,y,z'` (3D), in the parent's local space. The link's start/end are relative to this.
+- `start_position` (required) — start point, local to the link node, as `'x,y'` (2D) or `'x,y,z'` (3D).
+- `end_position` (required) — end point, local to the link node, as `'x,y'` (2D) or `'x,y,z'` (3D).
+- `bidirectional` (optional, default `false`) — when `true`, the link can be traversed both ways.
+- `paths_hint` (required) — mutation scope (the edited scene path). Mandatory even when `gate` is `off`.
+- `gate` (optional, default `enforce`) — `enforce` | `warn` | `off`.
+
+**Result:** a NodeData object plus the standard `gate` block.
+
+**Errors:** `paths_hint_required`, `invalid_parameter` (bad `dimension` or malformed start/end position), `missing_parameter`, `edited_scene_unavailable`, `parent_not_found`, `create_failed`.
+
+### `godot_open_mcp_navigation_get`
+
+- Route: `live`
+- Visibility group: `navigation`
+- Read-only/mutating: read-only
+- Live editor requirement: requires the bridge
+
+Read the scalar configuration of any navigation node — a `NavigationRegion2D/3D`, `NavigationAgent2D/3D`, or `NavigationLink2D/3D`. The result includes the resolved `type` and `dimension` so an agent does not need a second probe to know which property set applies. Regions report their navigation resource path (or `null` when unassigned); agents report the full scalar set; links report their start/end positions and bidirectional flag.
+
+**Input:**
+
+- `node_path` (required) — scene-tree path of the target navigation node.
+
+**Result:** `{ nodePath, type, dimension, kind, … }` where `kind` is `"region"` | `"agent"` | `"link"`. For a region, `meshPath` (or `null`). For an agent, `properties: { radius, height, maxSpeed, pathDesiredDistance, targetDesiredDistance, avoidanceEnabled }`. For a link, `properties: { startPosition, endPosition, bidirectional }`.
+
+**Errors:** `missing_parameter`, `edited_scene_unavailable`, `node_not_found`, `wrong_node_type`.
 
 ## Offline fidelity limitations
 

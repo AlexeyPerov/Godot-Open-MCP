@@ -198,8 +198,10 @@ namespace GodotOpenMcp.Bridge.Editor
     // SliceQuotedString / SliceBareToken / the full \" \\ \/ \n \r \t \b \f \uXXXX
     // escape table) plus the int extractor from NodeFindBody. Kept as a private static
     // class so every tilemap body type shares one implementation without widening the
-    // namespace surface. If a third family duplicates this, factor a shared JsonScalar
-    // reader into the Tools root then.
+    // namespace surface. P12.2 (navigation) is the "third family" the original comment
+    // anticipated — it reuses this class rather than duplicating a third copy, and adds
+    // ExtractFloat / ExtractBool for the navigation agent scalars. If a fourth family
+    // needs a different extractor, add it here.
     // ===========================================================================
 
     internal static class JsonScalar
@@ -231,6 +233,45 @@ namespace GodotOpenMcp.Bridge.Editor
                 return (int)v;
             }
             return defaultValue;
+        }
+
+        /// <summary>
+        /// Extract a float scalar. Returns null when the key is absent, explicitly null, or not a
+        /// parseable number — the caller treats null as "leave unchanged" (P12.2 navigation agent
+        /// configure contract). Added in P12.2 for the navigation pack's clamped agent scalars
+        /// (radius / height / max_speed / distances); reused by any future float-extracting body.
+        /// Parses with <see cref="NumberStyles.Float"/> + invariant culture so a comma-decimal
+        /// locale cannot corrupt the value.
+        /// </summary>
+        internal static float? ExtractFloat(string body, string key)
+        {
+            var raw = ExtractRawValue(body, key);
+            if (raw == null) return null;
+            var trimmed = raw.AsSpan().Trim();
+            if (trimmed.Length == 0) return null;
+            if (float.TryParse(trimmed, NumberStyles.Float,
+                    CultureInfo.InvariantCulture, out var v))
+            {
+                return v;
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Extract a bool scalar. Returns null when the key is absent, explicitly null, or not a
+        /// recognized bool literal — the caller treats null as "leave unchanged". Recognizes the
+        /// JSON bool literals <c>true</c> / <c>false</c> (case-sensitive per the JSON spec; a
+        /// stray <c>True</c> degrades to null). Added in P12.2 for the navigation pack's
+        /// avoidance_enabled / bidirectional flags.
+        /// </summary>
+        internal static bool? ExtractBool(string body, string key)
+        {
+            var raw = ExtractRawValue(body, key);
+            if (raw == null) return null;
+            var trimmed = raw.AsSpan().Trim();
+            if (trimmed.Length == 4 && trimmed.SequenceEqual("true".AsSpan())) return true;
+            if (trimmed.Length == 5 && trimmed.SequenceEqual("false".AsSpan())) return false;
+            return null;
         }
 
         static string? ExtractRawValue(string body, string key)

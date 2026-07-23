@@ -87,7 +87,9 @@ export const TOOL_GROUPS: ToolGroup[] = [
   {
     id: "navigation",
     description:
-      "NavigationRegion / NavigationAgent tools (domain pack). Empty until the pack ships.",
+      "NavigationRegion / NavigationAgent / NavigationLink tools (Godot 4.3+, 2D + 3D): " +
+      "starter defaults, create regions/agents/links, assign a region's navigation resource, " +
+      "configure agent scalars, and inspect any navigation node.",
     defaultEnabled: false,
   },
   {
@@ -231,6 +233,23 @@ assign(
     "tilemap_erase_cell",
     "tilemap_get_used_cells",
     "tilemap_clear",
+  ].map((suffix) => `godot_open_mcp_${suffix}`),
+);
+
+// --- navigation (P12.2 — Godot 4.3+ navigation domain pack) ------------------
+// Seven tools: defaults (read-only) / region_create / region_set_mesh /
+// agent_create / agent_configure / link_create / get (read-only). Hidden until
+// activated via manage_tools.
+assign(
+  "navigation",
+  [
+    "navigation_defaults",
+    "navigation_region_create",
+    "navigation_region_set_mesh",
+    "navigation_agent_create",
+    "navigation_agent_configure",
+    "navigation_link_create",
+    "navigation_get",
   ].map((suffix) => `godot_open_mcp_${suffix}`),
 );
 

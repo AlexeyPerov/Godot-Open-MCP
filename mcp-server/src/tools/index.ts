@@ -56,6 +56,13 @@ import { tilemapSetCell } from "./tilemap-set-cell.js";
 import { tilemapEraseCell } from "./tilemap-erase-cell.js";
 import { tilemapGetUsedCells } from "./tilemap-get-used-cells.js";
 import { tilemapClear } from "./tilemap-clear.js";
+import { navigationDefaults } from "./navigation-defaults.js";
+import { navigationRegionCreate } from "./navigation-region-create.js";
+import { navigationRegionSetMesh } from "./navigation-region-set-mesh.js";
+import { navigationAgentCreate } from "./navigation-agent-create.js";
+import { navigationAgentConfigure } from "./navigation-agent-configure.js";
+import { navigationLinkCreate } from "./navigation-link-create.js";
+import { navigationGet } from "./navigation-get.js";
 import { bridgeStatus } from "./bridge-status.js";
 import { pullEvents } from "./pull-events.js";
 import { readCompileErrors } from "./read-compile-errors.js";
@@ -164,6 +171,22 @@ export const ALL_TOOLS: Tool[] = [
   tilemapEraseCell,
   tilemapGetUsedCells,
   tilemapClear,
+  // P12.2 — navigation domain pack: seven navigation tools (group `navigation`, hidden until
+  // activated via manage_tools). defaults returns recommended starter scalars for a 2D/3D agent
+  // (read-only helper); region_create makes a NavigationRegion2D/3D node; region_set_mesh assigns
+  // its navigation resource (NavigationPolygon 2D / NavigationMesh 3D); agent_create makes a
+  // NavigationAgent2D/3D node; agent_configure patches clamped scalar properties on an agent;
+  // link_create makes a NavigationLink2D/3D off-mesh connection with start/end; get reads any
+  // navigation node's scalar config (read-only). The five mutators default to gate "enforce" and
+  // require paths_hint scoped to the edited scene. The two read-only tools (defaults + get) are
+  // gate-free. Second Phase 12 domain pack.
+  navigationDefaults,
+  navigationRegionCreate,
+  navigationRegionSetMesh,
+  navigationAgentCreate,
+  navigationAgentConfigure,
+  navigationLinkCreate,
+  navigationGet,
   // P5.3 — bridge_status: operator-oriented health snapshot. Composes the instance-lock classifier
   // (instance-discovery.ts#classifyInstance) with one /ping probe and returns a coarse status token
   // (running | compiling | stopped | unreachable | dead_bridge) + classification + recoveryHint.
