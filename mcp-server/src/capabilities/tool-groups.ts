@@ -103,7 +103,10 @@ export const TOOL_GROUPS: ToolGroup[] = [
   {
     id: "animation",
     description:
-      "AnimationPlayer tools (domain pack). Empty until the pack ships.",
+      "AnimationPlayer tools (Godot 4.3+): starter defaults, create an AnimationPlayer node, " +
+      "add an empty AnimationLibrary, create an Animation clip (auto-creating the library when " +
+      "missing), add a value / position_3d / rotation_3d / scale_3d track, insert a keyframe, " +
+      "and inspect any player's libraries / animations / tracks.",
     defaultEnabled: false,
   },
   {
@@ -266,6 +269,23 @@ assign(
     "particles_configure",
     "particles_set_emitting",
     "particles_get",
+  ].map((suffix) => `godot_open_mcp_${suffix}`),
+);
+
+// --- animation (P12.4 — Godot 4.3+ animation domain pack) ------------------
+// Seven tools: defaults (read-only) / player_create / library_add / animation_create
+// / add_track / insert_key / get (read-only). Hidden until activated via
+// manage_tools.
+assign(
+  "animation",
+  [
+    "animation_defaults",
+    "animation_player_create",
+    "animation_library_add",
+    "animation_create",
+    "animation_add_track",
+    "animation_insert_key",
+    "animation_get",
   ].map((suffix) => `godot_open_mcp_${suffix}`),
 );
 

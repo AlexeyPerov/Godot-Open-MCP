@@ -178,6 +178,13 @@ namespace GodotOpenMcp.Bridge.Editor
                 // themselves; the read-only defaults and get are gate-free. Idempotent re-register
                 // refreshes the handler references after a domain reload.
                 ParticlesTools.RegisterParticlesTools();
+                // P12.4 — animation domain pack: seven AnimationPlayer tools (defaults /
+                // player_create / library_add / animation_create / add_track / insert_key /
+                // get), group animation. The fourth Phase 12 domain pack. The five mutators
+                // register defaultGate:"enforce" and validate paths_hint themselves; the
+                // read-only defaults and get are gate-free. Idempotent re-register refreshes
+                // the handler references after a domain reload.
+                AnimationTools.RegisterAnimationTools();
 
                 // Start the HTTP listener serving /ping and POST /tools/{name}. Stays down
                 // (and connected:false) if the bind fails — the editor remains usable, the

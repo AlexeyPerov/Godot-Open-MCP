@@ -195,13 +195,14 @@ test("toolGroups core entry is default-on", () => {
 });
 
 test("toolGroups unfilled domain stubs appear with empty rosters and available:true", () => {
-  // P12.1 filled the tilemap stub (six tools) and P12.2 filled the navigation
-  // stub (seven tools — roster correctness is pinned in tool-groups.test.ts
-  // against the real toolsInGroup). particles / animation / csg remain empty
-  // until their packs ship. This fixture-based builder buckets only the injected
-  // tools, so every domain group surfaces an empty roster here (the fixture has
-  // no domain tools); the catalog entry itself (defaultEnabled, available) is
-  // what's pinned.
+  // P12.1 filled the tilemap stub (six tools), P12.2 filled the navigation
+  // stub (seven tools), P12.3 filled the particles stub (five tools), and P12.4
+  // filled the animation stub (seven tools — roster correctness is pinned in
+  // tool-groups.test.ts against the real toolsInGroup). csg remains empty until
+  // its pack ships. This fixture-based builder buckets only the injected tools,
+  // so every domain group surfaces an empty roster here (the fixture has no
+  // domain tools); the catalog entry itself (defaultEnabled, available) is what's
+  // pinned.
   const result = buildCapabilities(DEPS);
   const stubIds = ["tilemap", "navigation", "particles", "animation", "csg"];
   for (const id of stubIds) {

@@ -58,6 +58,13 @@ The table below is the published view of `ALL_TOOLS`. The `scripts/check-tool-do
 | `godot_open_mcp_node_find` | node | live | typed-editor | no | n/a | Find Nodes in the edited scene (targeted lookup or filtered list). |
 | `godot_open_mcp_node_modify` | node | live | typed-editor | editor state | warn/off capable | Apply property/transform updates to one or more Nodes (single + batch). |
 | `godot_open_mcp_node_set_parent` | node | live | typed-editor | editor state | warn/off capable | Reparent a Node via `Node.Reparent`, cycle-safe, transform-preserving by default. |
+| `godot_open_mcp_animation_add_track` | animation | live | animation | editor state | enforce | Add a value / position_3d / rotation_3d / scale_3d track to an `Animation` clip; returns the track index. |
+| `godot_open_mcp_animation_create` | animation | live | animation | editor state | enforce | Create an `Animation` clip in a named `AnimationLibrary` (auto-creating the library when missing). |
+| `godot_open_mcp_animation_defaults` | animation | live | animation | no | n/a | Recommended starter length + loop mode for an `Animation` clip (pure helper, no scene). |
+| `godot_open_mcp_animation_get` | animation | live | animation | no | n/a | Read an `AnimationPlayer`'s libraries / animations / tracks (bounded; keys opt-in). |
+| `godot_open_mcp_animation_insert_key` | animation | live | animation | editor state | enforce | Insert a keyframe on a track; returns the key index Godot assigned. |
+| `godot_open_mcp_animation_library_add` | animation | live | animation | editor state | enforce | Add an empty `AnimationLibrary` registered by name on an `AnimationPlayer`. |
+| `godot_open_mcp_animation_player_create` | animation | live | animation | editor state | enforce | Create an `AnimationPlayer` node in the edited scene (returns NodeData). |
 | `godot_open_mcp_particles_configure` | particles | live | particles | editor state | enforce | Patch clamped scalar properties on a `GpuParticles2D`/`3D` emitter (allow-list only). |
 | `godot_open_mcp_particles_create` | particles | live | particles | editor state | enforce | Create a `GpuParticles2D`/`3D` node (+ optional initial scalars + process material). |
 | `godot_open_mcp_particles_defaults` | particles | live | particles | no | n/a | Recommended starter scalars for a 2D/3D emitter (pure helper, no scene). |
@@ -134,7 +141,8 @@ The MCP server filters `ListTools` through a per-session `ToolSessionState` so t
 | `tilemap` | no | Godot 4.3+ `TileMapLayer` tools: create a layer, assign a `TileSet`, set/erase/clear cells, list used cells. |
 | `navigation` | no | Godot 4.3+ navigation tools (2D + 3D): starter defaults, create `NavigationRegion`/`Agent`/`Link`, assign a region's navigation resource, configure agent scalars, inspect any navigation node. |
 | `particles` | no | Godot 4.3+ `GpuParticles2D`/`3D` tools (2D + 3D): starter defaults, create an emitter (+ optional initial scalars + process material), configure allow-listed + clamped scalars, start/stop emission (with optional restart), inspect any emitter. |
-| `animation` / `csg` | no | Domain pack stubs. Reserved ids with empty tool rosters — empty until the packs ship. |
+| `animation` | no | Godot 4.3+ `AnimationPlayer` tools: starter defaults, create a player node, add an empty `AnimationLibrary`, create an `Animation` clip (auto-creating the library when missing), add a value / position_3d / rotation_3d / scale_3d track, insert a keyframe, inspect any player's libraries / animations / tracks. |
+| `csg` | no | Domain pack stub. Reserved id with an empty tool roster — empty until the pack ships. |
 
 The catalog source of truth is `mcp-server/src/capabilities/tool-groups.ts`. Activate or deactivate groups with `godot_open_mcp_manage_tools`; on a successful change the server emits the MCP `notifications/tools/list_changed` notification so clients that support `listChanged` refresh `ListTools` automatically. Hiding a tool is a prompt-size control, not an authorization boundary — a hidden tool name still routes when called directly.
 
@@ -2007,6 +2015,171 @@ Read the scalar configuration of a `GpuParticles2D` or `GpuParticles3D`. The res
 **Result:** `{ nodePath, type, dimension, properties: { amount, lifetime, oneShot, preprocess, speedScale, explosiveness, randomness, fixedFps, interpolate, fractDelta, localCoords, emitting }, processMaterialPath }`.
 
 **Errors:** `missing_parameter`, `edited_scene_unavailable`, `node_not_found`, `wrong_node_type`.
+
+## Animation tools
+
+Animation tools author Godot 4.3+ `AnimationPlayer` clips — the player owns `AnimationLibrary` resources (named slots), each of which owns `Animation` clips, each of which owns tracks, each of which owns keyframes. The seven tools walk that hierarchy top-down: create the player, add a library, create a clip, add a track, insert keys, then inspect.
+
+This is an **`animation` group** family — hidden from `ListTools` until an agent activates it via `godot_open_mcp_manage_tools({ action: "activate", group: "animation" })`. As with every group, hiding is a prompt-size control, not an authorization boundary — a hidden tool name still routes when called directly.
+
+**Scope.** `AnimationPlayer` + `AnimationLibrary` + `Animation` only — not `AnimationTree`, not `Tween`, not `.glb` retargeting. Track types in v1: **value**, **position_3d**, **rotation_3d**, **scale_3d** — the four Godot exposes cleanly for create. Blend-shape / method / bezier / audio / animation tracks are deliberately not claimed; an agent requesting one gets `unsupported_track_type`. No Unity AnimatorController / `.controller` tools (skipped — Godot's catalog is player-centric). No `save_path` persistence model — animations live as resources owned by the `AnimationPlayer` in the edited scene and persist on scene save.
+
+**Track path format (the #1 failure mode).** Godot resolves track paths relative to the AnimationPlayer's `root_node` (an `AnimationMixer` property; default is the player's parent). The path is a `NodePath` with an optional sub-path to the animated property, e.g. `"Sprite2D:position"` animates the `position` Vector2 of a sibling node named Sprite2D. A path that does not resolve (wrong node name, or animating a property the node does not have) is **accepted by Godot at authoring time** but produces no effect at playback. This pack surfaces the resolved path in the `add_track` / `get` results so an agent can verify, but does not validate the path against the scene tree (Godot itself does not — the player may animate nodes added later). When in doubt, animate `position` / `rotation` / `scale` on a sibling Node2D / Node3D.
+
+**Key value JSON shapes.** `insert_key` parses the `value` field into a typed structure and converts it to a Godot Variant. Supported shapes: number (`0.5`, `42`) → float; bool (`true`/`false`); string; `{x,y}` → Vector2; `{x,y,z}` → Vector3; `{r,g,b[,a]}` → Color (`a` defaults to 1). A type-tagged object (`{type:"vector3",x,y,z}`) overrides component inference. Rotation3D tracks take a Vector3 in **radians** (Godot convention). An unrecognized shape returns `invalid_parameter`.
+
+**Shared contracts.** `node_path` follows the same scene-tree vocabulary as `node_find` / `node_create`. `paths_hint` is the edited scene `res://` path (mandatory on every mutator, even when `gate` is `off`). The five mutators run the gate cycle by default (`enforce`); the two read-only tools (`defaults`, `get`) are gate-free.
+
+### `godot_open_mcp_animation_defaults`
+
+- Route: `live`
+- Visibility group: `animation`
+- Read-only/mutating: read-only (pure helper — no scene required)
+- Live editor requirement: requires the bridge
+
+Return the recommended starter Animation length (1.0s) and loop mode (`"none"`) as a JSON object an agent can spread into `animation_create`. Animation is dimension-agnostic (one class), so there is no dimension arg. The loop mode names mirror Godot's `Animation.LoopMode` enum minus the redundant `Loop` prefix (none / linear / pingpong).
+
+**Input:** none.
+
+**Result:** `{ length, loopMode }`.
+
+**Errors:** none.
+
+### `godot_open_mcp_animation_player_create`
+
+- Route: `live`
+- Visibility group: `animation`
+- Read-only/mutating: mutating (editor state; marks the scene unsaved)
+- Live editor requirement: requires the bridge
+
+Create an `AnimationPlayer` node in the currently edited scene and return its NodeData (same shape as `node_create`). An `AnimationPlayer` is the Godot equivalent of Unity's Animator + AnimationClip container — it owns `AnimationLibrary` resources (named slots), each of which owns `Animation` clips. After creating the player, call `animation_library_add` to add an empty library, then `animation_create` to add a clip. `AnimationPlayer` derives from `Node` (not Node2D/Node3D), so it has no spatial position — the optional `position` arg is accepted for forward-compat but ignored.
+
+**Input:**
+
+- `name` (optional) — Node name. When omitted, Godot assigns the default (`AnimationPlayer`).
+- `parent_node_path` (optional, default edited scene root) — scene-tree path of the parent.
+- `position` (optional) — accepted but ignored (AnimationPlayer is not a spatial node).
+- `paths_hint` (required) — mutation scope (the edited scene `res://` path). Mandatory even when `gate` is `off`.
+- `gate` (optional, default `enforce`) — `enforce` | `warn` | `off`.
+
+**Result:** a NodeData object plus the standard `gate` block.
+
+**Errors:** `paths_hint_required`, `edited_scene_unavailable`, `parent_not_found`, `create_failed`.
+
+### `godot_open_mcp_animation_library_add`
+
+- Route: `live`
+- Visibility group: `animation`
+- Read-only/mutating: mutating (editor state; marks the scene unsaved)
+- Live editor requirement: requires the bridge
+
+Add an empty `AnimationLibrary` registered under a name on a target `AnimationPlayer`. The library is a named slot on the player that will hold `Animation` clips (added afterwards via `animation_create`). The library name defaults to `"default"` when omitted (Godot's convention). A library already registered under that name returns `already_exists` — no silent overwrite.
+
+**Input:**
+
+- `node_path` (required) — scene-tree path of the target `AnimationPlayer`.
+- `library` (optional, default `"default"`) — name to register the library under. Godot's internal default library key is the empty string; this pack names libraries `"default"` by convention so an agent does not have to know about the empty-string special case. Use a distinct name (`"player"`, `"ui"`) to hold multiple libraries on one player.
+- `paths_hint` (required) — mutation scope (the edited scene path). Mandatory even when `gate` is `off`.
+- `gate` (optional, default `enforce`) — `enforce` | `warn` | `off`.
+
+**Result:** `{ nodePath, library, animationCount }` (animationCount is `0` for a fresh library) plus the standard `gate` block.
+
+**Errors:** `paths_hint_required`, `missing_parameter`, `edited_scene_unavailable`, `node_not_found`, `wrong_node_type`, `already_exists`, `create_failed`.
+
+### `godot_open_mcp_animation_create`
+
+- Route: `live`
+- Visibility group: `animation`
+- Read-only/mutating: mutating (editor state; marks the scene unsaved)
+- Live editor requirement: requires the bridge
+
+Create an `Animation` clip in a named library on a target `AnimationPlayer`, and return the clip's name + length + loop mode. The library defaults to `"default"` and is auto-created when missing — you do not need to call `animation_library_add` first unless you want a non-default library name or an explicit empty library. A clip already registered under that name in that library returns `already_exists`. An explicit-but-unrecognized `loop_mode` returns `invalid_parameter`; an absent `loop_mode` leaves the Godot default (`none`).
+
+**Input:**
+
+- `node_path` (required) — scene-tree path of the target `AnimationPlayer`.
+- `animation` (required) — clip name (the key the clip is registered under in the library, e.g. `"Idle"`).
+- `library` (optional, default `"default"`) — library to add the clip to. Auto-created when missing.
+- `length` (optional, default `1.0`) — clip length in seconds. Clamped to strictly positive.
+- `loop_mode` (optional) — `"none"` | `"linear"` | `"pingpong"`. Absent leaves the Godot default (`none`).
+- `paths_hint` (required) — mutation scope (the edited scene path). Mandatory even when `gate` is `off`.
+- `gate` (optional, default `enforce`) — `enforce` | `warn` | `off`.
+
+**Result:** `{ nodePath, library, animation, length, loopMode }` plus the standard `gate` block.
+
+**Errors:** `paths_hint_required`, `missing_parameter`, `invalid_parameter` (bad `loop_mode`), `edited_scene_unavailable`, `node_not_found`, `wrong_node_type`, `already_exists`, `create_failed`.
+
+### `godot_open_mcp_animation_add_track`
+
+- Route: `live`
+- Visibility group: `animation`
+- Read-only/mutating: mutating (editor state; marks the scene unsaved)
+- Live editor requirement: requires the bridge
+
+Add a track to an `Animation` clip in a named library on a target `AnimationPlayer`, and return the new track's index (pass it to `animation_insert_key`). v1 supports four track types: `value` (animate any property), `position_3d` / `rotation_3d` / `scale_3d` (animate a Node3D transform component; rotation is in radians). Other Godot track types return `unsupported_track_type`. The `track_path` is a NodePath string Godot resolves relative to the AnimationPlayer's `root_node` — e.g. `"Sprite2D:position"` animates the `position` property of a node named Sprite2D. A wrong path is accepted at authoring time but produces no playback effect; the result echoes the path so an agent can verify. For value tracks an optional `update_mode` sets how Godot applies the value (`continuous` / `discrete` / `capture`; `continuous` is the default).
+
+**Input:**
+
+- `node_path` (required) — scene-tree path of the target `AnimationPlayer`.
+- `library` (optional, default `"default"`) — library holding the clip.
+- `animation` (required) — clip name.
+- `track_type` (required) — `"value"` | `"position_3d"` | `"rotation_3d"` | `"scale_3d"`.
+- `track_path` (required) — NodePath string relative to the player's `root_node` (e.g. `"Sprite2D:position"`, `"Player:rotation"`).
+- `value_type` (optional) — informational hint for value tracks (e.g. `"float"`, `"bool"`). Reserved for a future validation pass.
+- `update_mode` (optional, value tracks only, default `continuous`) — `"continuous"` | `"discrete"` | `"capture"`. Ignored for transform tracks.
+- `paths_hint` (required) — mutation scope (the edited scene path). Mandatory even when `gate` is `off`.
+- `gate` (optional, default `enforce`) — `enforce` | `warn` | `off`.
+
+**Result:** `{ nodePath, library, animation, trackIndex, trackType, trackPath, updateMode?, keyCount }` (`updateMode` only for value tracks; `keyCount` is `0` for a fresh track) plus the standard `gate` block.
+
+**Errors:** `paths_hint_required`, `missing_parameter`, `unsupported_track_type`, `library_not_found`, `animation_not_found`, `edited_scene_unavailable`, `node_not_found`, `wrong_node_type`, `create_failed`.
+
+### `godot_open_mcp_animation_insert_key`
+
+- Route: `live`
+- Visibility group: `animation`
+- Read-only/mutating: mutating (editor state; marks the scene unsaved)
+- Live editor requirement: requires the bridge
+
+Insert a keyframe at the given time on a track in an `Animation` clip, and return the key index Godot assigned (plus the track's new key count). The `value` is a typed JSON token the handler converts to a Godot Variant — supported shapes: number → float; bool; string; `{x,y}` → Vector2; `{x,y,z}` → Vector3; `{r,g,b[,a]}` → Color (`a` defaults to 1). A type-tagged object (`{type:"vector3",...}`) overrides component inference. Godot checks the Variant type against the track type at insertion — a value track accepts the property's type, a transform track requires a Vector3 (rotation in radians). A mismatch returns `invalid_parameter`. An optional `interpolation` overrides the per-key easing (`nearest` / `linear` / `cubic`; absent leaves the Godot default). An optional `transition` sets the easing curve weight (default `1.0`).
+
+**Input:**
+
+- `node_path` (required) — scene-tree path of the target `AnimationPlayer`.
+- `library` (optional, default `"default"`) — library holding the clip.
+- `animation` (required) — clip name.
+- `track_index` (required) — track index (the value returned by `animation_add_track`).
+- `time` (required) — keyframe time in seconds.
+- `value` (required) — number / boolean / string / `{x,y}` / `{x,y,z}` / `{r,g,b[,a]}` / `{type,...}`.
+- `interpolation` (optional) — `"nearest"` | `"linear"` | `"cubic"`.
+- `transition` (optional, default `1.0`) — easing curve weight.
+- `paths_hint` (required) — mutation scope (the edited scene path). Mandatory even when `gate` is `off`.
+- `gate` (optional, default `enforce`) — `enforce` | `warn` | `off`.
+
+**Result:** `{ nodePath, library, animation, trackIndex, keyIndex, time, keyCount }` plus the standard `gate` block.
+
+**Errors:** `paths_hint_required`, `missing_parameter`, `invalid_parameter` (bad value or interpolation), `library_not_found`, `animation_not_found`, `track_not_found`, `edited_scene_unavailable`, `node_not_found`, `wrong_node_type`.
+
+### `godot_open_mcp_animation_get`
+
+- Route: `live`
+- Visibility group: `animation`
+- Read-only/mutating: read-only
+- Live editor requirement: requires the bridge
+
+Read the libraries / animations / tracks of an `AnimationPlayer` in a bounded JSON envelope. Returns the full hierarchy: player → libraries[] → animations[] → tracks[] (each track carries `index` / `type` / `path` / `keyCount`). Does **not** dump every key by default — pass `include_keys: true` plus an optional `animation` filter and `max_keys` to dump keys for one clip (capped at `max_keys` per track, default `32`, hard max `256`; a `truncated` count is reported when the cap bites). Optional `library` / `animation` filters restrict the walk to one library or one clip (an animation filter without a library filter looks in `"default"`). A filter that does not resolve returns `library_not_found` / `animation_not_found`.
+
+**Input:**
+
+- `node_path` (required) — scene-tree path of the target `AnimationPlayer`.
+- `library` (optional) — library name filter. When absent, all libraries on the player are listed.
+- `animation` (optional) — clip name filter. When set without a `library` filter, looks in `"default"`.
+- `include_keys` (optional, default `false`) — if `true`, each track also carries a bounded `keys` array (`time` / `transition` / `value`).
+- `max_keys` (optional, default `32`, clamped to `[0, 256]`) — max keys per track when `include_keys` is `true`. `0` returns no keys (just the `keyCount`).
+
+**Result:** `{ nodePath, libraries: [{ name, animations: [{ name, length, loopMode, tracks: [{ index, type, path, keyCount, keys? }] }] }] }`.
+
+**Errors:** `missing_parameter`, `edited_scene_unavailable`, `node_not_found`, `wrong_node_type`, `library_not_found`, `animation_not_found`.
 
 ## Offline fidelity limitations
 

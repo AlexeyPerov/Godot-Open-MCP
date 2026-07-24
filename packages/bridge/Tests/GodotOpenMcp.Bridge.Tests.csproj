@@ -252,6 +252,20 @@
          Defaults / Create / Configure / SetEmitting / Get — EditorInterface/GpuParticles-coupled) is
          #if TOOLS and verified via the headless Godot smoke / live call path, not here. -->
     <Compile Include="..\Editor\Tools\Extensions\Particles\ParticlesBodies.cs" Link="Source\Particles\ParticlesBodies.cs" />
+    <!-- P12.4 — animation domain pack. The pure-managed body parsers
+         (AnimationDefaultsBody / AnimationPlayerCreateBody / AnimationLibraryAddBody /
+         AnimationCreateBody / AnimationAddTrackBody / AnimationInsertKeyBody /
+         AnimationGetBody, the four enum parsers (AnimationLoopModeParser /
+         AnimationTrackTypeParser / AnimationInterpolationParser / AnimationUpdateModeParser),
+         and the JSON value parser AnimationKeyValue) are linked for unit testing. They reuse
+         the P12.1 JsonScalar extractor (linked above). The value parser (AnimationKeyValue)
+         is the highest-value unit-test surface in this pack — it pins the JSON-to-Variant
+         contract for number / bool / string / vector2 / vector3 / color without requiring
+         the editor. The editor-only handler (AnimationTools.Defaults / PlayerCreate /
+         LibraryAdd / AnimationCreate / AddTrack / InsertKey / Get — EditorInterface /
+         AnimationPlayer / AnimationLibrary / Animation-coupled) is #if TOOLS and verified
+         via the headless Godot smoke / live call path, not here. -->
+    <Compile Include="..\Editor\Tools\Extensions\Animation\AnimationBodies.cs" Link="Source\Animation\AnimationBodies.cs" />
     <!-- P3.5 — gate on mutators. The gate types (GateMode/GateOutcome/DeltaData/GateDispatchResult/
          GatePolicy/GateDefaultPolicy) and the VerifyGateAdapter are pure-managed for the parts the unit
          tests exercise (decision matrix, next-step hints, delta math, gate-mode parsing). GatePolicy

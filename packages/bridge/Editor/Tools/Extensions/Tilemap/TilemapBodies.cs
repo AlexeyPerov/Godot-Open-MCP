@@ -306,7 +306,13 @@ namespace GodotOpenMcp.Bridge.Editor
             return null;
         }
 
-        static string? ExtractRawValue(string body, string key)
+        /// <summary>
+        /// Internal entry point so other packs (P12.4 animation's value parser) can reuse the
+        /// exact same key→raw-value scanner without duplicating it. The public siblings
+        /// (<see cref="ExtractString"/> / <see cref="ExtractInt"/> / <see cref="ExtractFloat"/>
+        /// / <see cref="ExtractIntOrNull"/> / <see cref="ExtractBool"/>) delegate here.
+        /// </summary>
+        internal static string? ExtractRawValue(string body, string key)
         {
             var quotedKey = "\"" + key + "\"";
             var idx = body.IndexOf(quotedKey, StringComparison.Ordinal);
@@ -328,8 +334,54 @@ namespace GodotOpenMcp.Bridge.Editor
             if (body[start] == '"')
                 return SliceQuotedString(body, start);
 
+            // Object / array value: slice the balanced {...} or [...], honoring quoted strings
+            // inside so a comma or brace in a nested string does not end the value early. Used
+            // by P12.4 animation's value parser (vector2 / vector3 / color objects). A scalar
+            // body never reaches this branch (no object-typed scalar in the P12.1–P12.3 packs),
+            // so this is additive — existing parsers are unaffected.
+            if (body[start] == '{' || body[start] == '[')
+                return SliceBalanced(body, start);
+
             // Number / boolean / etc.: slice to the next comma or closing brace.
             return SliceBareToken(body, start);
+        }
+
+        /// <summary>
+        /// Slice a balanced JSON object (<c>{…}</c>) or array (<c>[…]</c>) starting at
+        /// <paramref name="start"/>. Tracks brace/bracket depth and skips over quoted strings
+        /// (honoring backslash escapes) so a comma/brace inside a nested string does not
+        /// prematurely close the slice. Returns the substring from the opening delimiter
+        /// through the matching close. Falls back to a best-effort substring if the input is
+        /// malformed (unterminated) so the caller still gets a token to parse.
+        /// </summary>
+        static string SliceBalanced(string body, int start)
+        {
+            char open = body[start];
+            char close = open == '{' ? '}' : ']';
+            int depth = 0;
+            int i = start;
+            bool inString = false;
+            while (i < body.Length)
+            {
+                char c = body[i];
+                if (inString)
+                {
+                    if (c == '\\' && i + 1 < body.Length) { i += 2; continue; }
+                    if (c == '"') inString = false;
+                    i++;
+                    continue;
+                }
+                if (c == '"') { inString = true; i++; continue; }
+                if (c == open) depth++;
+                else if (c == close)
+                {
+                    depth--;
+                    if (depth == 0) return body.Substring(start, i - start + 1);
+                }
+                i++;
+            }
+            // Unterminated — return the rest so the parser can degrade gracefully.
+            return body.Substring(start);
         }
 
         static string SliceQuotedString(string body, int start)

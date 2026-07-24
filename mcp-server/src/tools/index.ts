@@ -68,6 +68,13 @@ import { particlesCreate } from "./particles-create.js";
 import { particlesConfigure } from "./particles-configure.js";
 import { particlesSetEmitting } from "./particles-set-emitting.js";
 import { particlesGet } from "./particles-get.js";
+import { animationDefaults } from "./animation-defaults.js";
+import { animationPlayerCreate } from "./animation-player-create.js";
+import { animationLibraryAdd } from "./animation-library-add.js";
+import { animationCreate } from "./animation-create.js";
+import { animationAddTrack } from "./animation-add-track.js";
+import { animationInsertKey } from "./animation-insert-key.js";
+import { animationGet } from "./animation-get.js";
 import { bridgeStatus } from "./bridge-status.js";
 import { pullEvents } from "./pull-events.js";
 import { readCompileErrors } from "./read-compile-errors.js";
@@ -207,6 +214,23 @@ export const ALL_TOOLS: Tool[] = [
   particlesConfigure,
   particlesSetEmitting,
   particlesGet,
+  // P12.4 — animation domain pack: seven AnimationPlayer tools (group `animation`, hidden
+  // until activated via manage_tools). defaults returns recommended starter length + loop
+  // mode (read-only helper); player_create makes an AnimationPlayer node; library_add
+  // registers an empty AnimationLibrary under a name on a player; animation_create creates
+  // an Animation clip in a named library (auto-creating the library when missing);
+  // add_track adds a value / position_3d / rotation_3d / scale_3d track and returns its
+  // index; insert_key inserts a keyframe on a track and returns the key index; get reads
+  // the player's libraries / animations / tracks (bounded; keys opt-in). The five mutators
+  // default to gate "enforce" and require paths_hint scoped to the edited scene. The two
+  // read-only tools (defaults + get) are gate-free. Fourth Phase 12 domain pack.
+  animationDefaults,
+  animationPlayerCreate,
+  animationLibraryAdd,
+  animationCreate,
+  animationAddTrack,
+  animationInsertKey,
+  animationGet,
   // P5.3 — bridge_status: operator-oriented health snapshot. Composes the instance-lock classifier
   // (instance-discovery.ts#classifyInstance) with one /ping probe and returns a coarse status token
   // (running | compiling | stopped | unreachable | dead_bridge) + classification + recoveryHint.
