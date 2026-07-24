@@ -200,8 +200,11 @@ namespace GodotOpenMcp.Bridge.Editor
     // class so every tilemap body type shares one implementation without widening the
     // namespace surface. P12.2 (navigation) is the "third family" the original comment
     // anticipated — it reuses this class rather than duplicating a third copy, and adds
-    // ExtractFloat / ExtractBool for the navigation agent scalars. If a fourth family
-    // needs a different extractor, add it here.
+    // ExtractFloat / ExtractBool for the navigation agent scalars. P12.3 (particles) is
+    // the fourth family — it adds ExtractIntOrNull for the particles pack's nullable int
+    // scalars (amount / fixed_fps) that follow the same "null = leave unchanged" contract
+    // as the float/bool extractors. If a fifth family needs a different extractor, add it
+    // here.
     // ===========================================================================
 
     internal static class JsonScalar
@@ -258,11 +261,40 @@ namespace GodotOpenMcp.Bridge.Editor
         }
 
         /// <summary>
+        /// Extract a nullable int scalar. Returns null when the key is absent, explicitly null, or
+        /// not a parseable integer — the caller treats null as "leave unchanged" (P12.3 particles
+        /// configure contract, mirroring the float/bool nullable pattern). Added in P12.3 for the
+        /// particles pack's clamped int scalars (amount / fixed_fps); the existing
+        /// <see cref="ExtractInt"/> overload takes a default value and is used by the tilemap pack
+        /// where every int has a sensible default. Parses as long first so a value outside the int
+        /// range degrades to null instead of throwing.
+        /// </summary>
+        internal static int? ExtractIntOrNull(string body, string key)
+        {
+            var raw = ExtractRawValue(body, key);
+            if (raw == null) return null;
+            var trimmed = raw.AsSpan().Trim();
+            int end = 0;
+            if (trimmed.Length > 0 && (trimmed[0] == '-' || trimmed[0] == '+')) end = 1;
+            while (end < trimmed.Length && char.IsDigit(trimmed[end])) end++;
+            if (end == 0 || (end == 1 && trimmed.Length > 0 && (trimmed[0] == '-' || trimmed[0] == '+')))
+                return null;
+            if (long.TryParse(trimmed.Slice(0, end), NumberStyles.Integer,
+                    CultureInfo.InvariantCulture, out var v))
+            {
+                if (v < int.MinValue || v > int.MaxValue) return null;
+                return (int)v;
+            }
+            return null;
+        }
+
+        /// <summary>
         /// Extract a bool scalar. Returns null when the key is absent, explicitly null, or not a
         /// recognized bool literal — the caller treats null as "leave unchanged". Recognizes the
         /// JSON bool literals <c>true</c> / <c>false</c> (case-sensitive per the JSON spec; a
         /// stray <c>True</c> degrades to null). Added in P12.2 for the navigation pack's
-        /// avoidance_enabled / bidirectional flags.
+        /// avoidance_enabled / bidirectional flags; reused by the P12.3 particles pack's
+        /// one_shot / interpolate / fract_delta / local_coords flags.
         /// </summary>
         internal static bool? ExtractBool(string body, string key)
         {

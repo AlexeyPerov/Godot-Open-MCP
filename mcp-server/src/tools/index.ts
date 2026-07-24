@@ -63,6 +63,11 @@ import { navigationAgentCreate } from "./navigation-agent-create.js";
 import { navigationAgentConfigure } from "./navigation-agent-configure.js";
 import { navigationLinkCreate } from "./navigation-link-create.js";
 import { navigationGet } from "./navigation-get.js";
+import { particlesDefaults } from "./particles-defaults.js";
+import { particlesCreate } from "./particles-create.js";
+import { particlesConfigure } from "./particles-configure.js";
+import { particlesSetEmitting } from "./particles-set-emitting.js";
+import { particlesGet } from "./particles-get.js";
 import { bridgeStatus } from "./bridge-status.js";
 import { pullEvents } from "./pull-events.js";
 import { readCompileErrors } from "./read-compile-errors.js";
@@ -187,6 +192,21 @@ export const ALL_TOOLS: Tool[] = [
   navigationAgentConfigure,
   navigationLinkCreate,
   navigationGet,
+  // P12.3 — particles domain pack: five GpuParticles tools (group `particles`, hidden until
+  // activated via manage_tools). defaults returns recommended starter scalars for a 2D/3D emitter
+  // (read-only helper); create makes a GpuParticles2D/3D node with optional initial properties +
+  // an optional process_material_path (ParticleProcessMaterial) assignment; configure patches
+  // clamped scalar properties on an emitter (allow-list + centralized clamps; emitting is excluded
+  // — use set_emitting); set_emitting starts/stops emission with an optional restart that clears
+  // existing particles; get reads an emitter's scalar config + type/dimension + process material
+  // path (read-only). The three mutators default to gate "enforce" and require paths_hint scoped
+  // to the edited scene. The two read-only tools (defaults + get) are gate-free. Third Phase 12
+  // domain pack.
+  particlesDefaults,
+  particlesCreate,
+  particlesConfigure,
+  particlesSetEmitting,
+  particlesGet,
   // P5.3 — bridge_status: operator-oriented health snapshot. Composes the instance-lock classifier
   // (instance-discovery.ts#classifyInstance) with one /ping probe and returns a coarse status token
   // (running | compiling | stopped | unreachable | dead_bridge) + classification + recoveryHint.

@@ -58,6 +58,11 @@ The table below is the published view of `ALL_TOOLS`. The `scripts/check-tool-do
 | `godot_open_mcp_node_find` | node | live | typed-editor | no | n/a | Find Nodes in the edited scene (targeted lookup or filtered list). |
 | `godot_open_mcp_node_modify` | node | live | typed-editor | editor state | warn/off capable | Apply property/transform updates to one or more Nodes (single + batch). |
 | `godot_open_mcp_node_set_parent` | node | live | typed-editor | editor state | warn/off capable | Reparent a Node via `Node.Reparent`, cycle-safe, transform-preserving by default. |
+| `godot_open_mcp_particles_configure` | particles | live | particles | editor state | enforce | Patch clamped scalar properties on a `GpuParticles2D`/`3D` emitter (allow-list only). |
+| `godot_open_mcp_particles_create` | particles | live | particles | editor state | enforce | Create a `GpuParticles2D`/`3D` node (+ optional initial scalars + process material). |
+| `godot_open_mcp_particles_defaults` | particles | live | particles | no | n/a | Recommended starter scalars for a 2D/3D emitter (pure helper, no scene). |
+| `godot_open_mcp_particles_get` | particles | live | particles | no | n/a | Read an emitter's scalar config + type/dimension + process material path. |
+| `godot_open_mcp_particles_set_emitting` | particles | live | particles | editor state | enforce | Start/stop emission on a `GpuParticles2D`/`3D`; optional restart clears particles. |
 | `godot_open_mcp_ping` | core | live | core | no | n/a | Bridge health check (`GET /ping` round-trip). |
 | `godot_open_mcp_pull_events` | core | local | always visible | no | n/a | Drain incremental bridge events (console logs + editor-state transitions) since the last pull. |
 | `godot_open_mcp_read_compile_errors` | core | offline | always visible | no | n/a | Offline diagnostic: read a bounded Godot log tail and extract structured C#/GDScript/load errors. |
@@ -128,7 +133,8 @@ The MCP server filters `ListTools` through a per-session `ToolSessionState` so t
 | `typed-editor` | no | The whole typed editor surface: nodes, scenes, resources, filesystem, editor state/selection, console, screenshots, reflection. One activate brings up the full typed surface. |
 | `tilemap` | no | Godot 4.3+ `TileMapLayer` tools: create a layer, assign a `TileSet`, set/erase/clear cells, list used cells. |
 | `navigation` | no | Godot 4.3+ navigation tools (2D + 3D): starter defaults, create `NavigationRegion`/`Agent`/`Link`, assign a region's navigation resource, configure agent scalars, inspect any navigation node. |
-| `particles` / `animation` / `csg` | no | Domain pack stubs. Reserved ids with empty tool rosters — empty until the packs ship. |
+| `particles` | no | Godot 4.3+ `GpuParticles2D`/`3D` tools (2D + 3D): starter defaults, create an emitter (+ optional initial scalars + process material), configure allow-listed + clamped scalars, start/stop emission (with optional restart), inspect any emitter. |
+| `animation` / `csg` | no | Domain pack stubs. Reserved ids with empty tool rosters — empty until the packs ship. |
 
 The catalog source of truth is `mcp-server/src/capabilities/tool-groups.ts`. Activate or deactivate groups with `godot_open_mcp_manage_tools`; on a successful change the server emits the MCP `notifications/tools/list_changed` notification so clients that support `listChanged` refresh `ListTools` automatically. Hiding a tool is a prompt-size control, not an authorization boundary — a hidden tool name still routes when called directly.
 
@@ -1867,6 +1873,138 @@ Read the scalar configuration of any navigation node — a `NavigationRegion2D/3
 - `node_path` (required) — scene-tree path of the target navigation node.
 
 **Result:** `{ nodePath, type, dimension, kind, … }` where `kind` is `"region"` | `"agent"` | `"link"`. For a region, `meshPath` (or `null`). For an agent, `properties: { radius, height, maxSpeed, pathDesiredDistance, targetDesiredDistance, avoidanceEnabled }`. For a link, `properties: { startPosition, endPosition, bidirectional }`.
+
+**Errors:** `missing_parameter`, `edited_scene_unavailable`, `node_not_found`, `wrong_node_type`.
+
+## Particles tools
+
+Particles tools author Godot 4.3+ GPU particle emitters — `GpuParticles2D` and `GpuParticles3D`. Every tool that creates an emitter takes a `dimension` arg (`"2d"` | `"3d"`) to select the parallel class hierarchy; the read/configure tools infer the dimension from the resolved node's class.
+
+This is a **`particles` group** family — hidden from `ListTools` until an agent activates it via `godot_open_mcp_manage_tools({ action: "activate", group: "particles" })`. As with every group, hiding is a prompt-size control, not an authorization boundary — a hidden tool name still routes when called directly.
+
+**Scope.** `GpuParticles2D` and `GpuParticles3D` only — not `CPUParticles2D/3D`, not `GPUParticlesAttractor*` / `GPUParticlesCollision*`. The configure surface is a fixed scalar allow-list with centralized clamping (particles tuning has many interdependent properties and easy-to-set invalid ranges); `emitting` is intentionally excluded — use the dedicated `particles_set_emitting` tool. Full `ParticleProcessMaterial` graph authoring is out of scope for v1: `create` / `configure` accept an optional `process_material_path` pointing at a pre-existing `ParticleProcessMaterial` (an emitter renders nothing without one). `particles_get` reports the scalar config + the process-material path only (no particle-instance arrays).
+
+**Scalar allow-list + clamps.** `configure` (and the initial `properties` object on `create`) accept exactly these scalars:
+
+| Property | Type | Clamp |
+|---|---|---|
+| `amount` | int | `[1, 100000]` |
+| `lifetime` | float | strictly positive (`> 0`) |
+| `preprocess` | float | non-negative (`≥ 0`) |
+| `speed_scale` | float | non-negative (`≥ 0`) |
+| `explosiveness` | float | `[0, 1]` |
+| `randomness` | float | `[0, 1]` |
+| `fixed_fps` | int | non-negative (`≥ 0`; 0 = render frame rate) |
+| `one_shot` / `interpolate` / `fract_delta` / `local_coords` | bool | pass-through |
+
+**Shared contracts.** `node_path` follows the same scene-tree vocabulary as `node_find` / `node_create`. `paths_hint` is the edited scene `res://` path (mandatory on every mutator, even when `gate` is `off`). The three mutators run the gate cycle by default (`enforce`); the two read-only tools (`defaults`, `get`) are gate-free.
+
+### `godot_open_mcp_particles_defaults`
+
+- Route: `live`
+- Visibility group: `particles`
+- Read-only/mutating: read-only (pure helper — no scene required)
+- Live editor requirement: requires the bridge
+
+Return recommended starter scalars (amount, lifetime, one_shot, preprocess, speed_scale, explosiveness, randomness, fixed_fps, interpolate, fract_delta, local_coords) for a 2D or 3D emitter as a JSON object an agent can spread into `particles_create`'s initial `properties` object or use as guidance for `particles_configure`. The 2D defaults lean slightly cheaper on amount (30 vs 16); both are mid-range values inside the clamp ranges so a spread-into-configure round-trips without clamping.
+
+**Input:**
+
+- `dimension` (required) — `"2d"` | `"3d"`.
+
+**Result:** `{ dimension, properties: { amount, lifetime, oneShot, preprocess, speedScale, explosiveness, randomness, fixedFps, interpolate, fractDelta, localCoords } }`.
+
+**Errors:** `invalid_parameter` (`dimension` not `"2d"`/`"3d"`).
+
+### `godot_open_mcp_particles_create`
+
+- Route: `live`
+- Visibility group: `particles`
+- Read-only/mutating: mutating (editor state; marks the scene unsaved)
+- Live editor requirement: requires the bridge
+
+Create a `GpuParticles2D` (`dimension: "2d"`) or `GpuParticles3D` (`dimension: "3d"`) node in the currently edited scene and return its NodeData (same shape as `node_create`). A GPU emitter needs a process material (typically a `ParticleProcessMaterial`) to render anything — pass an optional `process_material_path` to assign one at create time. An optional initial `properties` object applies the same allow-listed + clamped scalars as `particles_configure` post-creation.
+
+**Input:**
+
+- `dimension` (required) — `"2d"` | `"3d"`.
+- `name` (optional) — Node name. When omitted, Godot assigns the default (`GPUParticles3D`, etc.).
+- `parent_node_path` (optional, default edited scene root) — scene-tree path of the parent.
+- `position` (optional) — `'x,y'` (2D) or `'x,y,z'` (3D), applied because the emitter derives from `Node2D` / `Node3D`.
+- `process_material_path` (optional) — `res://` (or `uid://`) path to an existing `ProcessMaterial` (`ParticleProcessMaterial` is the typical choice). A type mismatch returns `resource_load_failed`. Omit to assign one later.
+- `properties` (optional) — initial scalar properties (same allow-list + clamps as `particles_configure`). Only the fields you send are applied.
+- `paths_hint` (required) — mutation scope (the edited scene `res://` path). Mandatory even when `gate` is `off`.
+- `gate` (optional, default `enforce`) — `enforce` | `warn` | `off`.
+
+**Result:** a NodeData object (`{ instanceId, name, path, type, scriptResourcePath, childCount, children }`) plus the standard `gate` block.
+
+**Errors:** `paths_hint_required`, `invalid_parameter` (bad `dimension`), `edited_scene_unavailable`, `parent_not_found`, `create_failed`, `resource_not_found`, `resource_load_failed` (bad process material).
+
+### `godot_open_mcp_particles_configure`
+
+- Route: `live`
+- Visibility group: `particles`
+- Read-only/mutating: mutating (editor state; marks the scene unsaved)
+- Live editor requirement: requires the bridge
+
+Patch clamped scalar properties on a `GpuParticles2D` or `GpuParticles3D`. Only the fields you send are applied — omitted scalars are left unchanged. `amount` is clamped to `[1, 100000]`; `lifetime` to strictly positive; `preprocess` and `speed_scale` to non-negative; `explosiveness` and `randomness` to `[0, 1]`; `fixed_fps` to non-negative; the booleans pass through. A non-numeric value is silently skipped (non-aborting). The same property names apply to both the 2D and 3D emitter classes. `emitting` is intentionally not configurable here — use `particles_set_emitting`.
+
+**Input:**
+
+- `node_path` (required) — scene-tree path of the target `GpuParticles2D/3D`.
+- `amount` (optional) — number of particles. Clamped to `[1, 100000]`.
+- `lifetime` (optional) — particle lifetime in seconds. Clamped to strictly positive.
+- `one_shot` (optional) — emit once and stop (one-shot burst).
+- `preprocess` (optional) — preprocess duration in seconds (simulate before the first frame so the emitter appears populated). Clamped to non-negative.
+- `speed_scale` (optional) — simulation speed scale. Clamped to non-negative. `1.0` = real-time.
+- `explosiveness` (optional) — emission explosiveness ratio. Clamped to `[0, 1]`.
+- `randomness` (optional) — emission randomness ratio. Clamped to `[0, 1]`.
+- `fixed_fps` (optional) — fixed simulation framerate. Clamped to non-negative. `0` = render frame rate.
+- `interpolate` (optional) — interpolate particle positions between fixed-fps steps.
+- `fract_delta` (optional) — use fractional delta time for smoother timing.
+- `local_coords` (optional) — use the emitter's local coordinate space (vs global).
+- `paths_hint` (required) — mutation scope (the edited scene path). Mandatory even when `gate` is `off`.
+- `gate` (optional, default `enforce`) — `enforce` | `warn` | `off`.
+
+**Result:** `{ nodePath, applied: { …only the keys written, clamped… } }` plus the standard `gate` block.
+
+**Errors:** `paths_hint_required`, `missing_parameter`, `edited_scene_unavailable`, `node_not_found`, `wrong_node_type`.
+
+### `godot_open_mcp_particles_set_emitting`
+
+- Route: `live`
+- Visibility group: `particles`
+- Read-only/mutating: mutating (editor state; marks the scene unsaved)
+- Live editor requirement: requires the bridge
+
+Start or stop emission on a `GpuParticles2D` or `GpuParticles3D` by setting its `emitting` flag. Pass `emitting: true` to start, `false` to stop. When `restart: true`, Godot's `Restart()` is called first — it clears existing particles and restarts the emission cycle (useful for one-shot re-fire or resetting a continuous emitter's accumulator). This is the single toggle path — `emitting` is intentionally not in `particles_configure`'s allow-list.
+
+**Input:**
+
+- `node_path` (required) — scene-tree path of the target `GpuParticles2D/3D`.
+- `emitting` (required) — `true` to start, `false` to stop. A non-boolean (e.g. `1`) returns `missing_parameter`.
+- `restart` (optional, default `false`) — call `Restart()` before flipping `emitting`.
+- `paths_hint` (required) — mutation scope (the edited scene path). Mandatory even when `gate` is `off`.
+- `gate` (optional, default `enforce`) — `enforce` | `warn` | `off`.
+
+**Result:** `{ nodePath, emitting, restarted }` plus the standard `gate` block.
+
+**Errors:** `paths_hint_required`, `missing_parameter`, `edited_scene_unavailable`, `node_not_found`, `wrong_node_type`.
+
+### `godot_open_mcp_particles_get`
+
+- Route: `live`
+- Visibility group: `particles`
+- Read-only/mutating: read-only
+- Live editor requirement: requires the bridge
+
+Read the scalar configuration of a `GpuParticles2D` or `GpuParticles3D`. The result includes the resolved `type` and `dimension` so an agent does not need a second probe, plus the full allow-listed scalar set (mirroring `particles_configure`'s allow-list, so a get → configure round-trip is lossless on those properties) and the `process_material_path` (or `null` when unassigned).
+
+**Input:**
+
+- `node_path` (required) — scene-tree path of the target `GpuParticles2D/3D`.
+
+**Result:** `{ nodePath, type, dimension, properties: { amount, lifetime, oneShot, preprocess, speedScale, explosiveness, randomness, fixedFps, interpolate, fractDelta, localCoords, emitting }, processMaterialPath }`.
 
 **Errors:** `missing_parameter`, `edited_scene_unavailable`, `node_not_found`, `wrong_node_type`.
 

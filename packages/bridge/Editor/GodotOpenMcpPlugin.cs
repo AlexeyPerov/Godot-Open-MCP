@@ -172,6 +172,12 @@ namespace GodotOpenMcp.Bridge.Editor
                 // and get are gate-free. Idempotent re-register refreshes the handler references
                 // after a domain reload.
                 NavigationTools.RegisterNavigationTools();
+                // P12.3 — particles domain pack: five GpuParticles tools (defaults / create /
+                // configure / set_emitting / get), group particles. The third Phase 12 domain pack.
+                // The three mutators register defaultGate:"enforce" and validate paths_hint
+                // themselves; the read-only defaults and get are gate-free. Idempotent re-register
+                // refreshes the handler references after a domain reload.
+                ParticlesTools.RegisterParticlesTools();
 
                 // Start the HTTP listener serving /ping and POST /tools/{name}. Stays down
                 // (and connected:false) if the bind fails — the editor remains usable, the

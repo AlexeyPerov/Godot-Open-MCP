@@ -241,6 +241,17 @@
          LinkCreate / Get — EditorInterface/NavigationRegion/Agent/Link-coupled) is #if TOOLS and
          verified via the headless Godot smoke / live call path, not here. -->
     <Compile Include="..\Editor\Tools\Extensions\Navigation\NavigationBodies.cs" Link="Source\Navigation\NavigationBodies.cs" />
+    <!-- P12.3 — particles domain pack. The pure-managed body parsers
+         (ParticlesDefaultsBody / ParticlesCreateBody / ParticlesConfigureBody /
+         ParticlesSetEmittingBody / ParticlesGetBody, the ParticlesDimension enum, the
+         ParticlesDimensionParser, and the ParticlesPropertyClamp clamp table) are linked for unit
+         testing. They reuse the P12.1 JsonScalar extractor (linked above), which P12.3 extends with
+         ExtractIntOrNull for the particles pack's nullable int scalars (amount / fixed_fps). The
+         clamp table (ParticlesPropertyClamp) is the highest-value unit-test surface in this pack —
+         it pins the allow-list ranges without the editor. The editor-only handler (ParticlesTools.
+         Defaults / Create / Configure / SetEmitting / Get — EditorInterface/GpuParticles-coupled) is
+         #if TOOLS and verified via the headless Godot smoke / live call path, not here. -->
+    <Compile Include="..\Editor\Tools\Extensions\Particles\ParticlesBodies.cs" Link="Source\Particles\ParticlesBodies.cs" />
     <!-- P3.5 — gate on mutators. The gate types (GateMode/GateOutcome/DeltaData/GateDispatchResult/
          GatePolicy/GateDefaultPolicy) and the VerifyGateAdapter are pure-managed for the parts the unit
          tests exercise (decision matrix, next-step hints, delta math, gate-mode parsing). GatePolicy

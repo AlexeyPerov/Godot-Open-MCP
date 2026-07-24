@@ -95,7 +95,9 @@ export const TOOL_GROUPS: ToolGroup[] = [
   {
     id: "particles",
     description:
-      "GpuParticles tools (domain pack). Empty until the pack ships.",
+      "GpuParticles2D/3D tools (Godot 4.3+, 2D + 3D): starter defaults, create an emitter, " +
+      "configure allow-listed + clamped scalars, set_emitting (start/stop + optional restart), " +
+      "and inspect any emitter.",
     defaultEnabled: false,
   },
   {
@@ -250,6 +252,20 @@ assign(
     "navigation_agent_configure",
     "navigation_link_create",
     "navigation_get",
+  ].map((suffix) => `godot_open_mcp_${suffix}`),
+);
+
+// --- particles (P12.3 — Godot 4.3+ particles domain pack) ------------------
+// Five tools: defaults (read-only) / create / configure / set_emitting / get
+// (read-only). Hidden until activated via manage_tools.
+assign(
+  "particles",
+  [
+    "particles_defaults",
+    "particles_create",
+    "particles_configure",
+    "particles_set_emitting",
+    "particles_get",
   ].map((suffix) => `godot_open_mcp_${suffix}`),
 );
 
