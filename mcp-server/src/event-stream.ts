@@ -63,6 +63,15 @@ export class BridgeEventStream {
   private abortController: AbortController | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private started = false;
+  /**
+   * Latched by {@link stop} so work that settles *after* the stop cannot resurrect the subscription.
+   * Both the connect `.catch` and `pump`'s `finally` call {@link scheduleReconnect}, and aborting the
+   * controller is what makes them run — so without this latch, `stop()` armed a fresh reconnect
+   * timer, whose `connect()` failed, whose `.catch` armed another, forever. The process could then
+   * never exit (an unref'd timer chain plus a live loopback fetch), which is why the shutdown
+   * `eventStream.stop()` in the CLI entrypoint had no effect.
+   */
+  private stopped = false;
 
   constructor(
     private readonly baseUrl: string,
@@ -79,12 +88,15 @@ export class BridgeEventStream {
    */
   ensureSubscription(): boolean {
     if (this.started) return false;
+    // A fresh subscription clears the stop latch, so a stream can be restarted after stop().
+    this.stopped = false;
     this.started = true;
     this.connect();
     return true;
   }
 
   private connect(): void {
+    if (this.stopped) return;
     if (this.abortController) return;
     this.abortController = new AbortController();
     const url =
@@ -221,6 +233,7 @@ export class BridgeEventStream {
   }
 
   private scheduleReconnect(): void {
+    if (this.stopped) return;
     if (this.reconnectTimer) return;
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
@@ -253,6 +266,9 @@ export class BridgeEventStream {
 
   /** Stop the reader and clear state. Idempotent; used in tests and on server shutdown. */
   stop(): void {
+    // Latch first: aborting the controller below makes any in-flight fetch/pump settle, and their
+    // handlers call scheduleReconnect().
+    this.stopped = true;
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;

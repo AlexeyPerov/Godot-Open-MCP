@@ -552,10 +552,13 @@ namespace GodotOpenMcp.Bridge.Editor
         }
 
         /// <summary>
-        /// Load a <c>ParticleProcessMaterial</c> from <paramref name="materialPath"/> and assign it
-        /// to the emitter's <c>ProcessMaterial</c>. Works for both GpuParticles2D and GpuParticles3D
-        /// (both expose ProcessMaterial as a ProcessMaterial base). Returns false with a structured
-        /// error on a missing path or type mismatch; the caller surfaces it.
+        /// Load a process material from <paramref name="materialPath"/> and assign it to the emitter's
+        /// <c>ProcessMaterial</c>. Works for both GpuParticles2D and GpuParticles3D, whose
+        /// <c>ProcessMaterial</c> property is typed as <see cref="Material"/> — the two materials Godot
+        /// accepts there are <c>ParticleProcessMaterial</c> (the usual choice) and <c>ShaderMaterial</c>,
+        /// so the load is typed to the <see cref="Material"/> base and a non-material resource is
+        /// rejected. Returns false with a structured error on a missing path or type mismatch; the
+        /// caller surfaces it.
         /// </summary>
         static bool TryAssignProcessMaterial(Node emitter, string materialPath, out ToolDispatchResult error)
         {
@@ -568,15 +571,15 @@ namespace GodotOpenMcp.Bridge.Editor
                 return false;
             }
 
-            ProcessMaterial material;
+            Material material;
             try
             {
-                var loaded = ResourceLoader.Load<ProcessMaterial>(materialPath);
+                var loaded = ResourceLoader.Load<Material>(materialPath);
                 if (loaded == null)
                 {
                     error = ToolDispatchResult.Fail(
                         "resource_load_failed",
-                        $"Resource at '{materialPath}' exists but is not a ProcessMaterial (ParticleProcessMaterial is the typical choice for GPU particles).");
+                        $"Resource at '{materialPath}' exists but is not a Material (ParticleProcessMaterial is the typical choice for GPU particles).");
                     return false;
                 }
                 material = loaded;
@@ -584,7 +587,7 @@ namespace GodotOpenMcp.Bridge.Editor
             catch (System.Exception e)
             {
                 error = ToolDispatchResult.Fail("resource_load_failed",
-                    $"Failed to load ProcessMaterial from '{materialPath}': {e.Message}");
+                    $"Failed to load a process Material from '{materialPath}': {e.Message}");
                 return false;
             }
 

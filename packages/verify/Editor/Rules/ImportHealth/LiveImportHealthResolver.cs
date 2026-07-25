@@ -56,11 +56,10 @@ namespace GodotOpenMcp.Verify.Rules.ImportHealth
         {
             if (string.IsNullOrWhiteSpace(uid)) return false;
 
-            var token = uid!;
-            const string scheme = "uid://";
-            if (token.StartsWith(scheme))
-                token = token.Substring(scheme.Length);
-            if (string.IsNullOrEmpty(token)) return false;
+            // Keep the `uid://` scheme — see LiveResourceResolver.UidExists: text_to_id rejects a token
+            // without it and returns InvalidId.
+            var token = uid!.Trim();
+            if (!token.StartsWith("uid://", System.StringComparison.Ordinal)) return false;
 
             long id;
             try
@@ -71,13 +70,21 @@ namespace GodotOpenMcp.Verify.Rules.ImportHealth
             {
                 return false;
             }
+            if (id == ResourceUid.InvalidId) return false;
             return ResourceUid.Singleton.HasId(id);
         }
 
         public IReadOnlyList<string> EnumerateImportSidecars(string? resRoot)
         {
-            var root = string.IsNullOrWhiteSpace(resRoot) ? "res://" : resRoot!.TrimEnd('/') + "/";
-            if (!root.StartsWith("res://")) return Empty;
+            // Normalize to a directory path with exactly one trailing slash, WITHOUT mangling the scheme.
+            // A naive TrimEnd('/') on the project root "res://" yields "res:", and re-appending "/" gives
+            // "res:/" — which then fails the StartsWith("res://") guard below and returned an empty list.
+            // "res://" is the documented whole-project scope value, so the effect was that a full-project
+            // scan found zero .import sidecars and silently never reported orphan_import or duplicate_uid.
+            var raw = string.IsNullOrWhiteSpace(resRoot) ? "res://" : resRoot!;
+            if (!raw.StartsWith("res://", System.StringComparison.Ordinal)) return Empty;
+            var relative = raw.Substring("res://".Length).Trim('/');
+            var root = relative.Length == 0 ? "res://" : "res://" + relative + "/";
 
             var results = new List<string>();
             // DirAccess.Open opens the directory; the recursive walk uses ListDirBegin/ListDirEnd per

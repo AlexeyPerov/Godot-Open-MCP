@@ -50,14 +50,16 @@ export const pullEvents: Tool = {
           "buffered events remain queued and are counted in `dropped` only if the client-side " +
           "queue overflows (capacity 500).",
       },
-      // Optional subscriber id so a long-lived agent session can resume a cursor across MCP server
-      // restarts. Defaults to a server-scoped id minted at stream construction; callers normally
-      // omit it.
-      subscriber: {
-        type: "string",
-        description:
-          "Optional subscriber id to resume a prior subscription (defaults to a server-scoped id).",
-      },
+      // NOTE: no `subscriber` property.
+      //
+      // The schema previously advertised one ("Optional subscriber id to resume a prior
+      // subscription"), but no handler ever read it: routePullEvents reads only `max_events`, and
+      // BridgeEventStream fixes its subscriberId at construction. An agent passing `subscriber` got
+      // its value silently discarded and a *different* subscriberId echoed back in the result — so
+      // the advertised resume-across-restarts behavior never happened, while the schema kept
+      // inviting agents to try. Removed rather than half-implemented; the id is server-scoped and
+      // reported in the result envelope. Re-add this only together with an
+      // `ensureSubscription(subscriberId)` re-subscribe path on the stream.
     },
     additionalProperties: false,
   },

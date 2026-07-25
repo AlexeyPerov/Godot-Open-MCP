@@ -1,6 +1,7 @@
 #if TOOLS
 #nullable enable
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 
 namespace GodotOpenMcp.Bridge.Editor
@@ -31,7 +32,15 @@ namespace GodotOpenMcp.Bridge.Editor
         /// </summary>
         internal const string EchoToolName = "godot_open_mcp_echo";
 
-        static readonly Dictionary<string, BridgeToolEntry> _tools = new(StringComparer.Ordinal);
+        // Concurrent, not a plain Dictionary: Register runs on the editor main thread (from
+        // GodotOpenMcpPlugin._EnterTree, ~40 calls per enable) while TryGet/TryDispatch run on HTTP
+        // ThreadPool workers — HandleToolDispatch resolves the entry *before* hopping to the main
+        // thread, and BridgeHttpServer.Stop only joins the listener thread, not in-flight handlers.
+        // A plugin disable→enable cycle or assembly reload therefore re-registers every tool while a
+        // worker may be mid-lookup, which on Dictionary can tear a read or hang inside the resize
+        // path rather than merely returning a stale entry.
+        static readonly ConcurrentDictionary<string, BridgeToolEntry> _tools =
+            new(StringComparer.Ordinal);
 
         /// <summary>
         /// Register a tool handler. Idempotent for the same name — a re-register replaces the

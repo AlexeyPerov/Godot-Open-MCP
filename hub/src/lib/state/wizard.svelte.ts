@@ -72,6 +72,13 @@ export class WizardState {
 
   busy = $state(false);
   error = $state<string | null>(null);
+
+  /**
+   * Cancellation token for the bridge-ping polling loop. Bumped by {@link cancel}; the loop compares
+   * the generation it started with and bails when it no longer matches. Not reactive state — nothing
+   * renders it, and it must be readable synchronously from inside the loop.
+   */
+  private pollGeneration = 0;
   log = $state<LogLine[]>([]);
   launchAcknowledged = $state(false);
 
@@ -301,9 +308,15 @@ export class WizardState {
       }
       this.push("ok", `Launched Godot (${this.launchResult.editorPath}). Waiting for the bridge…`);
 
+      // Capture the generation this loop belongs to. cancel() bumps the counter, which makes this
+      // loop exit at its next check instead of polling a destroyed component's state for up to two
+      // more minutes.
+      const generation = this.pollGeneration;
       const deadline = Date.now() + 120_000; // matches CLI DEFAULT_WAIT_TIMEOUT_MS
       while (Date.now() < deadline) {
+        if (generation !== this.pollGeneration) return;
         const ping = await ai.pollBridgePing(this.projectPath, this.overridePort);
+        if (generation !== this.pollGeneration) return;
         this.pingStatus = ping.status;
         if (ping.status === "ready") {
           this.push("ok", `Bridge is ready on port ${ping.port}.`);
@@ -314,6 +327,7 @@ export class WizardState {
         }
         await new Promise((r) => setTimeout(r, 1500));
       }
+      if (generation !== this.pollGeneration) return;
       this.pingStatus = "timeout";
       this.push("warn", "Bridge did not become ready within 120s. You can skip and check later.");
     } catch (e) {
@@ -322,6 +336,17 @@ export class WizardState {
     } finally {
       this.busy = false;
     }
+  }
+
+  /**
+   * Abandon any in-flight polling loop. Called when the wizard component is destroyed — the loop in
+   * {@link launchAndWait} otherwise keeps running against orphaned state, and each poll is a
+   * blocking-IO command, so it also makes the rest of the UI stutter after the wizard closes.
+   * Idempotent.
+   */
+  cancel(): void {
+    this.pollGeneration += 1;
+    this.busy = false;
   }
 
   finish(): void {

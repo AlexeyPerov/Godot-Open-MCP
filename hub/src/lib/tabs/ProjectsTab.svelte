@@ -57,7 +57,16 @@
   }
 
   async function remove(id: string): Promise<void> {
-    await appState.removeProject(id);
+    // remove_project returns Result<ProjectsFile, String> and rejects when projects.json cannot be
+    // written. Unhandled, that rejection left the row in the list, the file unchanged on disk, and no
+    // feedback at all — clicking "Remove" just appeared to do nothing. Surface it in the existing
+    // error banner.
+    try {
+      addError = null;
+      await appState.removeProject(id);
+    } catch (e) {
+      addError = `Could not remove the project: ${String(e)}`;
+    }
   }
 
   async function reveal(path: string): Promise<void> {

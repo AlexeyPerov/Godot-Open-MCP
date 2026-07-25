@@ -27,9 +27,18 @@ test("pull_events tool declares an object input schema with additionalProperties
   assert.equal(pullEvents.inputSchema.additionalProperties, false);
 });
 
-test("pull_events exposes the max_events + subscriber property set", () => {
+test("pull_events exposes exactly the max_events property", () => {
   const props = pullEvents.inputSchema.properties as Record<string, unknown>;
-  assert.deepEqual(Object.keys(props).sort(), ["max_events", "subscriber"]);
+  assert.deepEqual(Object.keys(props).sort(), ["max_events"]);
+});
+
+test("pull_events does NOT advertise a subscriber param the router ignores", () => {
+  // The schema used to declare `subscriber`, but routePullEvents reads only max_events and
+  // BridgeEventStream fixes its subscriberId at construction — so the value was silently dropped
+  // and a different id echoed back. Advertising an unimplemented resume knob is worse than omitting
+  // it: agents retry against it. Re-add only alongside a real re-subscribe path on the stream.
+  const props = pullEvents.inputSchema.properties as Record<string, unknown>;
+  assert.equal(props.subscriber, undefined);
 });
 
 test("pull_events does NOT expose gate surface (read-only)", () => {

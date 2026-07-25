@@ -23,6 +23,7 @@ import {
   validatePatch,
   parseSetAssignments,
   isKnownSettingKey,
+  invalidAuthModeOnDisk,
   SettingsValidationError,
   VALID_AUTH_MODES,
   VALID_BIND_ADDRESSES,
@@ -357,4 +358,90 @@ test("VALID_AUTH_MODES: none + required", () => {
 
 test("VALID_BIND_ADDRESSES: loopback + remote", () => {
   assert.deepEqual([...VALID_BIND_ADDRESSES], ["127.0.0.1", "0.0.0.0"]);
+});
+
+// ---------------------------------------------------------------------------
+// invalid on-disk authMode — must not be silently reset (regression)
+// ---------------------------------------------------------------------------
+//
+// The bridge does NOT coerce an unrecognized authMode to "none": BridgeAuthCheck denies anything
+// that is not exactly "required", so `authMode:"requred"` makes the bridge 401 every request. The
+// CLI's typed read has to coerce (BridgeSettings.authMode is a union), which means a patch that
+// touches only bindAddress would re-serialize the coerced value and silently flip the bridge from
+// deny-all to no-auth while reporting `authMode: none → none`.
+
+function writeRawSettings(dir: string, obj: unknown): string {
+  const file = settingsPath(dir);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(obj, null, 2));
+  return file;
+}
+
+test("invalidAuthModeOnDisk: reports the raw value when authMode is not a known mode", () => {
+  const fx = tempProject();
+  try {
+    writeRawSettings(fx.dir, { authMode: "requred", bindAddress: "127.0.0.1" });
+    assert.equal(invalidAuthModeOnDisk(fx.dir), "requred");
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test("invalidAuthModeOnDisk: null for a valid value, an absent key, and a missing file", () => {
+  const fx = tempProject();
+  try {
+    assert.equal(invalidAuthModeOnDisk(fx.dir), null, "missing file");
+    writeRawSettings(fx.dir, { bindAddress: "127.0.0.1" });
+    assert.equal(invalidAuthModeOnDisk(fx.dir), null, "absent key");
+    writeRawSettings(fx.dir, { authMode: "required" });
+    assert.equal(invalidAuthModeOnDisk(fx.dir), null, "valid value");
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test("writeSettings: refuses an unrelated patch when the on-disk authMode is invalid", () => {
+  const fx = tempProject();
+  try {
+    const file = writeRawSettings(fx.dir, { authMode: "requred", bindAddress: "127.0.0.1" });
+    assert.throws(
+      () => writeSettings(fx.dir, { bindAddress: "127.0.0.1" }),
+      (err: unknown) => {
+        assert.ok(err instanceof SettingsValidationError);
+        assert.equal((err as SettingsValidationError).errorLabel, "invalid_auth_mode_on_disk");
+        return true;
+      },
+    );
+    // Critically: the bad value is still on disk, NOT rewritten to "none".
+    assert.equal(JSON.parse(fs.readFileSync(file, "utf8")).authMode, "requred");
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test("writeSettings: an explicit authMode patch repairs an invalid on-disk value", () => {
+  const fx = tempProject();
+  try {
+    const file = writeRawSettings(fx.dir, { authMode: "requred", bindAddress: "127.0.0.1" });
+    const res = writeSettings(fx.dir, { authMode: "required" });
+    assert.equal(res.changed, true);
+    assert.equal(JSON.parse(fs.readFileSync(file, "utf8")).authMode, "required");
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test("writeSettings: temp file is unique per process so concurrent writes cannot collide", () => {
+  const fx = tempProject();
+  try {
+    writeSettings(fx.dir, { authMode: "required" });
+    // A fixed `${file}.tmp` made two concurrent writers publish each other's content. Assert no
+    // temp file survives and that the name is not the fixed one.
+    const dir = path.dirname(settingsPath(fx.dir));
+    const leftovers = fs.readdirSync(dir).filter((n) => n.endsWith(".tmp"));
+    assert.deepEqual(leftovers, []);
+    assert.equal(readSettings(fx.dir).authMode, "required");
+  } finally {
+    fx.cleanup();
+  }
 });

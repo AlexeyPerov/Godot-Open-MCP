@@ -1,4 +1,5 @@
 #nullable enable
+using System;
 using System.Collections.Generic;
 using System.IO;
 using GodotOpenMcp.Verify.Core;
@@ -35,6 +36,33 @@ namespace GodotOpenMcp.Verify.Fixes
     /// </summary>
     public sealed class RemoveMissingScriptFix : IFixProvider
     {
+        private readonly Rules.BrokenReferences.IResourceResolver _resolver;
+        private readonly Func<string, string?> _readFileText;
+        private readonly Action<string, string> _writeFileText;
+        private readonly Func<string, string> _globalizePath;
+
+        /// <summary>Production constructor: live resolver, real file I/O, live <c>res://</c> resolution.</summary>
+        public RemoveMissingScriptFix()
+            : this(GetLiveResolver(), File.ReadAllText, File.WriteAllText, GlobalizeResPath) { }
+
+        /// <summary>
+        /// Testable constructor. Every Godot-coupled dependency is a seam so the fix stays pure-managed
+        /// and runs in the binary-less xUnit host: <paramref name="resolver"/> decides whether a script
+        /// reference is broken (same model the rule uses), and <paramref name="globalizePath"/> maps a
+        /// <c>res://</c> asset path to an OS path for the read/write.
+        /// </summary>
+        internal RemoveMissingScriptFix(
+            Rules.BrokenReferences.IResourceResolver resolver,
+            Func<string, string?> readFileText,
+            Action<string, string> writeFileText,
+            Func<string, string> globalizePath)
+        {
+            _resolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
+            _readFileText = readFileText ?? throw new ArgumentNullException(nameof(readFileText));
+            _writeFileText = writeFileText ?? throw new ArgumentNullException(nameof(writeFileText));
+            _globalizePath = globalizePath ?? throw new ArgumentNullException(nameof(globalizePath));
+        }
+
         /// <summary>The stable fix id surfaced in the catalog and matched by <see cref="CanFix"/>.</summary>
         public string FixId => "remove_missing_script";
 
@@ -91,41 +119,89 @@ namespace GodotOpenMcp.Verify.Fixes
             if (!IsSupportedExtension(ext))
                 return Failed($"remove_missing_script only supports .tscn/.tres text assets, got '{ext}'.");
 
-            // The MissingScriptsRule localizes the attachment via Evidence. We need the script's ext id to
-            // find the line and the (optional) orphaned declaration; the line number is a hint that speeds up
-            // the search and disambiguates when the same id is reused. The issue carries these via Evidence
-            // — but a real issue id has no Evidence attached (Evidence lives on the VerifyIssue, not the key).
-            // So re-scan the text for the FIRST script attachment whose ext id matches, and resolve the
-            // declaration by id. This is robust to an agent supplying only the canonical key.
+            // The issue key carries only ruleId|severity|assetPath|issueCode — no node or line — so the
+            // fix must re-derive WHICH attachment is broken. It does that the same way the rule does:
+            // parse the node→script attachments and the [ext_resource] declarations, then pick the first
+            // attachment whose declaration fails to resolve through the shared IResourceResolver.
+            //
+            // Selecting by "first line that looks like a script attachment" (the previous behavior) is
+            // unsound: in a scene where node A has a healthy script and node B has the broken one, it
+            // removes A's attachment — and then, because no line references A's id any more, deletes A's
+            // [ext_resource] declaration too. That silently strips a working script, leaves the reported
+            // issue in place (so the fix is not idempotent), and the gate cannot catch it because no rule
+            // reports "a node lost its script", so NewErrors stays 0 and nothing is rolled back.
+            //
+            // The asset path is res://-rooted; System.IO cannot resolve that scheme, so it is globalized
+            // to an OS path for the read/write while TouchedPaths keeps the res:// form the gate expects.
+            var osPath = _globalizePath(assetPath!);
+            if (string.IsNullOrEmpty(osPath))
+                return Failed($"Could not resolve '{assetPath}' to a filesystem path.");
+
             string text;
             try
             {
-                text = File.ReadAllText(assetPath);
+                var raw = _readFileText(osPath);
+                if (raw == null)
+                    return Failed($"Could not read '{assetPath}'.");
+                text = raw;
             }
             catch (System.Exception e)
             {
                 return Failed($"Could not read '{assetPath}': {e.Message}");
             }
 
+            Rules.BrokenReferences.SceneRefParseResult refs;
+            Rules.MissingScripts.NodeScriptScanResult nodes;
+            try
+            {
+                refs = Rules.BrokenReferences.SceneRefParser.Parse(text);
+                nodes = Rules.MissingScripts.NodeScriptScanner.Parse(text);
+            }
+            catch (System.Exception e)
+            {
+                return Failed($"Could not parse '{assetPath}': {e.Message}");
+            }
+
+            // Last-wins index, tolerant of a duplicated id (a malformed asset must not throw here).
+            var byId = new Dictionary<string, Rules.BrokenReferences.ExtResourceDecl>();
+            foreach (var decl in refs.ExtResources) byId[decl.Id] = decl;
+
             var lines = text.Split('\n');
 
-            // Find the offending script line: `script = ExtResource("<id>")`. Without Evidence we cannot know
-            // which id the issue named, so remove the FIRST broken attachment. (The gate re-runs the rule
-            // afterward; if more remain, the agent re-issues apply_fix for the next.) The line-match is
-            // intentionally narrow so a non-attachment `ExtResource("...")` (e.g. a property value) is never
-            // touched.
-            var scriptLineIndex = FindScriptAttachmentLine(lines);
+            // First attachment that is genuinely broken. Two cases count as broken, matching the rule:
+            // the declaration resolves to nothing, or the id was never declared at all (dangling).
+            var scriptLineIndex = -1;
+            string scriptExtId = "";
+            foreach (var attachment in nodes.Attachments)
+            {
+                // A declared id that resolves is healthy; an id that resolves to nothing, or that was
+                // never declared in this file at all (dangling), is broken.
+                bool broken;
+                if (byId.TryGetValue(attachment.ScriptExtId, out var decl))
+                    broken = IsExtResourceMissing(decl);
+                else
+                    broken = true;
+                if (!broken) continue;
+
+                // ScriptLine is 1-based; verify it still looks like the attachment before trusting it.
+                var idx = attachment.ScriptLine - 1;
+                if (idx < 0 || idx >= lines.Length || !ReferencesExtId(lines[idx], attachment.ScriptExtId))
+                    continue;
+
+                scriptLineIndex = idx;
+                scriptExtId = attachment.ScriptExtId;
+                break;
+            }
+
             if (scriptLineIndex < 0)
             {
                 return new FixResult
                 {
                     Success = true,
-                    Description = $"No `script = ExtResource(\"...\")` attachment found in '{assetPath}'. The issue may have already been resolved.",
+                    Description = $"No broken `script = ExtResource(\"...\")` attachment found in '{assetPath}'. The issue may have already been resolved.",
                     TouchedPaths = null,
                 };
             }
-
-            var scriptExtId = ExtractExtId(lines[scriptLineIndex]);
 
             // Remove the attachment line. Keep the line ending semantics simple: rebuild without the line.
             var edited = new List<string>(lines.Length);
@@ -158,7 +234,7 @@ namespace GodotOpenMcp.Verify.Fixes
 
             try
             {
-                File.WriteAllText(assetPath, newText);
+                _writeFileText(osPath, newText);
             }
             catch (System.Exception e)
             {
@@ -183,34 +259,63 @@ namespace GodotOpenMcp.Verify.Fixes
         };
 
         /// <summary>
-        /// Find the index of the first line matching a node-body script attachment: <c>script = ExtResource("id")</c>.
-        /// Indented and trimmed to tolerate whitespace; does not match a <c>[node]</c>/<c>[ext_resource]</c> header.
+        /// The rule's false-positive guard, applied to a script attachment's <c>[ext_resource]</c>: an
+        /// identifier is "ok" when it is present and resolves, so flag only when every present identifier
+        /// fails. A stale <c>path=</c> with a live <c>uid=</c> (Godot's normal state after relocating an
+        /// asset) must NOT count as broken. Kept byte-identical in behavior to
+        /// <c>MissingScriptsRule.IsExtResourceMissing</c> so the fix can never disagree with the rule that
+        /// reported the issue.
         /// </summary>
-        private static int FindScriptAttachmentLine(string[] lines)
+        private bool IsExtResourceMissing(Rules.BrokenReferences.ExtResourceDecl ext)
         {
-            for (var i = 0; i < lines.Length; i++)
-            {
-                var t = lines[i].TrimStart();
-                // Match `script = ExtResource(` but NOT `# script = ...` (a comment) and not a header.
-                if (t.StartsWith("script", System.StringComparison.Ordinal)
-                    && t.Contains("ExtResource(")
-                    && !lines[i].TrimStart().StartsWith("#", System.StringComparison.Ordinal))
-                {
-                    return i;
-                }
-            }
-            return -1;
+            var uidPresent = !string.IsNullOrEmpty(ext.Uid);
+            var pathPresent = !string.IsNullOrEmpty(ext.Path);
+            if (!uidPresent && !pathPresent) return false; // malformed header; not this fix's concern
+
+            var uidOk = uidPresent && _resolver.UidExists(ext.Uid);
+            var pathOk = pathPresent && _resolver.PathExists(ext.Path);
+            return !uidOk && !pathOk;
         }
 
-        /// <summary>Extract the string id from <c>script = ExtResource("1_abc")</c> → <c>1_abc</c>. Empty on no match.</summary>
-        private static string ExtractExtId(string line)
+        /// <summary>
+        /// Live resolver, behind the package's single <c>#if TOOLS</c> boundary — identical pattern to
+        /// <c>MissingScriptsRule.GetLiveResolver</c>. Without TOOLS (the binary-less test host) there is
+        /// no live resolver; tests always use the internal constructor, so the fallback only needs to be
+        /// safe, and "resolves nothing as broken" is the conservative choice for a destructive fix.
+        /// </summary>
+        private static Rules.BrokenReferences.IResourceResolver GetLiveResolver()
         {
-            var open = line.IndexOf("ExtResource(\"", System.StringComparison.Ordinal);
-            if (open < 0) return "";
-            var start = open + "ExtResource(\"".Length;
-            var close = line.IndexOf('"', start);
-            if (close < 0) return "";
-            return line.Substring(start, close - start);
+#if TOOLS
+            return Rules.BrokenReferences.LiveResourceResolver.Instance;
+#else
+            return NullResolver.Instance;
+#endif
+        }
+
+#if !TOOLS
+        private sealed class NullResolver : Rules.BrokenReferences.IResourceResolver
+        {
+            internal static readonly NullResolver Instance = new();
+            public bool PathExists(string? resPath) => true;
+            public bool UidExists(string? uid) => true;
+        }
+#endif
+
+        /// <summary>
+        /// Resolve a <c>res://</c> asset path to an OS path. <c>ProjectSettings.GlobalizePath</c> is
+        /// Godot's canonical resolver; a non-<c>res://</c> path (a test fixture using a real temp path)
+        /// passes through unchanged.
+        /// </summary>
+        private static string GlobalizeResPath(string assetPath)
+        {
+            if (string.IsNullOrEmpty(assetPath)) return assetPath;
+            if (!assetPath.StartsWith("res://", System.StringComparison.Ordinal)) return assetPath;
+#if TOOLS
+            var abs = Godot.ProjectSettings.GlobalizePath(assetPath);
+            return string.IsNullOrEmpty(abs) ? assetPath : abs;
+#else
+            return assetPath;
+#endif
         }
 
         /// <summary>

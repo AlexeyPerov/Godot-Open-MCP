@@ -14,9 +14,30 @@
     }
   }
 
+  // Inline validation message for an out-of-range port. The `min`/`max` attributes on
+  // <input type="number"> are only enforced at form-validation time, never while typing.
+  let portError = $state<string | null>(null);
+
   async function onPortInput(e: Event): Promise<void> {
     const v = (e.target as HTMLInputElement).value.trim();
-    w.overridePort = v === "" ? null : Number(v);
+    if (v === "") {
+      portError = null;
+      w.overridePort = null;
+    } else {
+      // Validate BEFORE assigning. Rust types this as Option<u16>, so a value like 70000, -1 or 1.5
+      // fails serde deserialization on every subsequent invoke that carries it — resolve_bridge_port,
+      // plan_mcp_config, then write_mcp_config — surfacing a raw serde string ("invalid value:
+      // integer `70000`, expected u16") and hard-blocking Step 4 (mcpResult stays null so canAdvance
+      // is false). The bad value was also persisted to the localStorage draft, so it survived a
+      // restart.
+      const n = Number.parseInt(v, 10);
+      if (!Number.isInteger(n) || n < 1 || n > 65535) {
+        portError = "Port must be a whole number between 1 and 65535.";
+        return;
+      }
+      portError = null;
+      w.overridePort = n;
+    }
     await w.resolvePort();
     await w.previewMcp();
   }
@@ -54,7 +75,11 @@
     placeholder="deterministic"
     value={w.overridePort ?? ""}
     oninput={onPortInput}
+    aria-invalid={portError !== null}
   />
+  {#if portError}
+    <small class="err">{portError}</small>
+  {/if}
   <small>
     Resolved port: <b>{w.resolvedPort ?? "…"}</b>. Leave blank to use the
     deterministic per-project port; a value writes

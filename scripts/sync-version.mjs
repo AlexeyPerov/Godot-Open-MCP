@@ -51,17 +51,17 @@ const TRIO_TARGETS = [
     description: "npm MCP server package.json",
     replace: (b, v) => setJsonVersion(b, v),
   },
+  // NOTE: there are deliberately no `packages/bridge/package.json` /
+  // `packages/verify/package.json` targets. Those two directories are Godot addon *source* trees
+  // (Editor/ + Runtime/ + Tests/), not npm packages, and never had a package.json — they were
+  // declared here but silently skipped as "missing", which is why --check reported OK while
+  // carrying two dead entries. The bridge addon's user-visible version lives in plugin.cfg, below.
   {
-    file: "packages/bridge/package.json",
-    kind: "json",
-    description: "bridge Godot addon package.json",
-    replace: (b, v) => setJsonVersion(b, v),
-  },
-  {
-    file: "packages/verify/package.json",
-    kind: "json",
-    description: "verify Godot addon package.json",
-    replace: (b, v) => setJsonVersion(b, v),
+    file: "packages/bridge/plugin.cfg",
+    kind: "cfg",
+    description: "bridge addon plugin.cfg version (shown in Godot's plugin list)",
+    replace: (b, v) =>
+      b.replace(/(^version=")[^"]*(")/m, (_, pre, post) => `${pre}${v}${post}`),
   },
   {
     file: "cli/package.json",
@@ -124,7 +124,24 @@ function syncTargets(sourceFile, targets, mode) {
     }
     const original = readFileSync(p, "utf8");
     const updated = t.replace(original, want);
-    if (updated === original) continue;
+    if (updated === original) {
+      // "The replace changed nothing" is NOT proof of being in sync — it is also what happens when
+      // the version anchor no longer matches (renamed property, reformatted literal). Treating that
+      // as OK let a target silently drop out of the gate: the file would keep an arbitrary stale
+      // version while --check reported success. Confirm the file actually carries the wanted version.
+      const actual = extractVersion(original, t.kind);
+      if (actual !== want) {
+        drifted.push({
+          file: t.file,
+          description:
+            `${t.description} (version anchor did not match — the sync pattern found nothing to ` +
+            `replace, so this target is no longer being kept in sync)`,
+          from: actual,
+          want,
+        });
+      }
+      continue;
+    }
     const from = extractVersion(original, t.kind);
     if (mode === "write") {
       writeFileSync(p, updated);
@@ -140,6 +157,10 @@ function syncTargets(sourceFile, targets, mode) {
 function extractVersion(body, kind) {
   if (kind === "cs") {
     const m = body.match(/=>\s*"([^"]+)"/) || body.match(/"([\d.]+)"/);
+    return m ? m[1] : undefined;
+  }
+  if (kind === "cfg") {
+    const m = body.match(/^version="([^"]+)"/m);
     return m ? m[1] : undefined;
   }
   const m = body.match(/"version"\s*:\s*"([^"]+)"/);
@@ -252,17 +273,22 @@ if (mode === "write") {
   process.exit(0);
 }
 
-if (result.drifted.length === 0) {
+if (result.drifted.length === 0 && result.missing.length === 0) {
   console.log(`shared trio: OK (all targets match ${readSourceVersion(TRIO_SOURCE)}).`);
-  for (const m of result.missing) {
-    console.warn(`  ⚠  missing target: ${m.file} (${m.description})`);
-  }
   process.exit(0);
 }
 
-console.error(`✖ shared trio version drift detected. Source ${TRIO_SOURCE} = ${readSourceVersion(TRIO_SOURCE)}.`);
+console.error(`✖ shared trio version check failed. Source ${TRIO_SOURCE} = ${readSourceVersion(TRIO_SOURCE)}.`);
 for (const d of result.drifted) {
-  console.error(`  ${d.file}: ${d.from ?? "<unmatched>"} (expected ${d.want})`);
+  console.error(`  drift: ${d.file}: ${d.from ?? "<unmatched>"} (expected ${d.want})`);
 }
-console.error("\nFix: run `node scripts/sync-version.mjs` from the repo root.");
+// A declared target that does not exist is a gate failure in --check, not a warning. Previously this
+// printed a ⚠ and still exited 0, so a deleted or moved target left the version gate silently green.
+for (const m of result.missing) {
+  console.error(`  missing target: ${m.file} (${m.description})`);
+}
+console.error(
+  "\nFix: run `node scripts/sync-version.mjs` from the repo root, " +
+    "or update TRIO_TARGETS when a target has legitimately moved or been removed.",
+);
 process.exit(1);

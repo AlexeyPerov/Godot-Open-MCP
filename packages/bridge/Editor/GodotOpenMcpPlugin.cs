@@ -227,10 +227,17 @@ namespace GodotOpenMcp.Bridge.Editor
                 // Stop the HTTP listener FIRST so no new /ping probes arrive mid-teardown
                 // (a probe during dispatcher teardown would see connected:false via the
                 // listener's own SetConnected(false), which is fine — but closing the
-                // listener cleanly before the rest is the deterministic order). P1.4 will
-                // release the instance lock here too (graceful quit deletes it; the
-                // dispatcher is freed last so any teardown work the later subsystems
-                // marshal still lands on a live pump).
+                // listener cleanly before the rest is the deterministic order).
+                //
+                // The instance lock is deliberately NOT released here. `_ExitTree` also runs on a
+                // C# assembly reload, and the lock must survive that: a retained lock whose
+                // heartbeat has stopped advancing while the editor PID is still alive is the only
+                // out-of-band signal the MCP server has for "the bridge assembly failed to
+                // recompile and will not come back" (see packages/bridge/AGENTS.md §Multi-instance,
+                // "Lock retention on domain reload"). Releasing on every _ExitTree would erase that
+                // signal. A lock left behind by a graceful quit is reaped by the PID-liveness sweep
+                // in BridgeInstanceLock.Acquire; stopping the heartbeat here is enough to mark this
+                // bridge as no longer serving.
                 BridgeHttpServer.Stop();
                 // P5.4 — stop the event source and detach the collector fan-out sink. The ring buffer
                 // stays drainable (no ResetForTests here) so a reconnecting MCP subscriber can read the

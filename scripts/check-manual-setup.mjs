@@ -116,6 +116,90 @@ function bodyPathFor(agentId) {
 }
 
 /**
+ * Parse `{ id, bodyPath, getStdioProps }` out of the agent registry source.
+ *
+ * The header of this file claims the checker "never carries a second handwritten copy of the
+ * envelope", but `shaperFor` / `bodyPathFor` above are exactly that, and `AGENTS_REGISTRY_PATH` was
+ * declared and never read. So if a shaper in agents.ts gained or renamed a key — meaning `setup-mcp`
+ * started writing a different entry shape — the checker compared the doc against its own stale
+ * hardcoded shape, they still agreed, and the job passed green while docs/manual-setup.md no longer
+ * described what the CLI writes. That is precisely the drift this gate exists to catch.
+ *
+ * Fully re-evaluating the TypeScript shapers from a script is not worth the fragility, so instead we
+ * pin the *mapping*: every agent id in the registry must be known here, with the same `bodyPath` and
+ * the same shaper function. Adding an agent, renaming a bodyPath, or re-pointing an agent at a
+ * different shaper now fails the gate and forces this file to be updated alongside agents.ts.
+ */
+function parseAgentRegistry(source) {
+  const agents = [];
+  // Each entry is an object literal containing `id:`, `bodyPath:` and `getStdioProps:`.
+  const entryRe =
+    /id:\s*"([^"]+)"[\s\S]*?bodyPath:\s*\[([^\]]*)\][\s\S]*?getStdioProps:\s*([A-Za-z0-9_$]+)/g;
+  let m;
+  while ((m = entryRe.exec(source)) !== null) {
+    const id = m[1];
+    const bodyPath = m[2]
+      .split(",")
+      .map((s) => s.trim().replace(/^["']|["']$/g, ""))
+      .filter((s) => s.length > 0);
+    agents.push({ id, bodyPath, shaperName: m[3] });
+  }
+  return agents;
+}
+
+/** The shaper each agent id is expected to use, mirroring `shaperFor`'s grouping. */
+function expectedShaperName(agentId) {
+  switch (agentId) {
+    case "vscode-copilot":
+    case "vs-copilot":
+      return "vscodeStdio";
+    case "opencode":
+      return "opencodeStdio";
+    default:
+      return "bareStdio";
+  }
+}
+
+/**
+ * Assert this checker's hardcoded shaper/bodyPath mapping still matches the registry. Reads
+ * AGENTS_REGISTRY_PATH — the constant that was previously dead.
+ */
+function checkAgentRegistryParity() {
+  const registry = parseAgentRegistry(readText(AGENTS_REGISTRY_PATH));
+  if (registry.length === 0) {
+    fail(
+      `${AGENTS_REGISTRY_PATH}: could not parse any agent entries — the registry shape changed and ` +
+        `this checker's parser (parseAgentRegistry) needs updating.`,
+    );
+    return;
+  }
+
+  for (const agent of registry) {
+    if (shaperFor(agent.id) === null) {
+      fail(
+        `${AGENTS_REGISTRY_PATH}: agent "${agent.id}" is in the registry but unknown to ` +
+          `check-manual-setup.mjs — add it to shaperFor()/bodyPathFor() and document it in ${DOC_PATH}.`,
+      );
+      continue;
+    }
+    const wantBodyPath = bodyPathFor(agent.id);
+    if (JSON.stringify(agent.bodyPath) !== JSON.stringify(wantBodyPath)) {
+      fail(
+        `${AGENTS_REGISTRY_PATH}: agent "${agent.id}" declares bodyPath ` +
+          `${JSON.stringify(agent.bodyPath)} but this checker expects ${JSON.stringify(wantBodyPath)}.`,
+      );
+    }
+    const wantShaper = expectedShaperName(agent.id);
+    if (agent.shaperName !== wantShaper) {
+      fail(
+        `${AGENTS_REGISTRY_PATH}: agent "${agent.id}" uses shaper ${agent.shaperName} but this ` +
+          `checker models it as ${wantShaper} — update shaperFor() to match.`,
+      );
+    }
+  }
+}
+
+/**
  * Build the canonical `getStdioProps` output for an agent, using the same
  * `npx -y godot-open-mcp@<version>` spawn descriptor `setup-mcp` produces when
  * `--use-local` is NOT set. `projectPath` is the absolute path that goes into
@@ -453,6 +537,10 @@ function main() {
     printReport();
     process.exit(1);
   }
+
+  // Before comparing the doc against this checker's model of the shapers, verify that model still
+  // matches the real registry — otherwise every downstream comparison is against a stale shape.
+  checkAgentRegistryParity();
 
   // Validate package.json bin name matches the doc's server key.
   const pkg = readJson(PACKAGE_JSON_PATH);

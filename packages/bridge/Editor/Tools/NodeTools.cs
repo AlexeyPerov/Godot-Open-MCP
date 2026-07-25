@@ -545,7 +545,10 @@ namespace GodotOpenMcp.Bridge.Editor
             {
                 if (TryParseVector2(request.Position, out var pos))
                     n2d.Position = pos;
-                if (TryParseVector2(request.Rotation, out var rotDeg))
+                // 2D rotation is a scalar (Node2D.RotationDegrees is a float), not a vector — parse a
+                // single angle. A "45,0" style vector string is tolerated by taking its first
+                // component so an agent reusing the 3D shape still gets the intended Z rotation.
+                if (TryParseAngleDegrees(request.Rotation, out var rotDeg))
                     n2d.RotationDegrees = rotDeg;
                 if (TryParseVector2(request.Scale, out var scl, defaultXY: 1f))
                     n2d.Scale = scl;
@@ -600,6 +603,24 @@ namespace GodotOpenMcp.Bridge.Editor
                     System.Globalization.CultureInfo.InvariantCulture, out var y)) return false;
             v = new Vector2(x, y);
             return true;
+        }
+
+        /// <summary>
+        /// Parse a single rotation angle in degrees for the 2D case, where <c>Node2D.RotationDegrees</c>
+        /// is a scalar rather than a vector. Accepts a bare number (<c>"45"</c>) and also tolerates a
+        /// vector-shaped string (<c>"45,0"</c>) by using its first component, so an agent that reuses
+        /// the 3D <c>"x,y,z"</c> convention still gets the intended in-plane rotation. Returns false on
+        /// a malformed string — the caller treats that as "no rotation applied". Invariant-culture so a
+        /// comma-decimal locale does not corrupt parsing.
+        /// </summary>
+        static bool TryParseAngleDegrees(string? text, out float degrees)
+        {
+            degrees = 0f;
+            if (string.IsNullOrWhiteSpace(text))
+                return false;
+            var first = text!.Trim().Split(',')[0].Trim();
+            return float.TryParse(first, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out degrees);
         }
 
         /// <summary>
@@ -838,7 +859,8 @@ namespace GodotOpenMcp.Bridge.Editor
             {
                 if (merged.TryGetValue("position", out var pos2) && TryParseVector2(pos2, out var p2))
                 { n2.Position = p2; changed = true; }
-                if (merged.TryGetValue("rotation", out var rot2) && TryParseVector2(rot2, out var r2))
+                // Node2D.RotationDegrees is a scalar — see TryParseAngleDegrees.
+                if (merged.TryGetValue("rotation", out var rot2) && TryParseAngleDegrees(rot2, out var r2))
                 { n2.RotationDegrees = r2; changed = true; }
                 if (merged.TryGetValue("scale", out var scl2) && TryParseVector2(scl2, out var s2, defaultXY: 1f))
                 { n2.Scale = s2; changed = true; }
@@ -1191,6 +1213,18 @@ namespace GodotOpenMcp.Bridge.Editor
             var deleted = new List<string>();
             foreach (var (node, parent, snapPath) in targets)
             {
+                // Targets are resolved up-front, so a batch may contain both an ancestor and one of
+                // its descendants (e.g. ["Main/Enemies", "Main/Enemies/Enemy1"]). Freeing the ancestor
+                // synchronously destroys the descendant, and calling RemoveChild/Free on that freed
+                // handle throws ObjectDisposedException — which would escape the handler as an
+                // execution_error after nodes were already destroyed, leaving the scene mutated but
+                // never marked unsaved. Skip handles the previous iterations already invalidated; the
+                // node is gone either way, so it still counts as deleted.
+                if (!GodotObject.IsInstanceValid(node))
+                {
+                    deleted.Add(snapPath);
+                    continue;
+                }
                 parent?.RemoveChild(node);
                 node.Free();
                 deleted.Add(snapPath);

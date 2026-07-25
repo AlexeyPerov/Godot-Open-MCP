@@ -169,7 +169,11 @@ export function parseCliArgs(argv: string[]): ParsedCli {
     if (tok === "--port" || tok === "-p") {
       const v = args[i + 1];
       const n = parsePositiveInt(v);
-      if (n === undefined) {
+      // Enforce the upper bound the error message already promises. Without it, an out-of-range port
+      // passed parsing and was then silently discarded downstream: resolvePort re-validates the
+      // range and, on failure, falls through to the lock/hash port — so `--port 99999` probed a
+      // completely different port with no indication that the override had been ignored.
+      if (n === undefined || n > 65535) {
         parsed.error = `${tok} requires a valid port number (1-65535).`;
         return parsed;
       }

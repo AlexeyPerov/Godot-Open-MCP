@@ -152,7 +152,21 @@ namespace GodotOpenMcp.Verify.Editor
         /// </summary>
         public static CheckpointFingerprint CreateCheckpoint(VerifyScope scope, string[]? ruleIds)
         {
-            var result = RunScoped(scope, ruleIds, VerifyRunMode.Checkpoint);
+            // Run the baseline in Validate mode, NOT Checkpoint mode.
+            //
+            // The gate pairs this "before" fingerprint with a Validate-mode "after" scan and computes
+            // new = after − before. Every rule deliberately detects *less* under Checkpoint (it skips
+            // the dangling-usage walk, the dangling-script-id walk and the duplicate-uid pass — all
+            // Error severity), so a baseline captured in Checkpoint mode is not comparable to the
+            // after-set: any pre-existing issue that only the Validate pass can see shows up as a NEW
+            // error. That made every gated mutation on a file with a pre-existing dangling reference
+            // hard-fail under Enforce, and made ApplyFixGateRunner roll back correct fixes with
+            // "fix introduced N new error(s)" — with no way for an agent to make progress, and the
+            // phantom errors indistinguishable from real regressions.
+            //
+            // The Checkpoint mode value still exists for callers that want the cheap pass on its own;
+            // the budget warning below simply no longer fires for this path.
+            var result = RunScoped(scope, ruleIds, VerifyRunMode.Validate);
             var id = $"cp_{Guid.NewGuid().ToString("N").Substring(0, 6)}";
             var fingerprints = new Dictionary<string, RuleFingerprint>();
 

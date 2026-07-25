@@ -119,6 +119,48 @@ function readAuthMode(value: unknown): AuthMode {
     : defaultSettings().authMode;
 }
 
+/**
+ * The raw `authMode` string on disk when it is present but NOT a value the bridge accepts, else
+ * null (absent key, or a valid value).
+ *
+ * This exists because the bridge and the CLI must not disagree about what an invalid `authMode`
+ * means. `BridgeProjectSettings` deliberately returns the raw string and `BridgeAuthCheck` denies
+ * anything that is not exactly `"required"` — so a typo like `authMode:"requred"` makes the bridge
+ * 401 every request, including `/ping`. Coercing it to `"none"` (as {@link readAuthMode} must, to
+ * satisfy the typed shape) would have the CLI report `authMode: none` for a file the bridge treats
+ * as deny-all, and would let a `--set bindAddress=…` patch silently rewrite the key to `"none"` —
+ * flipping the bridge from deny-all to no-auth while printing `authMode: none → none`.
+ */
+export function invalidAuthModeOnDisk(projectRoot: string): string | null {
+  const raw = readRawSettingsObject(projectRoot);
+  if (raw === null) return null;
+  const value = raw.authMode;
+  if (value === undefined) return null;
+  if (typeof value === "string" && (VALID_AUTH_MODES as readonly string[]).includes(value)) {
+    return null;
+  }
+  return typeof value === "string" ? value : JSON.stringify(value);
+}
+
+/** Parse the settings file into a plain object, or null when absent/unparseable/non-object. */
+function readRawSettingsObject(projectRoot: string): Record<string, unknown> | null {
+  const file = settingsPath(projectRoot);
+  let raw: string;
+  try {
+    raw = fs.readFileSync(file, "utf8");
+  } catch {
+    return null;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
+  return parsed as Record<string, unknown>;
+}
+
 function readBindAddress(value: unknown): BindAddress {
   return typeof value === "string" && (VALID_BIND_ADDRESSES as readonly string[]).includes(value)
     ? (value as BindAddress)
@@ -170,6 +212,25 @@ export function writeSettings(
   validatePatch(patch);
 
   const file = settingsPath(projectRoot);
+
+  // Refuse to rewrite a file whose on-disk authMode is present but invalid, unless this patch sets
+  // authMode explicitly. `previous` below is the COERCED read, so merging a bindAddress-only patch
+  // onto it and re-serializing would silently replace the bad value with "none" — turning a bridge
+  // that currently denies every request into one that requires no auth, with no mention of it in the
+  // reported diff. Make the user resolve it deliberately.
+  if (patch.authMode === undefined) {
+    const badAuthMode = invalidAuthModeOnDisk(projectRoot);
+    if (badAuthMode !== null) {
+      throw new SettingsValidationError(
+        "invalid_auth_mode_on_disk",
+        `The settings file at ${file} has an invalid authMode (${JSON.stringify(badAuthMode)}). ` +
+          `The bridge fails closed on an unrecognized authMode — it denies every request, including /ping — ` +
+          `so this is not equivalent to "none". Writing other keys now would silently reset it. ` +
+          `Fix it explicitly: --set authMode=none (no auth) or --set authMode=required (token auth).`,
+      );
+    }
+  }
+
   const previous = readSettings(projectRoot);
   const next: BridgeSettings = { ...previous, ...patch };
 
@@ -189,14 +250,16 @@ export function writeSettings(
       fs.mkdirSync(dir, { recursive: true });
     }
     const json = serializeSettings(next);
-    // Atomic write: .tmp + rename. Matches the bridge's BridgeProjectSettings.Save.
-    const tmp = `${file}.tmp`;
+    // Atomic write: unique .tmp + rename. Matches the bridge's BridgeProjectSettings.Save.
+    //
+    // The temp name carries pid + timestamp (as lib/setup-mcp.ts already does). With a fixed
+    // `${file}.tmp`, two concurrent writers — parallel CI steps, or a `configure` racing the
+    // bridge's own Save — both wrote the same temp path: the first rename published the *other*
+    // process's content (a lost update) and the second failed with ENOENT, surfaced to the user as
+    // settings_write_failed.
+    const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
     fs.writeFileSync(tmp, json);
-    if (fs.existsSync(file)) {
-      fs.renameSync(tmp, file);
-    } else {
-      fs.renameSync(tmp, file);
-    }
+    fs.renameSync(tmp, file);
   }
 
   return { path: file, previous, next, changed };
@@ -301,6 +364,11 @@ export function parseSetAssignments(
 export type SettingsErrorLabel =
   | "unknown_key"
   | "invalid_auth_mode"
+  // The on-disk authMode is present but not a value the bridge accepts. Distinct from
+  // `invalid_auth_mode` (which rejects a bad value in the *patch*): this one refuses to rewrite a
+  // file whose existing authMode would be silently reset, flipping the bridge from deny-all to
+  // no-auth. See writeSettings.
+  | "invalid_auth_mode_on_disk"
   | "invalid_bind_address"
   | "bind_address_requires_auth"
   | "invalid_set_assignment"

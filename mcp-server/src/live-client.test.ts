@@ -190,13 +190,12 @@ test("ping: bridge too slow to answer surfaces bridge_timeout", async () => {
   }
 });
 
-test("ping: malformed 200 body surfaces as a fetch-side error (caught, not thrown)", async () => {
-  // A bridge that returns 200 with non-JSON body makes res.json() reject.
-  // That rejection bubbles into the catch block and is classified by err
-  // type — it is NOT an AbortError, so the agent sees bridge_offline (the
-  // safest framing when the body is unparseable; the bridge is effectively
-  // unusable). The point of this test is that the tool returns a structured
-  // result rather than throwing.
+test("ping: malformed 200 body surfaces bridge_response_unparsable, not bridge_offline", async () => {
+  // A bridge that returns 200 with a non-JSON body makes res.json() reject. That must NOT be
+  // classified as bridge_offline: the listener answered, so "the bridge is not reachable — if Godot
+  // is not open, launch it" is actively misleading, and bridge_status would derive `stopped` for an
+  // editor that is demonstrably running. The reachable-but-broken case gets its own code, matching
+  // how postTool already handles a 200 with an unparseable envelope.
   const bridge = await startBridgeStub((_req, res) => {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end("<<<not json>>>");
@@ -206,10 +205,7 @@ test("ping: malformed 200 body surfaces as a fetch-side error (caught, not throw
     const result = await client.route(PING_TOOL_NAME, {});
     assert.equal(result.isError, true);
     const body = JSON.parse(textOf(result));
-    assert.ok(
-      body.error.code === "bridge_offline" || body.error.code === "bridge_timeout",
-      `expected a structured error code, got ${body.error.code}`,
-    );
+    assert.equal(body.error.code, "bridge_response_unparsable");
   } finally {
     await bridge.close();
   }

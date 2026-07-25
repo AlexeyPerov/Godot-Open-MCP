@@ -176,7 +176,8 @@ namespace GodotOpenMcp.Bridge.Editor
                 return ToolDispatchResult.Fail("invalid_path", pathError);
             }
 
-            int uidId;
+            // ResourceUid works in the Int64 id space — TextToId returns long, as do HasId/GetIdPath.
+            long uidId;
             try
             {
                 uidId = ResourceUid.TextToId(normalized);
@@ -548,12 +549,14 @@ namespace GodotOpenMcp.Bridge.Editor
             if (!ValidateInstantiableResourceType(typeClassName, out var typeError))
                 return ToolDispatchResult.Fail("resource_type_invalid", typeError);
 
-            // Instantiate.
-            Resource resource;
+            // Instantiate. ClassDB.Instantiate returns a Variant, so unwrap with Variant.As<T>() —
+            // an `as` cast does not apply to a value-type Variant. As<Resource>() yields null when the
+            // instantiated class is not a Resource, which the null guard below reports.
+            Resource? resource;
             try
             {
                 var obj = ClassDB.Instantiate(typeClassName);
-                resource = obj as Resource;
+                resource = obj.As<Resource>();
             }
             catch (System.Exception e)
             {
@@ -1112,7 +1115,8 @@ namespace GodotOpenMcp.Bridge.Editor
         /// <summary>uid:// text → res:// path, or null when the uid is unknown. Main-thread only.</summary>
         static string? ResolveUidToPath(string uidText)
         {
-            int uidId;
+            // Int64 id space — see ResolveByUid.
+            long uidId;
             try
             {
                 uidId = ResourceUid.TextToId(uidText);
@@ -1359,21 +1363,22 @@ namespace GodotOpenMcp.Bridge.Editor
         /// True when <paramref name="resPath"/> is an imported/generated resource whose source of
         /// truth is external (e.g. a <c>.png</c>, <c>.glb</c>, <c>.csv</c> that the importer turned
         /// into a <c>.import</c> + cached binary). Hand-authored <c>.tres</c>/<c>.res</c> files are
-        /// writable; imported ones are not. Uses the editor filesystem's importer metadata.
+        /// writable; imported ones are not. Detected by probing for the <c>.import</c> sidecar.
         /// </summary>
         static bool IsImportedResource(string resPath)
         {
             try
             {
-                var fs = EditorInterface.Singleton.GetResourceFilesystem();
-                if (fs == null) return false;
-                // Imported resources have a .import sidecar next to the source. We check by looking
-                // at whether the path has a known non-tres/res source type. The simplest reliable
-                // signal: imported assets are NOT in the .tres/.res text format on disk — but since
-                // we already filtered to .tres/.res extensions, the real signal is whether an
-                // .import sidecar exists (binary .res can be imported). Check for the sidecar.
+                // Imported resources have a .import sidecar next to the source, so the presence of
+                // that sidecar is the signal (a binary .res can be imported too).
+                //
+                // The probe MUST go through Godot's own file API: `res://` is a virtual scheme that
+                // System.IO cannot resolve, so System.IO.File.Exists("res://…​.import") is always
+                // false. That made this guard vacuous, and resource_modify would happily patch and
+                // re-save a resource whose source of truth is an external file — exactly what the
+                // resource_not_writable check exists to prevent.
                 var importSidecar = resPath + ".import";
-                return System.IO.File.Exists(importSidecar);
+                return FileAccess.FileExists(importSidecar);
             }
             catch
             {

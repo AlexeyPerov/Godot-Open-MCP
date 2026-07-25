@@ -2,6 +2,23 @@
 //! Rust `config` modules. Commands are thin: they map camelCase JS args to the
 //! module functions (which mirror the `godot-open-mcp-cli` contracts) and
 //! return plain serializable types. All behavior lives in `config::*`.
+//!
+//! # Threading
+//!
+//! A synchronous `#[tauri::command]` runs on the **main thread** — the same thread that drives the
+//! window event loop. Any command that blocks therefore freezes the UI for its whole duration, and
+//! because the webview cannot receive the IPC reply while blocked, in-progress indicators never
+//! paint and captured output appears all at once when the freeze ends.
+//!
+//! Every command below that does blocking work — spawning a child process and waiting on it
+//! (`run_npm_script`, `run_version_sync`), walking install roots (`launch_godot`), TCP connect +
+//! read with multi-second timeouts (`poll_bridge_ping`, polled every 1.5s for up to 120s by the
+//! wizard), shelling out (`detect_project_state`), or recursive tree copy + byte-for-byte compare
+//! (`install_addon`, `copy_skill_files`) — is therefore declared `#[tauri::command(async)]`, which
+//! moves it off the main thread onto Tauri's async runtime.
+//!
+//! Keep new commands consistent with this: pure in-memory reads may stay synchronous; anything that
+//! touches a process, a socket, or a directory walk must be `(async)`.
 
 use std::path::{Path, PathBuf};
 
@@ -86,7 +103,7 @@ pub fn list_agents() -> Vec<AgentInfo> {
         .collect()
 }
 
-#[tauri::command]
+#[tauri::command(async)] // blocking IO/process work — must not run on the UI thread
 pub fn detect_project_state(
     project_path: String,
     client_ids: Vec<String>,
@@ -131,14 +148,14 @@ pub fn plan_mcp_config(input: McpInputDto) -> Result<McpPlan, String> {
     mcp_config::plan_mcp(&input.into())
 }
 
-#[tauri::command]
+#[tauri::command(async)] // blocking IO/process work — must not run on the UI thread
 pub fn write_mcp_config(input: McpInputDto) -> Result<McpPlan, String> {
     mcp_config::write_mcp(&input.into())
 }
 
 // ── P11.2: install addon / launch / ping / clear / skill ──────────────────────
 
-#[tauri::command]
+#[tauri::command(async)] // blocking IO/process work — must not run on the UI thread
 pub fn install_addon(
     project_path: String,
     source: Option<String>,
@@ -147,17 +164,17 @@ pub fn install_addon(
     ai_toolkit::install_addon(&project_path, source.as_deref(), monorepo_path.as_deref())
 }
 
-#[tauri::command]
+#[tauri::command(async)] // blocking IO/process work — must not run on the UI thread
 pub fn launch_godot(project_path: String, editor_path: Option<String>) -> LaunchResult {
     ai_toolkit::launch_editor(&project_path, editor_path.as_deref())
 }
 
-#[tauri::command]
+#[tauri::command(async)] // blocking IO/process work — must not run on the UI thread
 pub fn poll_bridge_ping(project_path: String, override_port: Option<u16>) -> PingResult {
     ai_toolkit::poll_bridge_ping(&project_path, override_port)
 }
 
-#[tauri::command]
+#[tauri::command(async)] // blocking IO/process work — must not run on the UI thread
 pub fn clear_ai_setup(
     project_path: String,
     client_ids: Vec<String>,
@@ -179,7 +196,7 @@ pub struct SkillCopyResult {
     pub message: Option<String>,
 }
 
-#[tauri::command]
+#[tauri::command(async)] // blocking IO/process work — must not run on the UI thread
 pub fn copy_skill_files(project_path: String, monorepo_path: Option<String>) -> SkillCopyResult {
     let Some(repo) = monorepo_path.filter(|s| !s.is_empty()) else {
         return SkillCopyResult {
@@ -235,18 +252,18 @@ fn copy_tree(src: &Path, dest: &Path) -> std::io::Result<()> {
 
 // ── P11.3: maintainer npm ─────────────────────────────────────────────────────
 
-#[tauri::command]
+#[tauri::command(async)] // blocking IO/process work — must not run on the UI thread
 pub fn read_mcp_package_info(project_path: String) -> Result<McpPackageInfo, String> {
     command_runner::read_mcp_package_info(&project_path)
 }
 
-#[tauri::command]
+#[tauri::command(async)] // blocking IO/process work — must not run on the UI thread
 pub fn run_npm_script(project_path: String, args: Vec<String>) -> CommandResult {
     let kind = project_kind::detect_project_kind(Path::new(&project_path));
     command_runner::run_npm(&project_path, kind, &args)
 }
 
-#[tauri::command]
+#[tauri::command(async)] // blocking IO/process work — must not run on the UI thread
 pub fn run_version_sync(project_path: String, args: Vec<String>) -> CommandResult {
     command_runner::run_version_sync(&project_path, &args)
 }

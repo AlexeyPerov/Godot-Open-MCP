@@ -128,6 +128,16 @@ namespace GodotOpenMcp.Bridge.Editor
                 };
                 _listenerThread.Start();
 
+                // Publish the instance lock now that the listener is actually bound. This is the
+                // step that makes the bridge discoverable and authenticable:
+                //   - the MCP server reads `port` + `authToken` from this file, and
+                //   - CheckAuth compares the request's bearer against the token minted here, which
+                //     means authMode:"required" (and therefore remote bind) cannot work at all until
+                //     the lock exists.
+                // Acquire also sweeps stale locks and arms the heartbeat, so it must run after a
+                // successful bind and never before.
+                BridgeInstanceLock.Acquire(BridgeSession.ProjectPath ?? string.Empty, _port);
+
                 BridgeLog.Info($"[{LogPrefix}] Bridge listening on http://{effectiveBind}:{_port}/");
             }
             catch (Exception e)
@@ -155,6 +165,10 @@ namespace GodotOpenMcp.Bridge.Editor
             _running = false;
             BridgeSession.SetConnected(false);
 
+            // Stop advancing the heartbeat but leave the lock file in place — see the retention note
+            // in GodotOpenMcpPlugin._ExitTree.
+            BridgeInstanceLock.SuspendHeartbeat();
+
             TryCleanupListener();
             TryJoinListenerThread();
 
@@ -163,25 +177,45 @@ namespace GodotOpenMcp.Bridge.Editor
         }
 
         /// <summary>
-        /// Resolve the listener port. P1.3 precedence:
+        /// Resolve the listener port. Precedence:
         /// <list type="number">
         ///   <item><see cref="PortEnvVar"/> env var, when a valid port.</item>
-        ///   <item><see cref="DefaultPort"/>.</item>
+        ///   <item>the deterministic per-project hash port
+        ///     (<see cref="InstancePortResolver.ComputePort"/>), keyed on
+        ///     <see cref="BridgeSession.ProjectPath"/>.</item>
+        ///   <item><see cref="DefaultPort"/>, only when the project path is unknown and no hash can
+        ///     be computed.</item>
         /// </list>
-        /// P1.4 inserts the deterministic per-project hash between (2) and the constant default,
-        /// reading <see cref="BridgeSession.ProjectPath"/> as the hash input. Kept as its own method
-        /// so the P1.4 widening is a localized diff.
+        /// <para>
+        /// The hash step is load-bearing for discovery, not just for collision avoidance: the MCP
+        /// server resolves the bridge port with the same env → lock → <c>20000 + sha256(projectPath) %
+        /// 10000</c> precedence (<c>instance-discovery.ts</c>). Returning the constant
+        /// <see cref="DefaultPort"/> here would leave the two sides listening and dialing on different
+        /// ports, so every live-bridge call would be refused unless the env override happened to be set
+        /// on both. <see cref="InstancePortResolver.ResolvePort"/> owns the precedence so the two
+        /// implementations stay in lockstep.
+        /// </para>
         /// </summary>
         static int ResolvePort()
         {
             var envValue = System.Environment.GetEnvironmentVariable(PortEnvVar);
+            int? envPort = null;
             if (!string.IsNullOrEmpty(envValue)
                 && int.TryParse(envValue, out var envParsed)
                 && IsValidPort(envParsed))
             {
-                return envParsed;
+                envPort = envParsed;
             }
-            return DefaultPort;
+
+            var projectPath = BridgeSession.ProjectPath;
+            if (string.IsNullOrEmpty(projectPath))
+            {
+                // No project path to hash (session not initialized). Honor an explicit override,
+                // otherwise fall back to the constant so the bridge still binds somewhere.
+                return envPort ?? DefaultPort;
+            }
+
+            return InstancePortResolver.ResolvePort(projectPath!, envPort);
         }
 
         static bool IsValidPort(int port) => port >= 1 && port <= 65535;

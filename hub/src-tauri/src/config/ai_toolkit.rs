@@ -479,13 +479,31 @@ pub fn launch_editor(project_path: &str, explicit_editor: Option<&str>) -> Launc
         .stderr(std::process::Stdio::null())
         .spawn();
     match child {
-        Ok(c) => LaunchResult {
-            ok: true,
-            editor_path: Some(editor.to_string_lossy().to_string()),
-            pid: Some(c.id()),
-            error_label: None,
-            message: None,
-        },
+        Ok(c) => {
+            let pid = c.id();
+            // Reap the child so it does not become a zombie.
+            //
+            // `std::process::Child` does NOT wait on drop, so simply dropping the handle leaves the
+            // editor process in the OS process table as a zombie owned by the Hub once the user
+            // quits Godot — and it stays there for the whole Hub session. The wizard's "Launch Godot
+            // & wait" button is re-pressable and Step 5 is re-entered on every wizard open, so this
+            // accumulated one zombie per launch.
+            //
+            // The wait happens on a detached thread: the launch is intentionally fire-and-forget
+            // (the Hub does not own the editor's lifetime), so we must not block here and must not
+            // kill the child.
+            std::thread::spawn(move || {
+                let mut child = c;
+                let _ = child.wait();
+            });
+            LaunchResult {
+                ok: true,
+                editor_path: Some(editor.to_string_lossy().to_string()),
+                pid: Some(pid),
+                error_label: None,
+                message: None,
+            }
+        }
         Err(e) => LaunchResult {
             ok: false,
             editor_path: Some(editor.to_string_lossy().to_string()),
@@ -525,8 +543,10 @@ fn lock_auth_token(project_path: &str) -> Option<String> {
 
 /// One-shot `GET /ping` against `http://127.0.0.1:<port>`. Classifies the
 /// result the same way the CLI's `singlePing` does: 503 → compiling; 200 with
-/// `compiling:true` → compiling; 200 with `connected:false` → offline; 200
-/// otherwise → ready; refused/timeout → offline/error.
+/// `compiling:true` → compiling; 200 with `connected:false` → offline; 200 with
+/// an unparseable body → compiling (the listener answered but the bridge is not
+/// serving a valid payload yet); 200 otherwise → ready; refused/timeout →
+/// offline/error.
 pub fn poll_bridge_ping(project_path: &str, override_port: Option<u16>) -> PingResult {
     let port = bridge_port::resolve_port(project_path, override_port);
     let base_url = format!("http://127.0.0.1:{port}");

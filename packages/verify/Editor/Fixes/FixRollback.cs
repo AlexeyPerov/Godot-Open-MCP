@@ -48,6 +48,11 @@ namespace GodotOpenMcp.Verify.Fixes
             public string OriginalPath;   // absolute path the fix may touch
             public string BackupPath;     // temp copy of the pre-fix bytes
             public bool ExistedBefore;    // false => a fix-created file is rolled back by deleting it
+            // True when the file existed but its backup copy could not be taken. Such an entry can
+            // never be restored, and must NEVER be treated as "created by the fix" — deleting it
+            // would destroy pre-existing user content. Tracked separately from ExistedBefore so the
+            // two conditions cannot be conflated.
+            public bool BackupFailed;
         }
 
         private readonly List<BackupEntry> _entries = new();
@@ -91,9 +96,13 @@ namespace GodotOpenMcp.Verify.Fixes
                     }
                     catch (System.Exception)
                     {
-                        // A backup failure must NOT silently let a failed fix go unrestored. Skip — Restore()
-                        // reports the unrestored path via ExistedBefore=false.
-                        entry.ExistedBefore = false;
+                        // A backup failure must NOT silently let a failed fix go unrestored, and it
+                        // must NOT be recorded as ExistedBefore=false: that is the "the fix created
+                        // this file" marker, and Restore() rolls those back by DELETING them. Doing
+                        // that here would delete a pre-existing user file (e.g. the scene being
+                        // fixed) and still report Success — the worst possible outcome for a rollback
+                        // path. Flag it instead; Restore() reports it as unrestored.
+                        entry.BackupFailed = true;
                     }
                 }
 
@@ -116,7 +125,14 @@ namespace GodotOpenMcp.Verify.Fixes
             {
                 try
                 {
-                    if (entry.ExistedBefore)
+                    if (entry.BackupFailed)
+                    {
+                        // Existed before, but we hold no bytes to put back. Report it and fail the
+                        // restore — never fall through to the delete branch.
+                        unrestored.Add(entry.OriginalPath);
+                        ok = false;
+                    }
+                    else if (entry.ExistedBefore)
                     {
                         // Rewrite / undelete case: copy the backup back over the original (creating it if the
                         // fix deleted it).

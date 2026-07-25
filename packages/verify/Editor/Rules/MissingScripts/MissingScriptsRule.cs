@@ -133,7 +133,15 @@ namespace GodotOpenMcp.Verify.Rules.MissingScripts
             }
 
             // Index ext_resource declarations by id so a node's script usage maps to its target in O(1).
-            var byId = refs.ExtResources.ToDictionary(e => e.Id);
+            // Built with an indexer loop rather than ToDictionary: SceneRefParser does not de-duplicate
+            // ids, and a file carrying two [ext_resource] headers with the same id= (a botched merge, a
+            // hand edit) is ordinary malformed input. ToDictionary throws ArgumentException on it, and
+            // that throw would escape Scan — abandoning this rule for every remaining path in the scope
+            // while the run still reports success, so the gate would compare against an artificially
+            // clean fingerprint. Godot's own loader keeps the first declaration wins/last wins
+            // distinction loose here; either is safe for a resolution lookup.
+            var byId = new Dictionary<string, ExtResourceDecl>();
+            foreach (var decl in refs.ExtResources) byId[decl.Id] = decl;
 
             foreach (var node in nodes.Attachments)
             {

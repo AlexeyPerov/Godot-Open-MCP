@@ -52,7 +52,10 @@ function pathCandidateNames(os: NodeJS.Platform): string[] {
       "Godot.exe",
     ];
   }
-  return ["godot", "godot_mono", "Godot"];
+  // Mono first, same as the Windows list: the addon is C#, so a non-.NET editor cannot load it.
+  // Probing "godot" first meant a plain `godot` on PATH always beat a `godot_mono` sitting in the
+  // same directory.
+  return ["godot_mono", "godot", "Godot"];
 }
 
 /**
@@ -158,12 +161,26 @@ export function scanForGodotBinaries(
   walk(root, 0);
 
   // Order: best build first, then newest version, then path (deterministic).
+  //
+  // Rank on the path RELATIVE TO the scan root, not on the basename. On macOS the edition and
+  // version markers live in the `.app` bundle *directory* name
+  // (`Godot_v4.5-stable_mono_macos.universal.app/Contents/MacOS/Godot`) — the inner executable is
+  // always literally `Godot`. Ranking by basename therefore made both godotBinaryRank and
+  // godotVersionKey constant, collapsing selection to a plain localeCompare on the full path: with
+  // both editions installed it picked the NON-.NET build, and with two versions it picked the older
+  // one. The addon is C#, so a non-.NET editor cannot load it at all, yet `open` still reported
+  // success. Using the root-relative path keeps Windows/Linux behavior identical (the markers are in
+  // the file name there, which the relative path includes) while fixing macOS.
+  const relativeTo = (p: string): string => {
+    const rel = path.relative(root, p);
+    return rel === "" ? path.basename(p) : rel;
+  };
   found.sort((a, b) => {
-    const nameA = path.basename(a);
-    const nameB = path.basename(b);
-    const rank = godotBinaryRank(nameB) - godotBinaryRank(nameA);
+    const keyA = relativeTo(a);
+    const keyB = relativeTo(b);
+    const rank = godotBinaryRank(keyB) - godotBinaryRank(keyA);
     if (rank !== 0) return rank;
-    const version = godotVersionKey(nameB) - godotVersionKey(nameA);
+    const version = godotVersionKey(keyB) - godotVersionKey(keyA);
     if (version !== 0) return version;
     return a.localeCompare(b);
   });

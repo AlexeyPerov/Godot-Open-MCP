@@ -488,18 +488,23 @@ namespace GodotOpenMcp.Bridge.Editor
             if (!TryResolveAnyNode(request.NodePath!, out var node, out var resolveError))
                 return resolveError;
 
-            // Resolve to the 2D or 3D agent interface. Both expose the same scalar property names
-            // (Radius / Height / MaxSpeed / PathDesiredDistance / TargetDesiredDistance /
-            // AvoidanceEnabled), but through different classes — handle each branch explicitly so
-            // a non-agent node returns wrong_node_type rather than a cast fault.
+            // Resolve to the 2D or 3D agent interface. The two classes share most scalar property names
+            // (Radius / MaxSpeed / PathDesiredDistance / TargetDesiredDistance / AvoidanceEnabled) but
+            // are unrelated types, so each branch is handled explicitly and a non-agent node returns
+            // wrong_node_type rather than a cast fault. `height` is 3D-only: NavigationAgent2D has no
+            // Height property (agent avoidance in 2D is a flat plane), so the 2D branch reports it as
+            // unsupported instead of silently accepting a value it cannot apply.
             float? appliedRadius = null, appliedHeight = null, appliedMaxSpeed = null;
             float? appliedPathDist = null, appliedTargetDist = null;
             bool? appliedAvoidance = null;
 
             if (node is NavigationAgent2D agent2d)
             {
+                if (request.Height.HasValue)
+                    return ToolDispatchResult.Fail(
+                        "unsupported_property",
+                        "'height' is not supported on a NavigationAgent2D (Godot exposes agent height on NavigationAgent3D only). Omit 'height' for 2D agents.");
                 if (request.Radius.HasValue) { agent2d.Radius = appliedRadius = ClampPositive(request.Radius.Value); }
-                if (request.Height.HasValue) { agent2d.Height = appliedHeight = ClampNonNegative(request.Height.Value); }
                 if (request.MaxSpeed.HasValue) { agent2d.MaxSpeed = appliedMaxSpeed = ClampNonNegative(request.MaxSpeed.Value); }
                 if (request.PathDesiredDistance.HasValue) { agent2d.PathDesiredDistance = appliedPathDist = ClampPositive(request.PathDesiredDistance.Value); }
                 if (request.TargetDesiredDistance.HasValue) { agent2d.TargetDesiredDistance = appliedTargetDist = ClampPositive(request.TargetDesiredDistance.Value); }
@@ -720,7 +725,9 @@ namespace GodotOpenMcp.Bridge.Editor
                     sb.Append("\"kind\":\"agent\",");
                     sb.Append("\"properties\":{");
                     sb.Append("\"radius\":").Append(Float(a2.Radius)).Append(',');
-                    sb.Append("\"height\":").Append(Float(a2.Height)).Append(',');
+                    // No "height" key for 2D: NavigationAgent2D has no Height property. The key is
+                    // omitted rather than reported as 0 so an agent can tell "not applicable" from
+                    // "configured to zero".
                     sb.Append("\"maxSpeed\":").Append(Float(a2.MaxSpeed)).Append(',');
                     sb.Append("\"pathDesiredDistance\":").Append(Float(a2.PathDesiredDistance)).Append(',');
                     sb.Append("\"targetDesiredDistance\":").Append(Float(a2.TargetDesiredDistance)).Append(',');

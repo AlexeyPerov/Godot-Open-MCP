@@ -247,3 +247,54 @@ test("pull: second call reports started:false (subscription already running)", (
   assert.equal(result.started, false);
   stream.stop();
 });
+
+// ---------------------------------------------------------------------------
+// stop() must be final (regression)
+// ---------------------------------------------------------------------------
+//
+// stop() aborts the controller, which makes any in-flight fetch/pump SETTLE — and both the connect
+// `.catch` and pump's `finally` call scheduleReconnect(). Without a stop latch, stop() therefore
+// armed a fresh 2s reconnect timer, whose connect() failed, whose .catch armed another, forever:
+// an unbounded reconnect loop plus a live loopback fetch that kept the process alive. That is why
+// `node --test` on this file used to hang and why the CLI's shutdown stop() had no effect.
+
+/** Active libuv Timeout handles — a leaked reconnect timer shows up here. */
+function timeoutHandles(): number {
+  return process.getActiveResourcesInfo().filter((h) => h === "Timeout").length;
+}
+
+test("stop: no reconnect timer survives past the reconnect interval", async () => {
+  const before = timeoutHandles();
+  const stream = new BridgeEventStream("http://127.0.0.1:1");
+  stream.pull(10); // starts a subscription against a dead port -> connect fails -> reconnect armed
+  await new Promise((r) => setTimeout(r, 150));
+  stream.stop();
+  // Wait comfortably longer than RECONNECT_MS (2000) so a resurrected timer would have fired.
+  await new Promise((r) => setTimeout(r, 2600));
+  assert.equal(
+    timeoutHandles(),
+    before,
+    "stop() must not leave (or re-arm) a reconnect timer",
+  );
+});
+
+test("stop: connected/lastError stay quiet and the stream does not resurrect", async () => {
+  const stream = new BridgeEventStream("http://127.0.0.1:1");
+  stream.pull(10);
+  await new Promise((r) => setTimeout(r, 150));
+  stream.stop();
+  await new Promise((r) => setTimeout(r, 2600));
+  assert.equal(stream.isConnected, false, "a stopped stream must never report connected");
+  // A resurrected loop would have replaced the abort-time state with a fresh "fetch failed".
+  const result = stream.pull(10);
+  assert.equal(result.started, true, "pull after stop starts a genuinely new subscription");
+  stream.stop();
+});
+
+test("stop: is idempotent", () => {
+  const stream = new BridgeEventStream("http://127.0.0.1:1");
+  stream.pull(10);
+  stream.stop();
+  assert.doesNotThrow(() => stream.stop());
+  assert.doesNotThrow(() => stream.stop());
+});

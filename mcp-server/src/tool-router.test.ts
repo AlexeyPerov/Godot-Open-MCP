@@ -1123,8 +1123,11 @@ test("route: manage_tools list_groups returns the catalog with session activatio
   assert.equal(typed!.defaultEnabled, false);
   assert.equal(typed!.activationSource, null);
 
-  // P12.1 filled the tilemap stub with six TileMapLayer tools. The other domain
-  // stubs (navigation / particles / animation / csg) still surface toolCount 0.
+  // The domain packs have been filled in progressively: tilemap 6, navigation 7,
+  // particles 5, animation 7. `csg` is the only remaining empty stub, so it is the
+  // one that still exercises the "an unimplemented pack surfaces toolCount 0"
+  // contract. Assert the empty case against csg rather than a pack that has since
+  // shipped, so filling the next pack fails loudly here instead of silently.
   const tilemap = (body.groups as Array<{
     id: string;
     toolCount: number;
@@ -1136,14 +1139,23 @@ test("route: manage_tools list_groups returns the catalog with session activatio
   assert.equal(tilemap!.tools.length, 6);
   assert.equal(tilemap!.active, false, "fresh session has tilemap inactive");
 
-  const navStub = (body.groups as Array<{
+  const navigation = (body.groups as Array<{
     id: string;
     toolCount: number;
     tools: string[];
   }>).find((g) => g.id === "navigation");
-  assert.ok(navStub, "navigation stub must be in the catalog");
-  assert.equal(navStub!.toolCount, 0);
-  assert.deepEqual(navStub!.tools, []);
+  assert.ok(navigation, "navigation group must be in the catalog");
+  assert.equal(navigation!.toolCount, 7);
+  assert.equal(navigation!.tools.length, 7);
+
+  const emptyStub = (body.groups as Array<{
+    id: string;
+    toolCount: number;
+    tools: string[];
+  }>).find((g) => g.id === "csg");
+  assert.ok(emptyStub, "csg stub must be in the catalog");
+  assert.equal(emptyStub!.toolCount, 0);
+  assert.deepEqual(emptyStub!.tools, []);
 
   // Active set snapshot.
   assert.deepEqual(body.activeGroups, ["core"]);

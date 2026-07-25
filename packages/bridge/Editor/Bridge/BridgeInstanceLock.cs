@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Text;
+using System.Threading;
 
 namespace GodotOpenMcp.Bridge.Editor
 {
@@ -76,6 +77,28 @@ namespace GodotOpenMcp.Bridge.Editor
         // a running session.
         static string? _authToken;
 
+        // Last state written, cached so the heartbeat tick can refresh `heartbeatAt` without
+        // recomputing editor state (which would need main-thread-only Godot APIs). A real state
+        // transition still goes through UpdateState, which updates these.
+        static volatile string _lastState = StateIdle;
+        static volatile bool _lastPlaying;
+        static volatile bool _lastCompiling;
+
+        /// <summary>
+        /// Heartbeat tick interval. The MCP server treats a heartbeat older than 10s as stale and
+        /// classifies the instance as <c>dead_bridge</c> (see <c>instance-discovery.ts</c>
+        /// <c>HEARTBEAT_STALE_MS</c>), so this must stay comfortably under that bound. 3s gives a 3x
+        /// margin for a slow disk or a briefly blocked editor without a false "dead" verdict.
+        /// </summary>
+        internal const int HeartbeatIntervalMs = 3000;
+
+        // Steady-state heartbeat writer. A plain threading Timer rather than a Godot _Process hook:
+        // the lock writer touches no Godot APIs, so it must not be coupled to the editor node
+        // lifecycle (and it must keep ticking while the main thread is busy compiling — that is
+        // precisely the window the dead-bridge classifier reasons about). Never a foreground thread,
+        // so it cannot keep the editor or the test host alive.
+        static Timer? _heartbeatTimer;
+
         /// <summary>True once <see cref="Acquire"/> has successfully written this instance's lock.</summary>
         public static bool IsAcquired => _acquired;
 
@@ -127,6 +150,10 @@ namespace GodotOpenMcp.Bridge.Editor
             // rewrites (it reuses this static, not regenerated).
             _authToken = BridgeAuthToken.Generate();
 
+            _lastState = StateIdle;
+            _lastPlaying = false;
+            _lastCompiling = false;
+
             try
             {
                 WriteLock(StateIdle, isPlaying: false, isCompiling: false, DateTime.UtcNow);
@@ -138,6 +165,68 @@ namespace GodotOpenMcp.Bridge.Editor
                     $"[BridgeInstanceLock] Failed to write lock file: {e.Message}");
                 _acquired = false;
             }
+
+            // Arm the heartbeat only once the lock actually landed. Without a steady heartbeat the
+            // MCP server would classify this live bridge as `dead_bridge` ~10s after Acquire.
+            if (_acquired)
+                StartHeartbeat();
+        }
+
+        /// <summary>
+        /// (Re)arm the heartbeat timer. Idempotent: a redundant call disposes the previous timer
+        /// first, so a re-Acquire (plugin disable → enable, domain reload) never leaves two writers.
+        /// </summary>
+        static void StartHeartbeat()
+        {
+            StopHeartbeat();
+            try
+            {
+                _heartbeatTimer = new Timer(
+                    _ => Heartbeat(),
+                    null,
+                    HeartbeatIntervalMs,
+                    HeartbeatIntervalMs);
+            }
+            catch (Exception e)
+            {
+                // A timer we cannot arm is not fatal — the lock is still written, it just goes stale.
+                BridgeLog.Warning($"[BridgeInstanceLock] Failed to arm heartbeat: {e.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Stop the heartbeat writer but keep the lock file on disk. Called when the listener stops
+        /// (plugin disable, editor quit, assembly reload). This is what produces the "stale heartbeat
+        /// + live PID" signature the MCP server reads as <c>dead_bridge</c>/<c>reloading</c>: the file
+        /// stays so the instance remains discoverable, but its <c>heartbeatAt</c> stops advancing.
+        /// Use <see cref="Release"/> only when the lock should actually be deleted.
+        /// </summary>
+        public static void SuspendHeartbeat() => StopHeartbeat();
+
+        static void StopHeartbeat()
+        {
+            var t = _heartbeatTimer;
+            _heartbeatTimer = null;
+            try { t?.Dispose(); } catch { /* best-effort */ }
+        }
+
+        /// <summary>
+        /// One heartbeat tick: rewrite the lock with the cached state so <c>heartbeatAt</c> advances.
+        /// Best-effort — a failed tick is logged at most once per transition to avoid log spam on a
+        /// read-only or full disk.
+        /// </summary>
+        static void Heartbeat()
+        {
+            if (!_acquired) return;
+            try
+            {
+                WriteLock(_lastState, _lastPlaying, _lastCompiling, DateTime.UtcNow);
+            }
+            catch
+            {
+                // Swallowed deliberately: this runs on a timer thread every few seconds, and the
+                // failure mode (stale heartbeat) is already an observable signal on the MCP side.
+            }
         }
 
         /// <summary>
@@ -147,6 +236,11 @@ namespace GodotOpenMcp.Bridge.Editor
         public static void UpdateState(string? state, bool isPlaying, bool isCompiling)
         {
             if (!_acquired) return;
+            // Cache so the heartbeat tick keeps re-asserting the current state rather than reverting
+            // the lock to "idle" on the next tick.
+            _lastState = state ?? StateIdle;
+            _lastPlaying = isPlaying;
+            _lastCompiling = isCompiling;
             try
             {
                 WriteLock(state ?? StateIdle, isPlaying, isCompiling, DateTime.UtcNow);
@@ -163,6 +257,8 @@ namespace GodotOpenMcp.Bridge.Editor
         public static void Release()
         {
             if (!_acquired) return;
+            // Stop the writer before deleting, or an in-flight tick could recreate the file.
+            StopHeartbeat();
             var path = InstancePortResolver.LockPath(_acquiredProjectPath!);
             try
             {

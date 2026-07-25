@@ -20,6 +20,7 @@
 
 import * as fs from "fs";
 import * as path from "path";
+import { fileURLToPath } from "node:url";
 
 /**
  * The directory names an addon source root may be identified by. A `--source`
@@ -80,8 +81,16 @@ export function resolveAddonSource(source?: string): ResolvedAddonSource {
  * CLI with no checkout nearby) so the caller can ask for `--source`.
  */
 export function defaultMonorepoSource(): string | null {
-  // cli/src/utils/addon-source.ts  →  ../../packages/bridge
+  // This package is ESM ("type": "module"), so `__dirname` does not exist at runtime — referencing
+  // it threw `ReferenceError: __dirname is not defined` and broke `install-plugin` whenever
+  // `--source` was omitted, i.e. the documented monorepo default. tsc does not catch it because
+  // @types/node declares __dirname as a global, and CI never hit it because the demo-addon script
+  // always passes an explicit --source. Derive the directory from import.meta.url instead, matching
+  // lib/setup-mcp.ts and package-version.ts.
+  //
+  // cli/src/utils/addon-source.ts  →  ../../../packages/bridge
   // (works from dist/utils/addon-source.js too — same relative depth).
-  const candidate = path.resolve(__dirname, "..", "..", "..", "packages", "bridge");
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const candidate = path.resolve(here, "..", "..", "..", "packages", "bridge");
   return fs.existsSync(path.join(candidate, "plugin.cfg")) ? candidate : null;
 }

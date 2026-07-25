@@ -223,6 +223,11 @@ function stageThenSwapAddon(
   );
   fs.rmSync(staging, { recursive: true, force: true });
   fs.mkdirSync(staging, { recursive: true });
+  // Set once the rename consumed `staging`, so the finally does not try to delete the tree that is
+  // now the live addon.
+  let swapped = false;
+  // Non-null once the previous addon has been moved aside and still needs cleanup or restoring.
+  let backup: string | null = null;
   try {
     fill(staging);
     // Idempotent short-circuit: if the installed tree already matches, skip the
@@ -230,14 +235,57 @@ function stageThenSwapAddon(
     if (fs.existsSync(addonReal) && dirsEqual(staging, addonReal)) {
       return false;
     }
-    // Swap staging -> addonDir only after `fill` fully succeeded.
-    fs.rmSync(addonReal, { recursive: true, force: true });
+
     fs.mkdirSync(path.dirname(addonReal), { recursive: true });
-    fs.renameSync(staging, addonReal);
+
+    // Move the existing addon aside rather than deleting it up front.
+    //
+    // The previous order was `rmSync(addonReal)` then `renameSync(staging, addonReal)`. If the
+    // rename failed — on Windows a directory rename fails with EPERM/EBUSY whenever any process
+    // holds a handle inside the tree (the Godot editor having the project open, an AV scanner), and
+    // rmSync itself can fail part-way with maxRetries defaulting to 0 — the user's addon was
+    // already gone, and the finally then deleted the staged replacement too. That left the project
+    // with no addon at all and nothing to recover from, contradicting this module's documented
+    // guarantee that a failure leaves the project as found.
+    if (fs.existsSync(addonReal)) {
+      backup = `${addonReal}.old-${process.pid}-${Date.now()}`;
+      fs.renameSync(addonReal, backup);
+    }
+
+    try {
+      fs.renameSync(staging, addonReal);
+      swapped = true;
+    } catch (err) {
+      // Put the original back before surfacing the failure.
+      if (backup !== null) {
+        try {
+          fs.rmSync(addonReal, { recursive: true, force: true });
+          fs.renameSync(backup, addonReal);
+          backup = null;
+        } catch {
+          // Restoring failed too — keep the backup directory on disk and name it in the error so
+          // the user can recover manually rather than silently losing the tree.
+          const hint = backup;
+          backup = null;
+          throw new Error(
+            `${(err as Error).message} (the previous addon was preserved at '${hint}' — ` +
+              `rename it back to '${addonReal}' to restore it)`,
+          );
+        }
+      }
+      throw err;
+    }
+
     return true;
   } finally {
-    // Best-effort cleanup if the swap didn't consume staging.
-    fs.rmSync(staging, { recursive: true, force: true });
+    // Best-effort cleanup: only remove staging when the swap did NOT consume it.
+    if (!swapped) {
+      fs.rmSync(staging, { recursive: true, force: true });
+    }
+    // Drop the superseded backup once the new tree is in place.
+    if (backup !== null) {
+      fs.rmSync(backup, { recursive: true, force: true });
+    }
   }
 }
 

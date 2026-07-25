@@ -250,3 +250,84 @@ test("launchEditor: rejects a non-existent binary via the error callback", async
     }
   }
 });
+
+// ---------------------------------------------------------------------------
+// macOS .app-bundle ranking (regression)
+// ---------------------------------------------------------------------------
+//
+// On macOS the edition (.NET/mono) and version markers live in the `.app` BUNDLE DIRECTORY name —
+// the inner executable is always literally `Godot`
+// (`Godot_v4.5-stable_mono_macos.universal.app/Contents/MacOS/Godot`). Ranking by basename made
+// both godotBinaryRank and godotVersionKey constant, so selection collapsed to a path
+// localeCompare: the non-.NET build won over the mono build, and 4.3 won over 4.5. The addon is C#,
+// so a non-.NET editor cannot load it at all.
+
+/** Lay out macOS-style .app bundles and return the scan root. */
+function macAppTree(bundleNames: string[]): { root: string; cleanup: () => void } {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "godot-mac-apps-"));
+  for (const name of bundleNames) {
+    const macos = path.join(root, name, "Contents", "MacOS");
+    fs.mkdirSync(macos, { recursive: true });
+    fs.writeFileSync(path.join(macos, "Godot"), "");
+  }
+  return { root, cleanup: () => fs.rmSync(root, { recursive: true, force: true }) };
+}
+
+/** The winning candidate's `.app` bundle directory name. */
+function winningBundle(root: string, ranked: string[]): string {
+  return path.relative(root, ranked[0]!).split(path.sep)[0]!;
+}
+
+test("scanForGodotBinaries: macOS prefers the .NET (mono) bundle over the plain one", () => {
+  const fx = macAppTree([
+    "Godot_v4.5-stable_macos.universal.app",
+    "Godot_v4.5-stable_mono_macos.universal.app",
+  ]);
+  try {
+    const hits = scanForGodotBinaries(fx.root, "darwin", 3);
+    assert.equal(hits.length, 2, "both bundles must be discovered");
+    assert.equal(winningBundle(fx.root, hits), "Godot_v4.5-stable_mono_macos.universal.app");
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test("scanForGodotBinaries: macOS prefers the newer version bundle", () => {
+  const fx = macAppTree([
+    "Godot_v4.3-stable_mono_macos.universal.app",
+    "Godot_v4.5-stable_mono_macos.universal.app",
+  ]);
+  try {
+    const hits = scanForGodotBinaries(fx.root, "darwin", 3);
+    assert.equal(winningBundle(fx.root, hits), "Godot_v4.5-stable_mono_macos.universal.app");
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test("scanForGodotBinaries: macOS ranks edition above version (mono 4.3 beats plain 4.5)", () => {
+  // Edition is the harder constraint: a plain build cannot load the C# addon at any version.
+  const fx = macAppTree([
+    "Godot_v4.5-stable_macos.universal.app",
+    "Godot_v4.3-stable_mono_macos.universal.app",
+  ]);
+  try {
+    const hits = scanForGodotBinaries(fx.root, "darwin", 3);
+    assert.equal(winningBundle(fx.root, hits), "Godot_v4.3-stable_mono_macos.universal.app");
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test("scanForGodotBinaries: linux/windows name-based ranking still holds", () => {
+  // The relative-path keying must not regress the platforms where the markers are in the file name.
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "godot-lin-"));
+  try {
+    fs.writeFileSync(path.join(root, "Godot_v4.5-stable_linux.x86_64"), "");
+    fs.writeFileSync(path.join(root, "Godot_v4.5-stable_mono_linux.x86_64"), "");
+    const hits = scanForGodotBinaries(root, "linux", 1);
+    assert.equal(path.basename(hits[0]!), "Godot_v4.5-stable_mono_linux.x86_64");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

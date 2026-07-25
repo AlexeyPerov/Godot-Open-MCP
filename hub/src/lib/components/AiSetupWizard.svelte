@@ -37,9 +37,27 @@
 
   async function finish(): Promise<void> {
     w.finish();
-    await appState.markOpened(project.id);
-    onClose();
+    // markOpened → touch_project_opened → save_projects, which rejects on a read-only config dir,
+    // a full disk, or bad permissions on the Hub's config directory. Nothing in the chain caught
+    // that, and Button's onclick prop is typed `=> void`, so the rejection was silently unhandled:
+    // onClose() never ran, no banner appeared, and "Finish" simply did nothing — permanently, since
+    // w.finish() has already discarded the saved draft by this point. Recording the open timestamp
+    // is bookkeeping, not part of the setup result, so a failure must not block closing the wizard.
+    try {
+      await appState.markOpened(project.id);
+    } catch {
+      /* non-fatal — the wizard's work is already committed to disk */
+    } finally {
+      onClose();
+    }
   }
+
+  // Stop the wizard's bridge-ping polling loop when the component goes away. Without this, closing
+  // the wizard mid-launch left a detached WizardState polling every 1.5s for up to two more minutes,
+  // writing into dead state — and re-opening the wizard started a second concurrent loop.
+  $effect(() => {
+    return () => w.cancel();
+  });
 </script>
 
 <WizardShell projectName={w.projectName} index={w.index} {onClose}>

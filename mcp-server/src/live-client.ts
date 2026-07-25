@@ -216,11 +216,17 @@ export class LiveClient {
    */
   async isLiveAvailable(): Promise<boolean> {
     try {
-      const res = await this.fetchWithTimeout("/ping", { method: "GET" });
-      if (res.status === 503) return true;
-      if (!res.ok) return false;
-      const body = (await res.json()) as PingResponse;
-      return body.connected === true;
+      return await this.fetchWithTimeout(
+        "/ping",
+        { method: "GET" },
+        PING_TIMEOUT_MS,
+        async (res) => {
+          if (res.status === 503) return true;
+          if (!res.ok) return false;
+          const body = (await res.json()) as PingResponse;
+          return body.connected === true;
+        },
+      );
     } catch {
       return false;
     }
@@ -245,8 +251,22 @@ export class LiveClient {
    */
   private async handlePing(): Promise<CallToolResult> {
     try {
-      const res = await this.fetchWithTimeout("/ping", { method: "GET" });
+      return await this.fetchWithTimeout(
+        "/ping",
+        { method: "GET" },
+        PING_TIMEOUT_MS,
+        (res) => this.readPingResponse(res),
+      );
+    } catch (err) {
+      return this.classifyPingFailure(err);
+    }
+  }
 
+  /**
+   * Body-reading half of {@link handlePing}. Runs inside the fetch timeout scope (see
+   * {@link fetchWithTimeout}) so a stalled body is aborted rather than hanging the call.
+   */
+  private async readPingResponse(res: Response): Promise<CallToolResult> {
       // 503 = bridge listener up, BridgeSession not initialized yet. Treat it
       // as a reachable-but-not-ready bridge rather than offline: the body is
       // a valid PingResponse-shape JSON the agent can inspect.
@@ -280,14 +300,26 @@ export class LiveClient {
         return makeErrorResult({ code, message });
       }
 
-      const body = (await res.json()) as PingResponse;
+      // Guard the parse locally. An unguarded res.json() on a 200 falls into the outer catch, where
+      // classifyPingFailure has no way to tell a parse failure from a connect failure and reports
+      // `bridge_offline` — telling the operator to launch a Godot editor that is already running,
+      // and making bridge_status derive `stopped` for a reachable bridge. postTool already
+      // distinguishes this case as bridge_response_unparsable; match it.
+      let body: PingResponse;
+      try {
+        body = (await res.json()) as PingResponse;
+      } catch {
+        return makeErrorResult({
+          code: "bridge_response_unparsable",
+          message:
+            `Bridge /ping returned HTTP 200 but the body was not valid JSON. Endpoint: ${this.baseUrl}. ` +
+            `The listener is reachable, so this is a bridge-side response fault rather than an offline editor.`,
+        });
+      }
       return {
         content: [{ type: "text", text: JSON.stringify(body) }],
         isError: false,
       };
-    } catch (err) {
-      return this.classifyPingFailure(err);
-    }
   }
 
   /**
@@ -329,7 +361,8 @@ export class LiveClient {
         BRIDGE_DEFAULT_TIMEOUT_MS + 10_000,
       );
 
-      const res = await this.fetchWithTimeout(
+      // Body reads happen inside the timeout scope — see fetchWithTimeout.
+      return await this.fetchWithTimeout(
         `/tools/${toolName}`,
         {
           method: "POST",
@@ -337,42 +370,43 @@ export class LiveClient {
           body: JSON.stringify(args),
         },
         fetchTimeout,
+        async (res) => {
+          if (!res.ok) {
+            // HTTP-level routing/transport fault (404/405/400/500). The body may
+            // carry a structured { error: { code, message } }; fall back to a
+            // generic bridge_http_error when it doesn't.
+            const body = (await res
+              .json()
+              .catch(() => null)) as HttpErrorBody | null;
+            const code = body?.error?.code ?? "bridge_http_error";
+            const message =
+              body?.error?.message ??
+              `Bridge /tools/${toolName} returned HTTP ${res.status}`;
+            return makeErrorResult({ code, message });
+          }
+
+          // HTTP 200 — unwrap the canonical { ok, result, error } envelope.
+          const rawText = await res.text();
+          let parsed: unknown = null;
+          try {
+            parsed = JSON.parse(rawText);
+          } catch {
+            // 200 OK with a non-JSON body is a bridge contract violation (the
+            // bridge always emits valid JSON envelopes). Surface it as a structured
+            // error rather than manufacturing a fake success.
+            return makeErrorResult({
+              code: "bridge_response_unparsable",
+              message:
+                `Bridge returned HTTP 200 for '${toolName}' but the body was not ` +
+                `valid JSON. This is a bridge contract violation — the bridge ` +
+                "should always emit a { ok, result, error } envelope. Raw body: " +
+                (rawText.length > 200 ? rawText.slice(0, 200) + "…" : rawText),
+            });
+          }
+
+          return this.unwrapEnvelope(toolName, parsed);
+        },
       );
-
-      if (!res.ok) {
-        // HTTP-level routing/transport fault (404/405/400/500). The body may
-        // carry a structured { error: { code, message } }; fall back to a
-        // generic bridge_http_error when it doesn't.
-        const body = (await res
-          .json()
-          .catch(() => null)) as HttpErrorBody | null;
-        const code = body?.error?.code ?? "bridge_http_error";
-        const message =
-          body?.error?.message ??
-          `Bridge /tools/${toolName} returned HTTP ${res.status}`;
-        return makeErrorResult({ code, message });
-      }
-
-      // HTTP 200 — unwrap the canonical { ok, result, error } envelope.
-      const rawText = await res.text();
-      let parsed: unknown = null;
-      try {
-        parsed = JSON.parse(rawText);
-      } catch {
-        // 200 OK with a non-JSON body is a bridge contract violation (the
-        // bridge always emits valid JSON envelopes). Surface it as a structured
-        // error rather than manufacturing a fake success.
-        return makeErrorResult({
-          code: "bridge_response_unparsable",
-          message:
-            `Bridge returned HTTP 200 for '${toolName}' but the body was not ` +
-            `valid JSON. This is a bridge contract violation — the bridge ` +
-            "should always emit a { ok, result, error } envelope. Raw body: " +
-            (rawText.length > 200 ? rawText.slice(0, 200) + "…" : rawText),
-        });
-      }
-
-      return this.unwrapEnvelope(toolName, parsed);
     } catch (err) {
       // Reuse the ping failure classifier: the same fetch-with-timeout +
       // bearer-token plumbing backs both paths, so a connection failure or
@@ -537,11 +571,12 @@ export class LiveClient {
    * always wins; in practice ping sends no caller headers, so the discovered
    * token is attached as-is when present.
    */
-  private fetchWithTimeout(
+  private async fetchWithTimeout<T>(
     path: string,
     init: RequestInit,
-    timeoutMs: number = PING_TIMEOUT_MS,
-  ): Promise<Response> {
+    timeoutMs: number,
+    consume: (res: Response) => Promise<T>,
+  ): Promise<T> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -550,11 +585,29 @@ export class LiveClient {
       headers.set("Authorization", `Bearer ${this.authToken}`);
     }
 
-    return fetch(`${this.baseUrl}${path}`, {
-      ...init,
-      headers,
-      signal: controller.signal,
-    }).finally(() => clearTimeout(timer));
+    // The timeout must cover the response BODY, not just the headers.
+    //
+    // `fetch` resolves as soon as the response headers arrive, so clearing the timer when that
+    // promise settles left every `res.json()` / `res.text()` unprotected and made the AbortSignal
+    // unable to fire. A bridge that flushed 200 headers and then stalled the body (half-open socket
+    // after sleep/wake, editor crash mid-write, a large screenshot payload over a stalling
+    // connection) would hang the MCP call until undici's 300s body timeout — or indefinitely on a
+    // keep-alive socket. That silently voided the deliberate BRIDGE_DEFAULT_TIMEOUT_MS floor below
+    // and made `bridge_status` — the one tool whose job is to answer fast when the bridge is
+    // unhealthy — hang instead.
+    //
+    // Callers therefore read the body inside `consume`, and the timer is only cleared once that
+    // has finished.
+    try {
+      const res = await fetch(`${this.baseUrl}${path}`, {
+        ...init,
+        headers,
+        signal: controller.signal,
+      });
+      return await consume(res);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   // ── P5.3 — `godot_open_mcp_bridge_status` composition ──────────────────

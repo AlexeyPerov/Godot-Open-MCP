@@ -774,26 +774,26 @@ namespace GodotOpenMcp.Bridge.Editor
 
         /// <summary>
         /// Create the parent directory for a <c>res://</c> path so <c>ResourceSaver.Save</c> does not
-        /// fail with <c>CantOpen</c> on a nested target. Uses <c>DirAccess.MakeDirRecursiveAbsolute</c>
-        /// on the <c>res://</c>-relative parent. Main-thread only. Adapted from Godot-MCP's
+        /// fail with <c>CantOpen</c> on a nested target. Main-thread only. Adapted from Godot-MCP's
         /// <c>Tool_Scene.Create</c> / Unity's <c>MaterialTools.EnsureFolderRecursive</c>.
+        /// <para>
+        /// <c>DirAccess.MakeDirRecursiveAbsolute</c> is a <b>static</b> method that takes a full path
+        /// (<c>res://</c>-rooted is fine) — it is not the instance method for a path relative to an
+        /// opened directory (that one is <c>MakeDirRecursive</c>). Calling the static form directly on
+        /// the parent path avoids opening a DirAccess handle at all, and matches
+        /// <c>ResourceFileOperations.EnsureDirectoryExists</c>.
+        /// </para>
         /// </summary>
         static void EnsureParentDir(string resPath)
         {
             var lastSlash = resPath.LastIndexOf('/');
             if (lastSlash <= "res://".Length - 1) return; // no parent dir beyond res:// itself
             var parentDir = resPath.Substring(0, lastSlash);
-            var da = DirAccess.Open("res://");
-            if (da == null) return;
             try
             {
-                // MakeDirRecursiveAbsolute takes a path relative to the opened dir (res://).
-                var rel = parentDir.Substring("res://".Length);
-                if (!string.IsNullOrEmpty(rel))
-                    da.MakeDirRecursiveAbsolute(rel);
+                DirAccess.MakeDirRecursiveAbsolute(parentDir);
             }
             catch { /* best-effort; a failure surfaces as a save error downstream */ }
-            finally { da.Dispose(); }
         }
 
         /// <summary>

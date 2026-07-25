@@ -49,15 +49,18 @@ namespace GodotOpenMcp.Verify.Rules.BrokenReferences
         {
             if (string.IsNullOrWhiteSpace(uid)) return false;
 
-            var token = uid!;
-            const string scheme = "uid://";
-            if (token.StartsWith(scheme))
-                token = token.Substring(scheme.Length);
-            if (string.IsNullOrEmpty(token)) return false;
+            // Pass the token through WITH its `uid://` scheme. Godot's ResourceUID.text_to_id starts by
+            // rejecting anything that does not begin with "uid://" and returns INVALID_ID (-1) — stripping
+            // the prefix first made this method return false for every uid in the project. That silently
+            // disabled the false-positive guard the broken-reference and missing-script rules depend on:
+            // a reference whose `path=` is stale but whose `uid=` is still live (the normal state after
+            // Godot relocates an asset) was reported as a hard Error, failing the gate under Enforce.
+            var token = uid!.Trim();
+            if (!token.StartsWith("uid://", System.StringComparison.Ordinal)) return false;
 
-            // ResourceUid works in the Int64 id space. Convert the text token, then check the singleton's
-            // table. TextToId throws on a malformed token — catch and treat as missing so a corrupt uid
-            // in a .tscn surfaces as a broken-ref issue, not a crash.
+            // ResourceUid works in the Int64 id space. text_to_id does not throw — it returns InvalidId
+            // for a malformed token — but the try/catch is retained as a cheap guard against a future
+            // binding change, and a corrupt uid in a .tscn surfaces as a broken-ref issue, not a crash.
             long id;
             try
             {
@@ -67,6 +70,8 @@ namespace GodotOpenMcp.Verify.Rules.BrokenReferences
             {
                 return false;
             }
+
+            if (id == ResourceUid.InvalidId) return false;
 
             // HasId returns false for a deregistered uid without throwing (unlike GetIdPath).
             return ResourceUid.Singleton.HasId(id);

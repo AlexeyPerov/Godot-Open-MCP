@@ -424,3 +424,37 @@ test("parseCliArgs: configure --set without '=' is an error", () => {
 test("parseCliArgs: configure --set with no value is an error", () => {
   assert.match(parse(["configure", "/p", "--set"]).error ?? "", /--set/);
 });
+
+// ---------------------------------------------------------------------------
+// --port range (regression)
+// ---------------------------------------------------------------------------
+//
+// parsePositiveInt only rejected <= 0 / non-integers, so an out-of-range port passed validation and
+// was then silently DISCARDED downstream: resolvePort re-validates the range and, on failure, falls
+// back to the lock/hash port. `--port 99999` therefore probed a completely different port with no
+// indication the override had been ignored — while the parser's own message promised "1-65535".
+
+test("parseCliArgs: --port accepts the range boundaries", () => {
+  assert.equal(parse(["status", "/p", "--port", "1"]).port, 1);
+  assert.equal(parse(["status", "/p", "--port", "65535"]).port, 65535);
+});
+
+test("parseCliArgs: --port rejects a value above 65535", () => {
+  const p = parse(["status", "/p", "--port", "65536"]);
+  assert.match(p.error ?? "", /1-65535/);
+  assert.equal(p.port, undefined, "an out-of-range port must not be carried forward");
+});
+
+test("parseCliArgs: --port rejects 99999 rather than silently falling back", () => {
+  assert.match(parse(["status", "/p", "--port", "99999"]).error ?? "", /1-65535/);
+});
+
+test("parseCliArgs: --port still rejects zero, negatives and non-integers", () => {
+  for (const bad of ["0", "-1", "1.5", "abc"]) {
+    assert.match(
+      parse(["status", "/p", "--port", bad]).error ?? "",
+      /1-65535/,
+      `--port ${bad} must be rejected`,
+    );
+  }
+});
