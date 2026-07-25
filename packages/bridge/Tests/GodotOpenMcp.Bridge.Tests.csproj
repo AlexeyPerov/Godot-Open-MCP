@@ -266,6 +266,16 @@
          AnimationPlayer / AnimationLibrary / Animation-coupled) is #if TOOLS and verified
          via the headless Godot smoke / live call path, not here. -->
     <Compile Include="..\Editor\Tools\Extensions\Animation\AnimationBodies.cs" Link="Source\Animation\AnimationBodies.cs" />
+    <!-- P12.5 — CSG domain pack. The pure-managed body parsers (CsgDefaultsBody /
+         CsgCreateBody / CsgSetOperationBody / CsgGetBody, the CsgKind / CsgOperation enums,
+         the CsgKindParser / CsgOperationParser parsers, and the CsgPropertyClamp clamp table)
+         are linked for unit testing. They reuse the P12.1 JsonScalar extractor (linked above).
+         The clamp table (CsgPropertyClamp) is the highest-value unit-test surface in this pack —
+         it pins the allow-list ranges without requiring the editor. The editor-only handler
+         (CsgTools.Defaults / BoxCreate / SphereCreate / CylinderCreate / CombinerCreate /
+         SetOperation / Get — EditorInterface / Csg*3D-coupled) is #if TOOLS and verified via
+         the headless Godot smoke / live call path, not here. -->
+    <Compile Include="..\Editor\Tools\Extensions\Csg\CsgBodies.cs" Link="Source\Csg\CsgBodies.cs" />
     <!-- P3.5 — gate on mutators. The gate types (GateMode/GateOutcome/DeltaData/GateDispatchResult/
          GatePolicy/GateDefaultPolicy) and the VerifyGateAdapter are pure-managed for the parts the unit
          tests exercise (decision matrix, next-step hints, delta math, gate-mode parsing). GatePolicy

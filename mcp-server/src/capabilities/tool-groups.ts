@@ -112,7 +112,10 @@ export const TOOL_GROUPS: ToolGroup[] = [
   {
     id: "csg",
     description:
-      "CSG primitive tools (domain pack). Empty until the pack ships.",
+      "CSG primitive tools (Godot 4.3+, 3D only): starter defaults, create CsgBox3D / CsgSphere3D / " +
+      "CsgCylinder3D / CsgCombiner3D nodes (with optional kind-specific scalars + boolean operation), " +
+      "set the boolean operation (union / intersection / subtraction) on any CSG shape, and inspect " +
+      "any CSG shape's scalar config.",
     defaultEnabled: false,
   },
 ];
@@ -221,10 +224,11 @@ assign(
   ].map((suffix) => `godot_open_mcp_${suffix}`),
 );
 
-// Domain stub groups (tilemap / navigation / particles / animation / csg)
-// carry no assign() calls in P8 — they are reserved ids with empty rosters.
-// P12.1 fills the tilemap stub: six TileMapLayer tools. The other four stubs
-// remain empty until their packs ship.
+// Domain pack groups (tilemap / navigation / particles / animation / csg)
+// were reserved as empty stubs in P8 and filled progressively by the Phase 12
+// packs: P12.1 tilemap (6), P12.2 navigation (7), P12.3 particles (5), P12.4
+// animation (7), P12.5 csg (7). Phase 12 is now complete — every reserved stub
+// carries its pack's roster.
 
 // --- tilemap (P12.1 — Godot 4.3+ TileMapLayer domain pack) ------------------
 // Six tools: create / set_tileset / set_cell / erase_cell / get_used_cells
@@ -286,6 +290,23 @@ assign(
     "animation_add_track",
     "animation_insert_key",
     "animation_get",
+  ].map((suffix) => `godot_open_mcp_${suffix}`),
+);
+
+// --- csg (P12.5 — Godot 4.3+ CSG domain pack) -------------------------------
+// Seven tools: defaults (read-only) / box_create / sphere_create /
+// cylinder_create / combiner_create / set_operation / get (read-only). Hidden
+// until activated via manage_tools.
+assign(
+  "csg",
+  [
+    "csg_defaults",
+    "csg_box_create",
+    "csg_sphere_create",
+    "csg_cylinder_create",
+    "csg_combiner_create",
+    "csg_set_operation",
+    "csg_get",
   ].map((suffix) => `godot_open_mcp_${suffix}`),
 );
 

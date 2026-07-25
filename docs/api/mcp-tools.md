@@ -37,6 +37,13 @@ The table below is the published view of `ALL_TOOLS`. The `scripts/check-tool-do
 | `godot_open_mcp_checkpoint_create` | core | live | core | no | n/a | Capture a project-health baseline over res:// paths for later `delta`. |
 | `godot_open_mcp_console_clear_logs` | editor | live | typed-editor | ephemeral | n/a | Clear the addon-owned log collector (ephemeral; never touches the native Output panel). |
 | `godot_open_mcp_console_get_logs` | editor | live | typed-editor | no | n/a | Read captured Godot Open MCP log lines, newest-first, with capture-capability metadata. |
+| `godot_open_mcp_csg_box_create` | csg | live | csg | editor state | enforce | Create a `CsgBox3D` primitive node (+ optional `size` + `operation`). |
+| `godot_open_mcp_csg_combiner_create` | csg | live | csg | editor state | enforce | Create a `CsgCombiner3D` boolean-group container (groups child CSG shapes for boolean ops). |
+| `godot_open_mcp_csg_cylinder_create` | csg | live | csg | editor state | enforce | Create a `CsgCylinder3D` primitive node (+ optional `radius` / `height` / `sides` / `cone` / `smooth_faces`). |
+| `godot_open_mcp_csg_defaults` | csg | live | csg | no | n/a | Recommended starter scalars for a CSG kind (pure helper, no scene). |
+| `godot_open_mcp_csg_get` | csg | live | csg | no | n/a | Read a CSG shape's scalar config + type/kind/operation (read-only). |
+| `godot_open_mcp_csg_set_operation` | csg | live | csg | editor state | enforce | Set the boolean operation (union / intersection / subtraction) on any CSG shape. |
+| `godot_open_mcp_csg_sphere_create` | csg | live | csg | editor state | enforce | Create a `CsgSphere3D` primitive node (+ optional `radius` / `radial_segments` / `rings` / `smooth_faces`). |
 | `godot_open_mcp_delta` | core | live | core | no | n/a | Compare current state against a prior checkpoint and return the new/resolved issue delta. |
 | `godot_open_mcp_editor_application_get_state` | editor | live | typed-editor | no | n/a | Truthful play-process snapshot (`isPlaying`, `playingScene`, `editorVersion`, `observedAt`). |
 | `godot_open_mcp_editor_application_set_state` | editor | live | typed-editor | editor state | enforce | Start (main/current/custom scene) or stop the play process with a bounded observation window. |
@@ -142,7 +149,7 @@ The MCP server filters `ListTools` through a per-session `ToolSessionState` so t
 | `navigation` | no | Godot 4.3+ navigation tools (2D + 3D): starter defaults, create `NavigationRegion`/`Agent`/`Link`, assign a region's navigation resource, configure agent scalars, inspect any navigation node. |
 | `particles` | no | Godot 4.3+ `GpuParticles2D`/`3D` tools (2D + 3D): starter defaults, create an emitter (+ optional initial scalars + process material), configure allow-listed + clamped scalars, start/stop emission (with optional restart), inspect any emitter. |
 | `animation` | no | Godot 4.3+ `AnimationPlayer` tools: starter defaults, create a player node, add an empty `AnimationLibrary`, create an `Animation` clip (auto-creating the library when missing), add a value / position_3d / rotation_3d / scale_3d track, insert a keyframe, inspect any player's libraries / animations / tracks. |
-| `csg` | no | Domain pack stub. Reserved id with an empty tool roster — empty until the pack ships. |
+| `csg` | no | Godot 4.3+ CSG primitive tools (3D only): starter defaults, create `CsgBox3D` / `CsgSphere3D` / `CsgCylinder3D` / `CsgCombiner3D` nodes (with optional kind-specific scalars + boolean operation), set the boolean operation (union / intersection / subtraction) on any CSG shape, inspect any CSG shape's scalar config. |
 
 The catalog source of truth is `mcp-server/src/capabilities/tool-groups.ts`. Activate or deactivate groups with `godot_open_mcp_manage_tools`; on a successful change the server emits the MCP `notifications/tools/list_changed` notification so clients that support `listChanged` refresh `ListTools` automatically. Hiding a tool is a prompt-size control, not an authorization boundary — a hidden tool name still routes when called directly.
 
@@ -2180,6 +2187,187 @@ Read the libraries / animations / tracks of an `AnimationPlayer` in a bounded JS
 **Result:** `{ nodePath, libraries: [{ name, animations: [{ name, length, loopMode, tracks: [{ index, type, path, keyCount, keys? }] }] }] }`.
 
 **Errors:** `missing_parameter`, `edited_scene_unavailable`, `node_not_found`, `wrong_node_type`, `library_not_found`, `animation_not_found`.
+
+## CSG tools
+
+CSG tools author Godot 4.3+ constructive-solid geometry primitives — `CsgBox3D`, `CsgSphere3D`, `CsgCylinder3D`, and the `CsgCombiner3D` boolean-group container. The four create tools are split per kind (the catalog's split-tool style — clearer for an agent picking a primitive than a single create-shape with a kind enum); `set_operation` is the second half of the boolean workflow.
+
+This is a **`csg` group** family — hidden from `ListTools` until an agent activates it via `godot_open_mcp_manage_tools({ action: "activate", group: "csg" })`. As with every group, hiding is a prompt-size control, not an authorization boundary — a hidden tool name still routes when called directly.
+
+**Scope.** `CsgBox3D`, `CsgSphere3D`, `CsgCylinder3D`, `CsgCombiner3D` only — not `CsgTorus3D`, not `CsgPolygon3D`, not `CsgMesh3D`. The create surface is a fixed scalar allow-list per kind with centralized clamping; full mesh vertex editing is out of scope (a CSG mesh's vertex array is large and not what an agent tunes — `csg_get` returns scalars only). Godot has no 2D CSG primitives, so the pack is 3D only. No face-editing API (CSG has no equivalent of ProBuilder's extrude / delete_faces / set_face_material).
+
+**Boolean workflow.** Godot's CSG combiner is implicit: a `CsgCombiner3D` parent collects its child `CsgShape3D` children, and each child's `Operation` property (union / intersection / subtraction) defines how it combines with the sibling-before-it. The three-step recipe: `csg_combiner_create` to make the parent → create primitives with `parent_node_path` = the combiner → `csg_set_operation` on each child (e.g. subtraction on a cutter carves out the cutter's silhouette). Godot rebuilds the CSG mesh when the scene updates; the pack marks the scene dirty and does not force a manual rebuild.
+
+**Scalar allow-list + clamps (per kind):**
+
+| Kind | Property | Type | Clamp |
+|---|---|---|---|
+| box | `size` ("x,y,z") | Vector3 per component | strictly positive per component (`≥ 0.0001`) |
+| sphere | `radius` | float | strictly positive (`≥ 0.0001`) |
+| sphere | `radial_segments` | int | `[3, 1000]` |
+| sphere | `rings` | int | `[3, 1000]` |
+| sphere | `smooth_faces` | bool | pass-through |
+| cylinder | `radius` | float | strictly positive (`≥ 0.0001`) |
+| cylinder | `height` | float | strictly positive (`≥ 0.0001`) |
+| cylinder | `sides` | int | `[3, 1000]` |
+| cylinder | `cone` | bool | pass-through |
+| cylinder | `smooth_faces` | bool | pass-through |
+
+`operation` (union / intersection / subtraction) is shared by every kind and applies via Godot's `CsgShape3D.OperationEnum`. The combiner carries no primitive scalars — `operation` is its only knob.
+
+**Shared contracts.** `node_path` follows the same scene-tree vocabulary as `node_find` / `node_create`. `paths_hint` is the edited scene `res://` path (mandatory on every mutator, even when `gate` is `off`). The five mutators (four creates + set_operation) run the gate cycle by default (`enforce`); the two read-only tools (`defaults`, `get`) are gate-free. Every create tool returns the new node's NodeData (same shape as `node_create`).
+
+### `godot_open_mcp_csg_defaults`
+
+- Route: `live`
+- Visibility group: `csg`
+- Read-only/mutating: read-only
+- Live editor requirement: requires the bridge
+
+Return recommended starter scalars for a CSG primitive kind (box / sphere / cylinder / combiner) plus the shared `operation` (`"union"`). Pure helper — no scene required, no mutation. The values mirror Godot's engine defaults for a fresh `Csg*3D` node: box `size` 1×1×1; sphere `radius` 0.5 / `radial_segments` 12 / `rings` 6 / `smooth_faces` true; cylinder `radius` 0.5 / `height` 2.0 / `sides` 8 / `cone` false / `smooth_faces` true; combiner carries `operation` only (no primitive scalars). Spread the relevant fields into the matching create tool.
+
+**Input:**
+
+- `kind` (required) — `"box"` | `"sphere"` | `"cylinder"` | `"combiner"`.
+
+**Result:** `{ kind, operation, ...kind-specific scalars }`.
+
+**Errors:** `invalid_parameter` (unknown/absent `kind`).
+
+### `godot_open_mcp_csg_box_create`
+
+- Route: `live`
+- Visibility group: `csg`
+- Read-only/mutating: mutating (gate `enforce`, `paths_hint` required)
+- Live editor requirement: requires the bridge
+
+Create a `CsgBox3D` node in the edited scene and return its NodeData. An optional `size` (`"x,y,z"`) sets the box extents — each component is clamped to strictly positive (the engine default is 1,1,1). An optional `operation` applies the boolean operation at create time — most useful when this box is a child of a `CsgCombiner3D`. The new node's owner is the edited scene root; the scene is marked unsaved.
+
+**Input:**
+
+- `name` (optional) — name for the new box.
+- `parent_node_path` (optional) — parent Node path relative to the edited scene root (default: root). Pass a `CsgCombiner3D`'s path to group this box into a boolean combination.
+- `position` (optional) — `"x,y,z"` (Node3D origin; malformed → ignored).
+- `size` (optional) — `"x,y,z"`. Each component clamped to `≥ 0.0001`.
+- `operation` (optional) — `"union"` | `"intersection"` | `"subtraction"`. Omit to leave the engine default (union).
+- `paths_hint` (required) — edited scene `res://` path.
+- `gate` (optional, default `enforce`) — `"enforce"` | `"warn"` | `"off"`.
+
+**Result:** NodeData for the new box.
+
+**Errors:** `paths_hint_required`, `no_edited_scene`, `parent_not_found`, `create_failed`.
+
+### `godot_open_mcp_csg_sphere_create`
+
+- Route: `live`
+- Visibility group: `csg`
+- Read-only/mutating: mutating (gate `enforce`, `paths_hint` required)
+- Live editor requirement: requires the bridge
+
+Create a `CsgSphere3D` node in the edited scene and return its NodeData. Optional scalars tune the sphere: `radius` (default 0.5), `radial_segments` (default 12 — higher is smoother), `rings` (default 6), `smooth_faces` (default true). An optional `operation` applies the boolean operation at create time. The new node's owner is the edited scene root; the scene is marked unsaved.
+
+**Input:**
+
+- `name` (optional) — name for the new sphere.
+- `parent_node_path` (optional) — parent Node path relative to the edited scene root (default: root). Pass a `CsgCombiner3D`'s path to group this sphere into a boolean combination.
+- `position` (optional) — `"x,y,z"` (Node3D origin; malformed → ignored).
+- `radius` (optional) — clamped to `≥ 0.0001`.
+- `radial_segments` (optional) — clamped to `[3, 1000]`.
+- `rings` (optional) — clamped to `[3, 1000]`.
+- `smooth_faces` (optional) — bool.
+- `operation` (optional) — `"union"` | `"intersection"` | `"subtraction"`. Omit to leave the engine default (union).
+- `paths_hint` (required) — edited scene `res://` path.
+- `gate` (optional, default `enforce`) — `"enforce"` | `"warn"` | `"off"`.
+
+**Result:** NodeData for the new sphere.
+
+**Errors:** `paths_hint_required`, `no_edited_scene`, `parent_not_found`, `create_failed`.
+
+### `godot_open_mcp_csg_cylinder_create`
+
+- Route: `live`
+- Visibility group: `csg`
+- Read-only/mutating: mutating (gate `enforce`, `paths_hint` required)
+- Live editor requirement: requires the bridge
+
+Create a `CsgCylinder3D` node in the edited scene and return its NodeData. Optional scalars tune the cylinder: `radius` (default 0.5), `height` (default 2.0), `sides` (default 8 — higher is smoother), `cone` (default false — set true for a cone), `smooth_faces` (default true). An optional `operation` applies the boolean operation at create time. The new node's owner is the edited scene root; the scene is marked unsaved.
+
+**Input:**
+
+- `name` (optional) — name for the new cylinder.
+- `parent_node_path` (optional) — parent Node path relative to the edited scene root (default: root). Pass a `CsgCombiner3D`'s path to group this cylinder into a boolean combination.
+- `position` (optional) — `"x,y,z"` (Node3D origin; malformed → ignored).
+- `radius` (optional) — clamped to `≥ 0.0001`.
+- `height` (optional) — clamped to `≥ 0.0001`.
+- `sides` (optional) — clamped to `[3, 1000]`.
+- `cone` (optional) — bool.
+- `smooth_faces` (optional) — bool.
+- `operation` (optional) — `"union"` | `"intersection"` | `"subtraction"`. Omit to leave the engine default (union).
+- `paths_hint` (required) — edited scene `res://` path.
+- `gate` (optional, default `enforce`) — `"enforce"` | `"warn"` | `"off"`.
+
+**Result:** NodeData for the new cylinder.
+
+**Errors:** `paths_hint_required`, `no_edited_scene`, `parent_not_found`, `create_failed`.
+
+### `godot_open_mcp_csg_combiner_create`
+
+- Route: `live`
+- Visibility group: `csg`
+- Read-only/mutating: mutating (gate `enforce`, `paths_hint` required)
+- Live editor requirement: requires the bridge
+
+Create a `CsgCombiner3D` node in the edited scene and return its NodeData. The combiner is Godot's boolean-group container: every child `CsgShape3D` (primitive or nested combiner) combines according to its own `Operation` property. Create primitives under the combiner by passing its path as `parent_node_path` to the primitive create tools, then call `csg_set_operation` on each child to define how it combines. The combiner has no primitive scalars of its own; the only knob is the optional `operation` (rarely needed — a combiner's own operation only matters when it is itself a child of another combiner). The new node's owner is the edited scene root; the scene is marked unsaved.
+
+**Input:**
+
+- `name` (optional) — name for the new combiner.
+- `parent_node_path` (optional) — parent Node path relative to the edited scene root (default: root). May point at an existing `CsgCombiner3D` to nest this combiner as a boolean child.
+- `position` (optional) — `"x,y,z"` (Node3D origin; malformed → ignored).
+- `operation` (optional) — `"union"` | `"intersection"` | `"subtraction"`. Rarely needed — a combiner's own operation only matters when it is itself a child of another combiner. Omit to leave the engine default (union).
+- `paths_hint` (required) — edited scene `res://` path.
+- `gate` (optional, default `enforce`) — `"enforce"` | `"warn"` | `"off"`.
+
+**Result:** NodeData for the new combiner.
+
+**Errors:** `paths_hint_required`, `no_edited_scene`, `parent_not_found`, `create_failed`.
+
+### `godot_open_mcp_csg_set_operation`
+
+- Route: `live`
+- Visibility group: `csg`
+- Read-only/mutating: mutating (gate `enforce`, `paths_hint` required)
+- Live editor requirement: requires the bridge
+
+Set the boolean `Operation` property on any CSG shape (`CsgBox3D` / `CsgSphere3D` / `CsgCylinder3D` / `CsgCombiner3D` — the property lives on the shared `CsgShape3D` base). The operation only takes effect when the shape is a child of a `CsgCombiner3D` (or another CSG shape): `union` merges the child's geometry with the sibling-before-it, `intersection` keeps only the overlap, `subtraction` removes the child's shape from the sibling-before-it (a cutter carves out its silhouette). Godot rebuilds the CSG mesh when the scene updates; the pack marks the scene dirty and does not force a manual rebuild.
+
+**Input:**
+
+- `node_path` (required) — scene-tree path of the CSG shape to mutate.
+- `operation` (required) — `"union"` | `"intersection"` | `"subtraction"`.
+- `paths_hint` (required) — edited scene `res://` path.
+- `gate` (optional, default `enforce`) — `"enforce"` | `"warn"` | `"off"`.
+
+**Result:** `{ nodePath, operation }`.
+
+**Errors:** `paths_hint_required`, `missing_parameter` (`node_path` or `operation` absent/invalid), `no_edited_scene`, `node_not_found`, `wrong_node_type`.
+
+### `godot_open_mcp_csg_get`
+
+- Route: `live`
+- Visibility group: `csg`
+- Read-only/mutating: read-only
+- Live editor requirement: requires the bridge
+
+Read the scalar configuration of any CSG shape. Returns the resolved `type` (Godot class name) + `kind` (box / sphere / cylinder / combiner) + `operation` (union / intersection / subtraction) plus the kind-specific scalars (box: `size` x/y/z; sphere: `radius` / `radial_segments` / `rings` / `smooth_faces`; cylinder: `radius` / `height` / `sides` / `cone` / `smooth_faces`; combiner: none). No mesh vertex dump — a CSG mesh's vertex array is large and not what an agent tunes. Use this to verify a boolean setup or to read back what a create tool landed.
+
+**Input:**
+
+- `node_path` (required) — scene-tree path of the CSG shape to read.
+
+**Result:** `{ nodePath, type, operation, kind, ...kind-specific scalars }`.
+
+**Errors:** `missing_parameter`, `no_edited_scene`, `node_not_found`, `wrong_node_type`.
 
 ## Offline fidelity limitations
 

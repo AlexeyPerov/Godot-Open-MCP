@@ -185,6 +185,13 @@ namespace GodotOpenMcp.Bridge.Editor
                 // read-only defaults and get are gate-free. Idempotent re-register refreshes
                 // the handler references after a domain reload.
                 AnimationTools.RegisterAnimationTools();
+                // P12.5 — CSG domain pack: seven CSG primitive tools (defaults / box_create /
+                // sphere_create / cylinder_create / combiner_create / set_operation / get),
+                // group csg. The fifth and final Phase 12 domain pack. The five mutators
+                // register defaultGate:"enforce" and validate paths_hint themselves; the
+                // read-only defaults and get are gate-free. Idempotent re-register refreshes
+                // the handler references after a domain reload.
+                CsgTools.RegisterCsgTools();
 
                 // Start the HTTP listener serving /ping and POST /tools/{name}. Stays down
                 // (and connected:false) if the bind fails — the editor remains usable, the

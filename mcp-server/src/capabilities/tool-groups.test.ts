@@ -116,20 +116,21 @@ test("typed-editor group is registered, opt-in, with a non-empty roster", () => 
   );
 });
 
-test("the one unfilled domain stub group is present with an empty roster", () => {
+test("every reserved domain stub group is now filled by its Phase 12 pack", () => {
   // Reserved ids so Phase 12 packs reuse them without a rename. P12.1 filled the
   // `tilemap` stub (six tools), P12.2 filled the `navigation` stub (seven tools),
-  // P12.3 filled the `particles` stub (five tools), and P12.4 filled the `animation`
-  // stub (seven tools); csg remains empty until its pack ships.
-  const stubIds = ["csg"];
+  // P12.3 filled the `particles` stub (five tools), P12.4 filled the `animation`
+  // stub (seven tools), and P12.5 filled the `csg` stub (seven tools) — Phase 12
+  // is now complete, so no unfilled stub remains. This test pins that invariant:
+  // a future stub id added with an empty roster must update this list explicitly.
+  const stubIds = ["tilemap", "navigation", "particles", "animation", "csg"];
   for (const id of stubIds) {
     const g = getGroup(id);
     assert.ok(g, `${id} stub group must exist`);
     assert.equal(g!.defaultEnabled, false, `${id} must be opt-in`);
-    assert.deepEqual(
-      toolsInGroup(id),
-      [],
-      `${id} roster must be empty until its pack ships`,
+    assert.ok(
+      toolsInGroup(id).length > 0,
+      `${id} roster must be non-empty (its Phase 12 pack shipped)`,
     );
   }
 });
@@ -192,6 +193,22 @@ test("the animation group is present, opt-in, and carries the P12.4 seven-tool r
     "godot_open_mcp_animation_insert_key",
     "godot_open_mcp_animation_library_add",
     "godot_open_mcp_animation_player_create",
+  ]);
+});
+
+test("the csg group is present, opt-in, and carries the P12.5 seven-tool roster", () => {
+  // P12.5 filled the csg stub (the last Phase 12 stub). The roster is the seven CSG tools.
+  const csg = getGroup("csg");
+  assert.ok(csg, "csg group must exist");
+  assert.equal(csg!.defaultEnabled, false, "csg must be opt-in");
+  assert.deepEqual(toolsInGroup("csg"), [
+    "godot_open_mcp_csg_box_create",
+    "godot_open_mcp_csg_combiner_create",
+    "godot_open_mcp_csg_cylinder_create",
+    "godot_open_mcp_csg_defaults",
+    "godot_open_mcp_csg_get",
+    "godot_open_mcp_csg_set_operation",
+    "godot_open_mcp_csg_sphere_create",
   ]);
 });
 
@@ -391,16 +408,15 @@ test("no tool is assigned to more than one group", () => {
 test("every registered tool is meta, core, typed-editor, or a shipped domain group", () => {
   // Regression guard: the only groups that carry tools are `core`, `typed-editor`,
   // and the Phase 12 domain packs as they ship (tilemap landed in P12.1, navigation
-  // in P12.2, particles in P12.3, animation in P12.4). The one unfilled stub (csg)
-  // must stay empty — if a tool ends up there, either a stub shipped early or the
-  // assign() landed in the wrong place.
-  const shippedDomainGroups = new Set(["tilemap", "navigation", "particles", "animation"]);
+  // in P12.2, particles in P12.3, animation in P12.4, csg in P12.5 — Phase 12 is now
+  // complete, every reserved stub is filled).
+  const shippedDomainGroups = new Set(["tilemap", "navigation", "particles", "animation", "csg"]);
   for (const tool of ALL_TOOLS) {
     const g = groupFor(tool.name);
     if (g === null) continue; // meta-tool
     assert.ok(
       g === "core" || g === "typed-editor" || shippedDomainGroups.has(g),
-      `${tool.name} is in group '${g}' — only core, typed-editor, and shipped domain packs (tilemap, navigation, particles, animation) carry tools`,
+      `${tool.name} is in group '${g}' — only core, typed-editor, and shipped domain packs (tilemap, navigation, particles, animation, csg) carry tools`,
     );
   }
 });

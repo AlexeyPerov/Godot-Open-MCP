@@ -75,6 +75,13 @@ import { animationCreate } from "./animation-create.js";
 import { animationAddTrack } from "./animation-add-track.js";
 import { animationInsertKey } from "./animation-insert-key.js";
 import { animationGet } from "./animation-get.js";
+import { csgDefaults } from "./csg-defaults.js";
+import { csgBoxCreate } from "./csg-box-create.js";
+import { csgSphereCreate } from "./csg-sphere-create.js";
+import { csgCylinderCreate } from "./csg-cylinder-create.js";
+import { csgCombinerCreate } from "./csg-combiner-create.js";
+import { csgSetOperation } from "./csg-set-operation.js";
+import { csgGet } from "./csg-get.js";
 import { bridgeStatus } from "./bridge-status.js";
 import { pullEvents } from "./pull-events.js";
 import { readCompileErrors } from "./read-compile-errors.js";
@@ -231,6 +238,22 @@ export const ALL_TOOLS: Tool[] = [
   animationAddTrack,
   animationInsertKey,
   animationGet,
+  // P12.5 — CSG domain pack: seven CSG primitive tools (group `csg`, hidden until
+  // activated via manage_tools). defaults returns recommended starter scalars for a
+  // kind (read-only helper); box_create / sphere_create / cylinder_create /
+  // combiner_create make the corresponding Csg*3D node (with optional kind-specific
+  // scalars + operation); set_operation sets the boolean operation (union /
+  // intersection / subtraction) on any CSG shape; get reads a shape's scalar config
+  // (read-only). The five mutators default to gate "enforce" and require paths_hint
+  // scoped to the edited scene. The two read-only tools (defaults + get) are
+  // gate-free. Fifth and final Phase 12 domain pack — fills the last reserved stub.
+  csgDefaults,
+  csgBoxCreate,
+  csgSphereCreate,
+  csgCylinderCreate,
+  csgCombinerCreate,
+  csgSetOperation,
+  csgGet,
   // P5.3 — bridge_status: operator-oriented health snapshot. Composes the instance-lock classifier
   // (instance-discovery.ts#classifyInstance) with one /ping probe and returns a coarse status token
   // (running | compiling | stopped | unreachable | dead_bridge) + classification + recoveryHint.
