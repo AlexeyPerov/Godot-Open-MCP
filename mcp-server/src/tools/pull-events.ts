@@ -18,9 +18,11 @@
 // returns `connected:false` + `lastError` rather than throwing — the caller branches on those
 // fields. Result envelope: `{ subscriberId, events[], dropped, connected, started, lastError }`.
 //
-// Adapted from Unity Open MCP's mcp-server/src/tools/pull-events.ts (copy fidelity): identical
-// schema (`max_events`, optional `subscriber`) and the same result envelope. Only the tool-name
-// prefix (`godot_open_mcp_*`, no `unity_senses_*` alias — ADR-003) differs.
+// Adapted from Unity Open MCP's mcp-server/src/tools/pull_events.ts (adapt fidelity): the schema
+// is `max_events` only — Unity still declares a `subscriber` param, but no handler reads it on
+// either side (BridgeEventStream fixes its id at construction), so the Godot port drops the
+// misleading knob. Result envelope is unchanged. Only the tool-name prefix (`godot_open_mcp_*`,
+// no `unity_senses_*` alias — ADR-003) differs. See the NOTE on the schema below for re-adding it.
 
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
