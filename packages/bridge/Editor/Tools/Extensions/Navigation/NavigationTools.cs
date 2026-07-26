@@ -127,11 +127,13 @@ namespace GodotOpenMcp.Bridge.Editor
         /// gate surface. A dimension other than "2d"/"3d" returns <c>invalid_parameter</c>.
         ///
         /// <para>
-        /// The scalar keys match the Godot property names the agent will reuse in
-        /// <c>agent_configure</c> (snake_case in the MCP schema → camelCase in the result mirrors
-        /// the NodeData serializer convention; the agent uses the snake_case schema keys when
-        /// calling configure). The defaults are conservative mid-range values, not engine
-        /// defaults — they are a sensible starting point an agent can tune from.
+        /// The scalar keys use the snake_case schema form (<c>max_speed</c>,
+        /// <c>path_desired_distance</c>, …) so the result spreads losslessly into
+        /// <c>agent_configure</c>, whose body parser reads the same snake_case keys. <c>height</c>
+        /// is omitted for 2D agents because <c>NavigationAgent2D</c> has no Height property and
+        /// <c>agent_configure</c> rejects it with <c>unsupported_property</c>. The defaults are
+        /// conservative mid-range values, not engine defaults — a sensible starting point an
+        /// agent can tune from.
         /// </para>
         /// </summary>
         internal static ToolDispatchResult Defaults(string body)
@@ -149,17 +151,18 @@ namespace GodotOpenMcp.Bridge.Editor
             sb.Append("\"agent\":{");
             if (request.Dimension == NavDimension.TwoD)
             {
-                // 2D agents: radius is in pixels; max_speed in pixels/sec; distances in pixels.
-                sb.Append("\"radius\":10,").Append("\"height\":0,").Append("\"maxSpeed\":200,");
-                sb.Append("\"pathDesiredDistance\":20,").Append("\"targetDesiredDistance\":20,");
-                sb.Append("\"avoidanceEnabled\":false");
+                // 2D agents: radius in pixels; max_speed in pixels/sec; distances in pixels.
+                // No height — NavigationAgent2D exposes no Height property and configure rejects it.
+                sb.Append("\"radius\":10,").Append("\"max_speed\":200,");
+                sb.Append("\"path_desired_distance\":20,").Append("\"target_desired_distance\":20,");
+                sb.Append("\"avoidance_enabled\":false");
             }
             else
             {
                 // 3D agents: values in meters / m/s. Height is meaningful in 3D (agent cylinder).
-                sb.Append("\"radius\":0.5,").Append("\"height\":1.8,").Append("\"maxSpeed\":5,");
-                sb.Append("\"pathDesiredDistance\":1,").Append("\"targetDesiredDistance\":1,");
-                sb.Append("\"avoidanceEnabled\":false");
+                sb.Append("\"radius\":0.5,").Append("\"height\":1.8,").Append("\"max_speed\":5,");
+                sb.Append("\"path_desired_distance\":1,").Append("\"target_desired_distance\":1,");
+                sb.Append("\"avoidance_enabled\":false");
             }
             sb.Append("}}");
             return ToolDispatchResult.Ok(sb.ToString());
@@ -532,17 +535,19 @@ namespace GodotOpenMcp.Bridge.Editor
             var sb = new StringBuilder(160);
             sb.Append('{');
             sb.Append("\"nodePath\":").Append(BridgeJson.EscapeString(node.GetPath().ToString())).Append(',');
+            // `applied` echoes the snake_case schema keys so an agent can re-spread the block into
+            // a follow-up agent_configure call without renaming.
             sb.Append("\"applied\":{");
             bool first = true;
             first = AppendFloatIfHas(sb, "radius", appliedRadius, first);
             first = AppendFloatIfHas(sb, "height", appliedHeight, first);
-            first = AppendFloatIfHas(sb, "maxSpeed", appliedMaxSpeed, first);
-            first = AppendFloatIfHas(sb, "pathDesiredDistance", appliedPathDist, first);
-            first = AppendFloatIfHas(sb, "targetDesiredDistance", appliedTargetDist, first);
+            first = AppendFloatIfHas(sb, "max_speed", appliedMaxSpeed, first);
+            first = AppendFloatIfHas(sb, "path_desired_distance", appliedPathDist, first);
+            first = AppendFloatIfHas(sb, "target_desired_distance", appliedTargetDist, first);
             if (appliedAvoidance.HasValue)
             {
                 if (!first) sb.Append(',');
-                sb.Append("\"avoidanceEnabled\":").Append(appliedAvoidance.Value ? "true" : "false");
+                sb.Append("\"avoidance_enabled\":").Append(appliedAvoidance.Value ? "true" : "false");
             }
             sb.Append("}}");
             return ToolDispatchResult.Ok(sb.ToString());
@@ -600,6 +605,35 @@ namespace GodotOpenMcp.Bridge.Editor
                         $"Parent node not found at path '{request.ParentNodePath}'.");
             }
 
+            // Validate start/end position strings BEFORE instantiating the node so a malformed
+            // vector cannot leave a partially-configured, owner-tagged link in the scene. The
+            // start/end are LOCAL to the link node (Godot's NavigationLink.StartPosition /
+            // EndPosition are local-space).
+            Vector2 start2d = default, end2d = default;
+            Vector3 start3d = default, end3d = default;
+            if (request.Dimension == NavDimension.TwoD)
+            {
+                if (!TryParseVector2(request.StartPosition, out start2d))
+                    return ToolDispatchResult.Fail(
+                        "invalid_parameter",
+                        "start_position for a 2D link must be 'x,y'.");
+                if (!TryParseVector2(request.EndPosition, out end2d))
+                    return ToolDispatchResult.Fail(
+                        "invalid_parameter",
+                        "end_position for a 2D link must be 'x,y'.");
+            }
+            else
+            {
+                if (!TryParseVector3(request.StartPosition, out start3d))
+                    return ToolDispatchResult.Fail(
+                        "invalid_parameter",
+                        "start_position for a 3D link must be 'x,y,z'.");
+                if (!TryParseVector3(request.EndPosition, out end3d))
+                    return ToolDispatchResult.Fail(
+                        "invalid_parameter",
+                        "end_position for a 3D link must be 'x,y,z'.");
+            }
+
             Node link;
             try
             {
@@ -628,40 +662,18 @@ namespace GodotOpenMcp.Bridge.Editor
             link.Owner = root;
             ApplyPosition(link, request.Position);
 
-            // Apply start/end + bidirectional. Parse errors after AddChild still free the node is
-            // not worth the complexity — the node is created; only the position fields are
-            // rejected, surfaced as invalid_parameter. The start/end are LOCAL to the link node
-            // (Godot's NavigationLink.StartPosition / EndPosition are local-space).
+            // Apply start/end + bidirectional. Positions are already validated above, so this
+            // branch cannot fail and leave a partial node.
             if (link is NavigationLink2D link2d)
             {
-                if (TryParseVector2(request.StartPosition, out var start2))
-                    link2d.StartPosition = start2;
-                else
-                    return ToolDispatchResult.Fail(
-                        "invalid_parameter",
-                        "start_position for a 2D link must be 'x,y'.");
-                if (TryParseVector2(request.EndPosition, out var end2))
-                    link2d.EndPosition = end2;
-                else
-                    return ToolDispatchResult.Fail(
-                        "invalid_parameter",
-                        "end_position for a 2D link must be 'x,y'.");
+                link2d.StartPosition = start2d;
+                link2d.EndPosition = end2d;
                 if (request.Bidirectional.HasValue) link2d.Bidirectional = request.Bidirectional.Value;
             }
             else if (link is NavigationLink3D link3d)
             {
-                if (TryParseVector3(request.StartPosition, out var start3))
-                    link3d.StartPosition = start3;
-                else
-                    return ToolDispatchResult.Fail(
-                        "invalid_parameter",
-                        "start_position for a 3D link must be 'x,y,z'.");
-                if (TryParseVector3(request.EndPosition, out var end3))
-                    link3d.EndPosition = end3;
-                else
-                    return ToolDispatchResult.Fail(
-                        "invalid_parameter",
-                        "end_position for a 3D link must be 'x,y,z'.");
+                link3d.StartPosition = start3d;
+                link3d.EndPosition = end3d;
                 if (request.Bidirectional.HasValue) link3d.Bidirectional = request.Bidirectional.Value;
             }
 
@@ -727,11 +739,12 @@ namespace GodotOpenMcp.Bridge.Editor
                     sb.Append("\"radius\":").Append(Float(a2.Radius)).Append(',');
                     // No "height" key for 2D: NavigationAgent2D has no Height property. The key is
                     // omitted rather than reported as 0 so an agent can tell "not applicable" from
-                    // "configured to zero".
-                    sb.Append("\"maxSpeed\":").Append(Float(a2.MaxSpeed)).Append(',');
-                    sb.Append("\"pathDesiredDistance\":").Append(Float(a2.PathDesiredDistance)).Append(',');
-                    sb.Append("\"targetDesiredDistance\":").Append(Float(a2.TargetDesiredDistance)).Append(',');
-                    sb.Append("\"avoidanceEnabled\":").Append(a2.AvoidanceEnabled ? "true" : "false");
+                    // "configured to zero". Keys mirror the snake_case configure/create schema so a
+                    // get → configure round-trip is lossless without renaming.
+                    sb.Append("\"max_speed\":").Append(Float(a2.MaxSpeed)).Append(',');
+                    sb.Append("\"path_desired_distance\":").Append(Float(a2.PathDesiredDistance)).Append(',');
+                    sb.Append("\"target_desired_distance\":").Append(Float(a2.TargetDesiredDistance)).Append(',');
+                    sb.Append("\"avoidance_enabled\":").Append(a2.AvoidanceEnabled ? "true" : "false");
                     sb.Append('}');
                     break;
                 case NavigationAgent3D a3:
@@ -740,18 +753,20 @@ namespace GodotOpenMcp.Bridge.Editor
                     sb.Append("\"properties\":{");
                     sb.Append("\"radius\":").Append(Float(a3.Radius)).Append(',');
                     sb.Append("\"height\":").Append(Float(a3.Height)).Append(',');
-                    sb.Append("\"maxSpeed\":").Append(Float(a3.MaxSpeed)).Append(',');
-                    sb.Append("\"pathDesiredDistance\":").Append(Float(a3.PathDesiredDistance)).Append(',');
-                    sb.Append("\"targetDesiredDistance\":").Append(Float(a3.TargetDesiredDistance)).Append(',');
-                    sb.Append("\"avoidanceEnabled\":").Append(a3.AvoidanceEnabled ? "true" : "false");
+                    sb.Append("\"max_speed\":").Append(Float(a3.MaxSpeed)).Append(',');
+                    sb.Append("\"path_desired_distance\":").Append(Float(a3.PathDesiredDistance)).Append(',');
+                    sb.Append("\"target_desired_distance\":").Append(Float(a3.TargetDesiredDistance)).Append(',');
+                    sb.Append("\"avoidance_enabled\":").Append(a3.AvoidanceEnabled ? "true" : "false");
                     sb.Append('}');
                     break;
                 case NavigationLink2D l2:
                     sb.Append("\"dimension\":\"2d\",");
                     sb.Append("\"kind\":\"link\",");
                     sb.Append("\"properties\":{");
-                    sb.Append("\"startPosition\":\"").Append(l2.StartPosition.X).Append(',').Append(l2.StartPosition.Y).Append("\",");
-                    sb.Append("\"endPosition\":\"").Append(l2.EndPosition.X).Append(',').Append(l2.EndPosition.Y).Append("\",");
+                    // Position components rendered via Float() so a comma-decimal locale cannot
+                    // corrupt the "x,y" string and break the round-trip parse on the way back in.
+                    sb.Append("\"start_position\":\"").Append(Float(l2.StartPosition.X)).Append(',').Append(Float(l2.StartPosition.Y)).Append("\",");
+                    sb.Append("\"end_position\":\"").Append(Float(l2.EndPosition.X)).Append(',').Append(Float(l2.EndPosition.Y)).Append("\",");
                     sb.Append("\"bidirectional\":").Append(l2.Bidirectional ? "true" : "false");
                     sb.Append('}');
                     break;
@@ -759,10 +774,10 @@ namespace GodotOpenMcp.Bridge.Editor
                     sb.Append("\"dimension\":\"3d\",");
                     sb.Append("\"kind\":\"link\",");
                     sb.Append("\"properties\":{");
-                    sb.Append("\"startPosition\":\"")
-                        .Append(l3.StartPosition.X).Append(',').Append(l3.StartPosition.Y).Append(',').Append(l3.StartPosition.Z).Append("\",");
-                    sb.Append("\"endPosition\":\"")
-                        .Append(l3.EndPosition.X).Append(',').Append(l3.EndPosition.Y).Append(',').Append(l3.EndPosition.Z).Append("\",");
+                    sb.Append("\"start_position\":\"")
+                        .Append(Float(l3.StartPosition.X)).Append(',').Append(Float(l3.StartPosition.Y)).Append(',').Append(Float(l3.StartPosition.Z)).Append("\",");
+                    sb.Append("\"end_position\":\"")
+                        .Append(Float(l3.EndPosition.X)).Append(',').Append(Float(l3.EndPosition.Y)).Append(',').Append(Float(l3.EndPosition.Z)).Append("\",");
                     sb.Append("\"bidirectional\":").Append(l3.Bidirectional ? "true" : "false");
                     sb.Append('}');
                     break;

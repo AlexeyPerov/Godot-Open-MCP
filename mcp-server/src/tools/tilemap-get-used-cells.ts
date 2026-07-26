@@ -38,11 +38,11 @@ export const tilemapGetUsedCells: Tool = {
       max_results: {
         type: "integer",
         default: 256,
-        minimum: 1,
+        maximum: 2000,
         description:
           "Max cells returned (default 256, hard cap 2000). The remainder is reported in " +
           "'truncated' so an agent knows whether to page. A non-positive value falls back to the " +
-          "default.",
+          "default (matches the bridge's EffectiveMaxResults fallback).",
       },
     },
     additionalProperties: false,

@@ -1148,6 +1148,24 @@ test("route: manage_tools list_groups returns the catalog with session activatio
   assert.equal(navigation!.toolCount, 7);
   assert.equal(navigation!.tools.length, 7);
 
+  const particles = (body.groups as Array<{
+    id: string;
+    toolCount: number;
+    tools: string[];
+  }>).find((g) => g.id === "particles");
+  assert.ok(particles, "particles group must be in the catalog");
+  assert.equal(particles!.toolCount, 5, "particles is now filled (P12.3) — five tools");
+  assert.equal(particles!.tools.length, 5);
+
+  const animation = (body.groups as Array<{
+    id: string;
+    toolCount: number;
+    tools: string[];
+  }>).find((g) => g.id === "animation");
+  assert.ok(animation, "animation group must be in the catalog");
+  assert.equal(animation!.toolCount, 7, "animation is now filled (P12.4) — seven tools");
+  assert.equal(animation!.tools.length, 7);
+
   const csg = (body.groups as Array<{
     id: string;
     toolCount: number;

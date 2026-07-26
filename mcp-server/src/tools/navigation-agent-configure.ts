@@ -51,7 +51,8 @@ export const navigationAgentConfigure: Tool = {
         minimum: 0,
         description:
           "Agent height (meaningful in 3D — the agent cylinder height). Clamped to non-negative. " +
-          "Ignored by 2D agents but accepted for schema symmetry.",
+          "3D-only: passing this for a NavigationAgent2D returns unsupported_property " +
+          "(NavigationAgent2D exposes no Height property).",
       },
       max_speed: {
         type: "number",

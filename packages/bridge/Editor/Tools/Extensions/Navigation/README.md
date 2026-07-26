@@ -31,7 +31,7 @@ Every create tool (and `defaults`) takes a `dimension` arg (`"2d"` | `"3d"`). Th
 
 - `new NavigationRegion2D()` / `new NavigationRegion3D()` — concrete engine nodes present in every 4.3+ build; no `ClassDB.ClassExists` guard needed.
 - Region resource assignment: `NavigationRegion2D.NavigationPolygon` (a `NavigationPolygon`) and `NavigationRegion3D.NavigationMesh` (a `NavigationMesh`). Loaded via typed `ResourceLoader.Load<T>` — a type mismatch returns `resource_load_failed`.
-- Agent scalars: `Radius`, `Height`, `MaxSpeed`, `PathDesiredDistance`, `TargetDesiredDistance`, `AvoidanceEnabled` — same property names on both `NavigationAgent2D` and `NavigationAgent3D`. `agent_configure` clamps: radius > 0, height ≥ 0, max_speed ≥ 0, distances > 0.
+- Agent scalars: `Radius`, `MaxSpeed`, `PathDesiredDistance`, `TargetDesiredDistance`, `AvoidanceEnabled` are shared across `NavigationAgent2D` and `NavigationAgent3D`. `Height` is **3D-only** — `NavigationAgent2D` exposes no Height property, so `agent_configure` returns `unsupported_property` when `height` is sent for a 2D agent (and `navigation_defaults` omits it from the 2D payload). `agent_configure` clamps: radius > 0, height ≥ 0, max_speed ≥ 0, distances > 0.
 - Link positions: `NavigationLink.StartPosition` / `EndPosition` are LOCAL to the link node (Godot exposes them in local space). `Bidirectional` controls traversal direction.
 - Owner assignment to the edited scene root makes the new node persist in the `.tscn` on save (Godot-specific; Unity has no equivalent).
 
@@ -41,4 +41,4 @@ The five mutators register `defaultGate: "enforce"` and validate `paths_hint` at
 
 ## Error codes
 
-Reuses the shared Phase 12 vocabulary (`no_edited_scene`, `node_not_found`, `wrong_node_type`, `missing_parameter`, `invalid_parameter`, `paths_hint_required`, `resource_not_found`, `resource_load_failed`, `parent_not_found`, `create_failed`). No pack-specific codes in v1 — `invalid_parameter` covers bad dimension tokens and malformed position strings.
+Reuses the shared Phase 12 vocabulary (`no_edited_scene`, `node_not_found`, `wrong_node_type`, `missing_parameter`, `invalid_parameter`, `paths_hint_required`, `resource_not_found`, `resource_load_failed`, `parent_not_found`, `create_failed`). One pack-specific code: `unsupported_property` — returned by `agent_configure` when `height` is sent for a `NavigationAgent2D` (no Height property). `invalid_parameter` covers bad dimension tokens and malformed position strings.

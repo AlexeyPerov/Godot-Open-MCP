@@ -315,12 +315,21 @@ namespace GodotOpenMcp.Bridge.Editor
 
             // Guard the source id: Godot's SetCell silently does nothing when the source id is not
             // present in the TileSet. Surface that as a structured error so an agent does not see
-            // a silent no-op.
+            // a silent no-op. Note: TileSet source ids are NOT necessarily contiguous — sources can
+            // be removed leaving gaps — so the message enumerates the actual ids rather than a range.
             var tileSet = layer.TileSet;
             if (!tileSet.HasSource(request.SourceId))
+            {
+                var validIds = new System.Text.StringBuilder();
+                for (int i = 0; i < tileSet.GetSourceCount(); i++)
+                {
+                    if (i > 0) validIds.Append(", ");
+                    validIds.Append(tileSet.GetSourceId(i).ToString());
+                }
                 return ToolDispatchResult.Fail(
                     "invalid_parameter",
-                    $"TileSet has no source with id {request.SourceId}; valid source ids are 0..{tileSet.GetSourceCount() - 1}.");
+                    $"TileSet has no source with id {request.SourceId}; present source ids are: {validIds}.");
+            }
 
             var coords = new Vector2I(request.X, request.Y);
             var atlasCoords = new Vector2I(request.AtlasX, request.AtlasY);

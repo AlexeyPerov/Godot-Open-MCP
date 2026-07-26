@@ -25,9 +25,10 @@ export const particlesDefaults: Tool = {
   description:
     "Return the recommended starter scalars (amount, lifetime, one_shot, preprocess, speed_scale, " +
     "explosiveness, randomness, fixed_fps, interpolate, fract_delta, local_coords) for a 2D or 3D " +
-    "GpuParticles emitter. Pure helper — no scene required, no mutation. The 2D defaults lean " +
-    "slightly cheaper on amount (30 vs 16) since 2D particles render as sprites; both are mid-range " +
-    "values inside the clamp ranges so a spread-into-configure round-trips without clamping. Spread " +
+    "GpuParticles emitter. Pure helper — no scene required, no mutation. The 3D defaults lean higher " +
+    "on amount (30 vs 16 in 2D) since billboarded 3D particles need more samples to read as a " +
+    "continuous plume; both are mid-range values inside the clamp ranges so a spread-into-configure " +
+    "round-trips losslessly (the result keys already match the snake_case configure schema). Spread " +
     "the result's properties into particles_create's initial properties object, or use the values as " +
     "guidance when calling particles_configure. This is a `particles` group tool — activate the group " +
     "with manage_tools first. Read-only.",

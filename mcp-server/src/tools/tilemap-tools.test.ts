@@ -223,11 +223,15 @@ test("tilemap_clear exposes node_path only (plus gate control)", () => {
   assert.deepEqual(Object.keys(props).sort(), ["gate", "node_path", "paths_hint"]);
 });
 
-test("tilemap_get_used_cells max_results defaults to 256 with a minimum of 1", () => {
+test("tilemap_get_used_cells max_results defaults to 256, hard-capped at 2000", () => {
+  // No `minimum`: the bridge's EffectiveMaxResults falls back to the default for non-positive
+  // values (unit-tested in TilemapBodiesTests). The schema declares the hard cap (maximum: 2000)
+  // so a validating client knows where the silent clamp kicks in.
   const max = (tilemapGetUsedCells.inputSchema.properties as Record<
     string,
-    { default?: number; minimum?: number }
+    { default?: number; minimum?: number; maximum?: number }
   >).max_results;
   assert.equal(max.default, 256);
-  assert.equal(max.minimum, 1);
+  assert.equal(max.minimum, undefined);
+  assert.equal(max.maximum, 2000);
 });

@@ -139,22 +139,24 @@ namespace GodotOpenMcp.Bridge.Editor
             sb.Append("\"dimension\":").Append(BridgeJson.EscapeString(
                 request.Dimension == ParticlesDimension.TwoD ? "2d" : "3d")).Append(',');
             sb.Append("\"properties\":{");
-            // 2D and 3D share the same scalar surface; the defaults differ only in amount (2D is
-            // cheaper by default since 2D particles render as sprites, not billboards). The values
-            // are inside the clamp ranges so a spread-into-configure round-trips without clamping.
+            // 2D and 3D share the same scalar surface; the defaults differ only in amount (3D
+            // defaults higher because billboarded 3D particles need more samples to read as a
+            // continuous plume, while 2D sprite particles cover more screen area per particle). The
+            // keys mirror the snake_case configure schema so a spread-into-configure round-trips
+            // losslessly without renaming. Values are inside the clamp ranges so no clamping fires.
             if (request.Dimension == ParticlesDimension.TwoD)
             {
-                sb.Append("\"amount\":30,").Append("\"lifetime\":1.0,").Append("\"oneShot\":false,");
-                sb.Append("\"preprocess\":0,").Append("\"speedScale\":1.0,").Append("\"explosiveness\":0,");
-                sb.Append("\"randomness\":0,").Append("\"fixedFps\":0,").Append("\"interpolate\":true,");
-                sb.Append("\"fractDelta\":true,").Append("\"localCoords\":true");
+                sb.Append("\"amount\":16,").Append("\"lifetime\":1.0,").Append("\"one_shot\":false,");
+                sb.Append("\"preprocess\":0,").Append("\"speed_scale\":1.0,").Append("\"explosiveness\":0,");
+                sb.Append("\"randomness\":0,").Append("\"fixed_fps\":0,").Append("\"interpolate\":true,");
+                sb.Append("\"fract_delta\":true,").Append("\"local_coords\":true");
             }
             else
             {
-                sb.Append("\"amount\":16,").Append("\"lifetime\":1.0,").Append("\"oneShot\":false,");
-                sb.Append("\"preprocess\":0,").Append("\"speedScale\":1.0,").Append("\"explosiveness\":0,");
-                sb.Append("\"randomness\":0,").Append("\"fixedFps\":0,").Append("\"interpolate\":true,");
-                sb.Append("\"fractDelta\":true,").Append("\"localCoords\":true");
+                sb.Append("\"amount\":30,").Append("\"lifetime\":1.0,").Append("\"one_shot\":false,");
+                sb.Append("\"preprocess\":0,").Append("\"speed_scale\":1.0,").Append("\"explosiveness\":0,");
+                sb.Append("\"randomness\":0,").Append("\"fixed_fps\":0,").Append("\"interpolate\":true,");
+                sb.Append("\"fract_delta\":true,").Append("\"local_coords\":true");
             }
             sb.Append("}}");
             return ToolDispatchResult.Ok(sb.ToString());
@@ -243,10 +245,14 @@ namespace GodotOpenMcp.Bridge.Editor
 
             // Optional process material assignment. An emitter without a process material renders
             // nothing; surfacing the assignment here saves a second configure round-trip. A bad path
-            // or type after AddChild still frees the node is not worth the complexity — the node is
-            // created; only the material assignment is rejected, surfaced as resource_load_failed.
+            // or type after AddChild rolls the whole create back — a partial, owner-tagged, un-dirtied
+            // emitter would otherwise leak into the scene with no scene-dirty signal and no result
+            // returned to the agent. Free first, then surface the material failure.
             if (request.HasProcessMaterialPath && !TryAssignProcessMaterial(emitter, request.ProcessMaterialPath!, out var matError))
+            {
+                emitter.QueueFree();
                 return matError;
+            }
 
             // Optional initial scalar properties (same allow-list + clamping as configure). Applied
             // after AddChild + material so the emitter is fully parented before tuning. A scalar
@@ -348,19 +354,21 @@ namespace GodotOpenMcp.Bridge.Editor
             var sb = new StringBuilder(256);
             sb.Append('{');
             sb.Append("\"nodePath\":").Append(BridgeJson.EscapeString(node.GetPath().ToString())).Append(',');
+            // `applied` echoes the snake_case configure schema keys so an agent can re-spread the
+            // block into a follow-up configure call without renaming.
             sb.Append("\"applied\":{");
             bool first = true;
             first = AppendIntIfHas(sb, "amount", appliedAmount, first);
             first = AppendFloatIfHas(sb, "lifetime", appliedLifetime, first);
-            first = AppendBoolIfHas(sb, "oneShot", appliedOneShot, first);
+            first = AppendBoolIfHas(sb, "one_shot", appliedOneShot, first);
             first = AppendFloatIfHas(sb, "preprocess", appliedPreprocess, first);
-            first = AppendFloatIfHas(sb, "speedScale", appliedSpeedScale, first);
+            first = AppendFloatIfHas(sb, "speed_scale", appliedSpeedScale, first);
             first = AppendFloatIfHas(sb, "explosiveness", appliedExplosiveness, first);
             first = AppendFloatIfHas(sb, "randomness", appliedRandomness, first);
-            first = AppendIntIfHas(sb, "fixedFps", appliedFixedFps, first);
+            first = AppendIntIfHas(sb, "fixed_fps", appliedFixedFps, first);
             first = AppendBoolIfHas(sb, "interpolate", appliedInterpolate, first);
-            first = AppendBoolIfHas(sb, "fractDelta", appliedFractDelta, first);
-            AppendBoolIfHas(sb, "localCoords", appliedLocalCoords, first);
+            first = AppendBoolIfHas(sb, "fract_delta", appliedFractDelta, first);
+            AppendBoolIfHas(sb, "local_coords", appliedLocalCoords, first);
             sb.Append("}}");
             return ToolDispatchResult.Ok(sb.ToString());
         }
@@ -639,8 +647,8 @@ namespace GodotOpenMcp.Bridge.Editor
         /// <summary>
         /// Append the shared emitter scalar snapshot to <paramref name="sb"/>. Both GpuParticles2D
         /// and GpuParticles3D expose the same property names, so the read path factors the JSON
-        /// building into one helper. Keys are camelCase to mirror the NodeData serializer
-        /// convention; an agent re-applies them via configure's snake_case schema keys.
+        /// building into one helper. Keys mirror the snake_case configure schema so a
+        /// get → configure round-trip is lossless without renaming.
         /// </summary>
         static void AppendEmitterScalars(StringBuilder sb, int amount, float lifetime, bool oneShot,
             float preprocess, float speedScale, float explosiveness, float randomness, int fixedFps,
@@ -649,18 +657,18 @@ namespace GodotOpenMcp.Bridge.Editor
             sb.Append("\"properties\":{");
             sb.Append("\"amount\":").Append(amount).Append(',');
             sb.Append("\"lifetime\":").Append(Float(lifetime)).Append(',');
-            sb.Append("\"oneShot\":").Append(oneShot ? "true" : "false").Append(',');
+            sb.Append("\"one_shot\":").Append(oneShot ? "true" : "false").Append(',');
             sb.Append("\"preprocess\":").Append(Float(preprocess)).Append(',');
-            sb.Append("\"speedScale\":").Append(Float(speedScale)).Append(',');
+            sb.Append("\"speed_scale\":").Append(Float(speedScale)).Append(',');
             sb.Append("\"explosiveness\":").Append(Float(explosiveness)).Append(',');
             sb.Append("\"randomness\":").Append(Float(randomness)).Append(',');
-            sb.Append("\"fixedFps\":").Append(fixedFps).Append(',');
+            sb.Append("\"fixed_fps\":").Append(fixedFps).Append(',');
             sb.Append("\"interpolate\":").Append(interpolate ? "true" : "false").Append(',');
-            sb.Append("\"fractDelta\":").Append(fractDelta ? "true" : "false").Append(',');
-            sb.Append("\"localCoords\":").Append(localCoords ? "true" : "false").Append(',');
+            sb.Append("\"fract_delta\":").Append(fractDelta ? "true" : "false").Append(',');
+            sb.Append("\"local_coords\":").Append(localCoords ? "true" : "false").Append(',');
             sb.Append("\"emitting\":").Append(emitting ? "true" : "false");
             sb.Append("},");
-            sb.Append("\"processMaterialPath\":").Append(BridgeJson.EscapeString(processMaterialPath));
+            sb.Append("\"process_material_path\":").Append(BridgeJson.EscapeString(processMaterialPath));
         }
 
         /// <summary>Render a float with the invariant culture so a comma-decimal locale cannot corrupt the JSON.</summary>

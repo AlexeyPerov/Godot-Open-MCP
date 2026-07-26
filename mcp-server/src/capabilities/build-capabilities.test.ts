@@ -213,13 +213,14 @@ test("toolGroups domain pack groups appear with the right catalog flags", () => 
   }
 });
 
-test("every toolGroups entry reports available:true (P8 — no compile inventory)", () => {
-  // P8 has no bridge compile inventory for domain packs, so every group is
-  // `available: true`. P12 will flip uninstalled packs without reshaping the
-  // field — pin the P8 contract here.
+test("every toolGroups entry reports available:true (domain packs ship embedded)", () => {
+  // Domain packs are embedded in the bridge addon (no per-pack compile inventory
+  // in Godot), so every group is `available: true`. The domain groups stay
+  // `defaultEnabled: false` until a client activates them via manage_tools —
+  // the `available` field itself stays uniform.
   const result = buildCapabilities(DEPS);
   for (const g of result.toolGroups) {
-    assert.equal(g.available, true, `${g.id} must be available:true in P8`);
+    assert.equal(g.available, true, `${g.id} must be available:true`);
   }
 });
 
@@ -339,5 +340,54 @@ test("capabilities built over ALL_TOOLS buckets the navigation pack into its gro
   assert.equal(navigation!.tools.length, 7, "navigation must bucket all seven pack tools");
   for (const name of navigation!.tools) {
     assert.match(name, /^godot_open_mcp_navigation_/);
+  }
+});
+
+test("capabilities built over ALL_TOOLS buckets the particles pack into its group roster", () => {
+  // P12.3 filled the particles stub — five tools. Same wiring check as the
+  // tilemap/navigation tests above.
+  const deps: BuildCapabilitiesDeps = {
+    tools: ALL_TOOLS,
+    rules: RULE_CATALOG,
+    fixes: FIX_CATALOG,
+  };
+  const result = buildCapabilities(deps);
+  const particles = result.toolGroups.find((g) => g.id === "particles");
+  assert.ok(particles, "particles group must appear in toolGroups");
+  assert.equal(particles!.tools.length, 5, "particles must bucket all five pack tools");
+  for (const name of particles!.tools) {
+    assert.match(name, /^godot_open_mcp_particles_/);
+  }
+});
+
+test("capabilities built over ALL_TOOLS buckets the animation pack into its group roster", () => {
+  // P12.4 filled the animation stub — seven tools.
+  const deps: BuildCapabilitiesDeps = {
+    tools: ALL_TOOLS,
+    rules: RULE_CATALOG,
+    fixes: FIX_CATALOG,
+  };
+  const result = buildCapabilities(deps);
+  const animation = result.toolGroups.find((g) => g.id === "animation");
+  assert.ok(animation, "animation group must appear in toolGroups");
+  assert.equal(animation!.tools.length, 7, "animation must bucket all seven pack tools");
+  for (const name of animation!.tools) {
+    assert.match(name, /^godot_open_mcp_animation_/);
+  }
+});
+
+test("capabilities built over ALL_TOOLS buckets the csg pack into its group roster", () => {
+  // P12.5 filled the csg stub — seven tools.
+  const deps: BuildCapabilitiesDeps = {
+    tools: ALL_TOOLS,
+    rules: RULE_CATALOG,
+    fixes: FIX_CATALOG,
+  };
+  const result = buildCapabilities(deps);
+  const csg = result.toolGroups.find((g) => g.id === "csg");
+  assert.ok(csg, "csg group must appear in toolGroups");
+  assert.equal(csg!.tools.length, 7, "csg must bucket all seven pack tools");
+  for (const name of csg!.tools) {
+    assert.match(name, /^godot_open_mcp_csg_/);
   }
 });

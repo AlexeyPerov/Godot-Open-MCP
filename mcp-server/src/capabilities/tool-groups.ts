@@ -38,11 +38,12 @@
 //     prompt-size win comes from hiding the whole typed surface behind one
 //     activate.
 //   - No `domainDefine` / `unityPackage` / `autoActivate` fields. Godot has
-//     no bridge compile inventory for packs yet; stubs are always
-//     `available: true` with empty tool lists.
-//   - Five domain stub ids reserved up front (tilemap, navigation,
-//     particles, animation, csg) mirroring the Godot-MCP extension-catalog
-//     pack boundaries. They carry no `assign()` calls in P8.
+//     no bridge compile inventory for packs; domain groups are always
+//     `available: true` (their tools exist in every 4.3+ build) and are
+//     `defaultEnabled: false` until a client activates them via manage_tools.
+//   - Five domain group ids reserved up front in P8 (tilemap, navigation,
+//     particles, animation, csg) and filled with `assign()` calls as each
+//     Phase 12 pack shipped.
 
 /**
  * Catalog entry for one tool group.

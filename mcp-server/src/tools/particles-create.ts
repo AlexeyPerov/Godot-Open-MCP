@@ -61,9 +61,10 @@ export const particlesCreate: Tool = {
       process_material_path: {
         type: "string",
         description:
-          "Optional res:// (or uid://) path to an existing ProcessMaterial (ParticleProcessMaterial is " +
-          "the typical choice for GPU particles). Assigned at create time so the emitter renders " +
-          "immediately. A type mismatch returns resource_load_failed. Omit to assign one later.",
+          "Optional res:// (or uid://) path to an existing Material (ParticleProcessMaterial is " +
+          "the typical choice for GPU particles; ShaderMaterial is also accepted). Assigned at create " +
+          "time so the emitter renders immediately. A type mismatch returns resource_load_failed. " +
+          "Omit to assign one later.",
       },
       properties: {
         type: "object",
@@ -77,7 +78,7 @@ export const particlesCreate: Tool = {
             type: "integer",
             minimum: 1,
             description:
-              "Number of particles to emit. Clamped to [1, 100000]. Engine default is 8 (2D) / 16 (3D).",
+              "Number of particles to emit. Clamped to [1, 100000]. Engine default is 8 (both 2D and 3D).",
           },
           lifetime: {
             type: "number",

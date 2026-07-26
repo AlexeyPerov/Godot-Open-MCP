@@ -17,7 +17,7 @@ Group id: **`particles`** (default-on: false — activate via `godot_open_mcp_ma
 ## Scope
 
 - `GpuParticles2D` and `GpuParticles3D` only — **not** `CPUParticles2D/3D`, **not** `GPUParticlesAttractor*` / `GPUParticlesCollision*`.
-- Scalar / enum configure surface only in v1 — **not** full `ParticleProcessMaterial` graph editing. Material authoring is out of scope; `create` / `configure` accept an optional `process_material_path` pointing at a pre-existing `ParticleProcessMaterial` (loaded via `ResourceLoader.Load<ProcessMaterial>`).
+- Scalar / enum configure surface only in v1 — **not** full `ParticleProcessMaterial` graph editing. Material authoring is out of scope; `create` / `configure` accept an optional `process_material_path` pointing at a pre-existing `ParticleProcessMaterial` (loaded via `ResourceLoader.Load<Material>` — Godot 4.3 types `process_material` as `Material`, so `ShaderMaterial` is also accepted; `ParticleProcessMaterial` is the typical choice).
 - No particle-instance arrays in `get` v1 — only the scalar config snapshot.
 - No third-party particle addons.
 - No separate NuGet/extension package — embedded in the main bridge addon.
@@ -51,7 +51,7 @@ Group id: **`particles`** (default-on: false — activate via `godot_open_mcp_ma
 - `new GpuParticles2D()` / `new GpuParticles3D()` — concrete engine nodes present in every 4.3+ build; no `ClassDB.ClassExists` guard needed. (C# PascalCase is `GpuParticles2D` / `GpuParticles3D`; the engine/GDScript identifier is `GPUParticles2D` / `GPUParticles3D`.)
 - Scalar properties (`Amount`, `Lifetime`, `OneShot`, `Preprocess`, `SpeedScale`, `Explosiveness`, `Randomness`, `FixedFps`, `Interpolate`, `FractDelta`, `LocalCoords`, `Emitting`) are shared by both classes.
 - `Restart()` clears existing particles and restarts the emission cycle — called by `set_emitting` when `restart:true` (before flipping `Emitting`).
-- Process material: `GpuParticles2D.ProcessMaterial` / `GpuParticles3D.ProcessMaterial` (typed `ProcessMaterial`; `ParticleProcessMaterial` is the typical concrete choice). Loaded via typed `ResourceLoader.Load<T>` — a type mismatch returns `resource_load_failed`.
+- Process material: `GpuParticles2D.ProcessMaterial` / `GpuParticles3D.ProcessMaterial` (Godot 4.3 types this as `Material`; `ParticleProcessMaterial` is the typical concrete choice, `ShaderMaterial` is also accepted). Loaded via typed `ResourceLoader.Load<Material>` — a type mismatch returns `resource_load_failed`.
 - Owner assignment to the edited scene root makes the new node persist in the `.tscn` on save (Godot-specific; Unity has no equivalent).
 
 ## Gate contract

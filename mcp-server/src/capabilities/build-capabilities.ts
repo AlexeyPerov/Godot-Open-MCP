@@ -212,9 +212,9 @@ export function buildCapabilities(
  * so the capabilities response is stable across calls. The catalog order is
  * preserved as-is (the static `TOOL_GROUPS` array).
  *
- * `available` is always `true` in P8 — Godot has no bridge compile inventory
- * for domain packs yet. P12 will flip unavailable packs to `false` without
- * reshaping the field.
+ * `available` is always `true` — the domain packs ship embedded in the bridge
+ * addon (no per-pack compile inventory in Godot), so the field stays uniform.
+ * Domain groups remain `defaultEnabled: false` until a client activates them.
  */
 function buildToolGroups(registeredToolNames: string[]): ToolGroupCapability[] {
   const toolsByGroup = new Map<string, string[]>();

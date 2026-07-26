@@ -47,7 +47,7 @@ export const particlesConfigure: Tool = {
         type: "integer",
         minimum: 1,
         description:
-          "Number of particles to emit. Clamped to [1, 100000]. Engine default is 8 (2D) / 16 (3D).",
+          "Number of particles to emit. Clamped to [1, 100000]. Engine default is 8 (both 2D and 3D).",
       },
       lifetime: {
         type: "number",

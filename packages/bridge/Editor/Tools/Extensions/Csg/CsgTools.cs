@@ -164,30 +164,29 @@ namespace GodotOpenMcp.Bridge.Editor
             sb.Append('{');
             sb.Append("\"kind\":").Append(BridgeJson.EscapeString(KindToSchemaString(request.Kind))).Append(',');
             // operation is shared by every kind — Godot's default Operation is Union.
-            sb.Append("\"operation\":\"union\",");
+            sb.Append("\"operation\":\"union\"");
 
             switch (request.Kind)
             {
                 case CsgKind.Box:
                     // The engine default box is (1, 1, 1). Use the same so defaults round-trip
                     // against what an agent sees in the inspector on a fresh CsgBox3D.
-                    sb.Append("\"size\":{\"x\":1.0,\"y\":1.0,\"z\":1.0}");
+                    sb.Append(',').Append("\"size\":{\"x\":1.0,\"y\":1.0,\"z\":1.0}");
                     break;
                 case CsgKind.Sphere:
                     // Engine defaults: radius 0.5, radial_segments 12, rings 6, smooth_faces true.
-                    sb.Append("\"radius\":0.5,").Append("\"radial_segments\":12,").Append("\"rings\":6,")
+                    sb.Append(',').Append("\"radius\":0.5,").Append("\"radial_segments\":12,").Append("\"rings\":6,")
                         .Append("\"smooth_faces\":true");
                     break;
                 case CsgKind.Cylinder:
                     // Engine defaults: radius 0.5, height 2.0, sides 8, cone false, smooth_faces true.
-                    sb.Append("\"radius\":0.5,").Append("\"height\":2.0,").Append("\"sides\":8,")
+                    sb.Append(',').Append("\"radius\":0.5,").Append("\"height\":2.0,").Append("\"sides\":8,")
                         .Append("\"cone\":false,").Append("\"smooth_faces\":true");
                     break;
                 case CsgKind.Combiner:
                     // CsgCombiner3D exposes no primitive-specific scalars — operation is the only
-                    // knob, already emitted above. Emit an empty "properties" object so the shape
-                    // matches the other kinds (an agent can destructure uniformly).
-                    sb.Append("\"properties\":{}");
+                    // knob, already emitted above. No extra fields so the shape is uniform with the
+                    // other kinds (every kind spreads its scalars at the top level; combiner has none).
                     break;
             }
             sb.Append('}');

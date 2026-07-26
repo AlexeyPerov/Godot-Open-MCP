@@ -31,6 +31,13 @@ The table below is the published view of `ALL_TOOLS`. The `scripts/check-tool-do
 <!-- tool-docs:inventory -->
 | Tool | Family | Route | Visibility | Mutates | Gate | Summary |
 |---|---|---|---|---|---|---|
+| `godot_open_mcp_animation_add_track` | animation | live | animation | editor state | enforce | Add a value / position_3d / rotation_3d / scale_3d track to an `Animation` clip; returns the track index. |
+| `godot_open_mcp_animation_create` | animation | live | animation | editor state | enforce | Create an `Animation` clip in a named `AnimationLibrary` (auto-creating the library when missing). |
+| `godot_open_mcp_animation_defaults` | animation | live | animation | no | n/a | Recommended starter length + loop mode for an `Animation` clip (pure helper, no scene). |
+| `godot_open_mcp_animation_get` | animation | live | animation | no | n/a | Read an `AnimationPlayer`'s libraries / animations / tracks (bounded; keys opt-in). |
+| `godot_open_mcp_animation_insert_key` | animation | live | animation | editor state | enforce | Insert a keyframe on a track; returns the key index Godot assigned. |
+| `godot_open_mcp_animation_library_add` | animation | live | animation | editor state | enforce | Add an empty `AnimationLibrary` registered by name on an `AnimationPlayer`. |
+| `godot_open_mcp_animation_player_create` | animation | live | animation | editor state | enforce | Create an `AnimationPlayer` node in the edited scene (returns NodeData). |
 | `godot_open_mcp_apply_fix` | core | live | core | disk | warn/off capable | Apply (or preview) a structured fix for a verify issue; non-dry-run applies roll back on new errors under `enforce`. |
 | `godot_open_mcp_bridge_status` | core | local | always visible | no | n/a | Operator-oriented health snapshot composing the instance-lock classifier with one `/ping` probe. |
 | `godot_open_mcp_capabilities` | core | local | always visible | no | n/a | Discover the full capability surface (tools + verify rules + fixes + groups + routing) in one call. |
@@ -39,11 +46,11 @@ The table below is the published view of `ALL_TOOLS`. The `scripts/check-tool-do
 | `godot_open_mcp_console_get_logs` | editor | live | typed-editor | no | n/a | Read captured Godot Open MCP log lines, newest-first, with capture-capability metadata. |
 | `godot_open_mcp_csg_box_create` | csg | live | csg | editor state | enforce | Create a `CsgBox3D` primitive node (+ optional `size` + `operation`). |
 | `godot_open_mcp_csg_combiner_create` | csg | live | csg | editor state | enforce | Create a `CsgCombiner3D` boolean-group container (groups child CSG shapes for boolean ops). |
-| `godot_open_mcp_csg_cylinder_create` | csg | live | csg | editor state | enforce | Create a `CsgCylinder3D` primitive node (+ optional `radius` / `height` / `sides` / `cone` / `smooth_faces`). |
+| `godot_open_mcp_csg_cylinder_create` | csg | live | csg | editor state | enforce | Create a `CsgCylinder3D` primitive node (+ optional `radius` / `height` / `sides` / `cone` / `smooth_faces` + `operation`). |
 | `godot_open_mcp_csg_defaults` | csg | live | csg | no | n/a | Recommended starter scalars for a CSG kind (pure helper, no scene). |
 | `godot_open_mcp_csg_get` | csg | live | csg | no | n/a | Read a CSG shape's scalar config + type/kind/operation (read-only). |
 | `godot_open_mcp_csg_set_operation` | csg | live | csg | editor state | enforce | Set the boolean operation (union / intersection / subtraction) on any CSG shape. |
-| `godot_open_mcp_csg_sphere_create` | csg | live | csg | editor state | enforce | Create a `CsgSphere3D` primitive node (+ optional `radius` / `radial_segments` / `rings` / `smooth_faces`). |
+| `godot_open_mcp_csg_sphere_create` | csg | live | csg | editor state | enforce | Create a `CsgSphere3D` primitive node (+ optional `radius` / `radial_segments` / `rings` / `smooth_faces` + `operation`). |
 | `godot_open_mcp_delta` | core | live | core | no | n/a | Compare current state against a prior checkpoint and return the new/resolved issue delta. |
 | `godot_open_mcp_editor_application_get_state` | editor | live | typed-editor | no | n/a | Truthful play-process snapshot (`isPlaying`, `playingScene`, `editorVersion`, `observedAt`). |
 | `godot_open_mcp_editor_application_set_state` | editor | live | typed-editor | editor state | enforce | Start (main/current/custom scene) or stop the play process with a bounded observation window. |
@@ -65,13 +72,6 @@ The table below is the published view of `ALL_TOOLS`. The `scripts/check-tool-do
 | `godot_open_mcp_node_find` | node | live | typed-editor | no | n/a | Find Nodes in the edited scene (targeted lookup or filtered list). |
 | `godot_open_mcp_node_modify` | node | live | typed-editor | editor state | warn/off capable | Apply property/transform updates to one or more Nodes (single + batch). |
 | `godot_open_mcp_node_set_parent` | node | live | typed-editor | editor state | warn/off capable | Reparent a Node via `Node.Reparent`, cycle-safe, transform-preserving by default. |
-| `godot_open_mcp_animation_add_track` | animation | live | animation | editor state | enforce | Add a value / position_3d / rotation_3d / scale_3d track to an `Animation` clip; returns the track index. |
-| `godot_open_mcp_animation_create` | animation | live | animation | editor state | enforce | Create an `Animation` clip in a named `AnimationLibrary` (auto-creating the library when missing). |
-| `godot_open_mcp_animation_defaults` | animation | live | animation | no | n/a | Recommended starter length + loop mode for an `Animation` clip (pure helper, no scene). |
-| `godot_open_mcp_animation_get` | animation | live | animation | no | n/a | Read an `AnimationPlayer`'s libraries / animations / tracks (bounded; keys opt-in). |
-| `godot_open_mcp_animation_insert_key` | animation | live | animation | editor state | enforce | Insert a keyframe on a track; returns the key index Godot assigned. |
-| `godot_open_mcp_animation_library_add` | animation | live | animation | editor state | enforce | Add an empty `AnimationLibrary` registered by name on an `AnimationPlayer`. |
-| `godot_open_mcp_animation_player_create` | animation | live | animation | editor state | enforce | Create an `AnimationPlayer` node in the edited scene (returns NodeData). |
 | `godot_open_mcp_particles_configure` | particles | live | particles | editor state | enforce | Patch clamped scalar properties on a `GpuParticles2D`/`3D` emitter (allow-list only). |
 | `godot_open_mcp_particles_create` | particles | live | particles | editor state | enforce | Create a `GpuParticles2D`/`3D` node (+ optional initial scalars + process material). |
 | `godot_open_mcp_particles_defaults` | particles | live | particles | no | n/a | Recommended starter scalars for a 2D/3D emitter (pure helper, no scene). |
@@ -505,13 +505,13 @@ Drain incremental bridge Events (console logs + editor-state transitions) since 
 
 Why poll instead of push? The MCP server runs over a stdio transport and has no native way to forward bridge SSE → MCP notifications. Polling per call keeps the model in the loop and lets an agent decide when to drain.
 
-**Input:** `max_events` (integer, default 50, clamped to [1, 1000]), `subscriber` (optional string — defaults to a server-scoped id; pass an explicit id to resume a cursor across MCP server restarts).
+**Input:** `max_events` (integer, default 50, clamped to [1, 1000]).
 
 **Result:**
 
 ```json
 {
-  "subscriberId": "<server-scoped-or-caller-id>",
+  "subscriberId": "<server-scoped>",
   "events": [
     { "seq": 1, "ts": "2026-07-12T00:00:01.234Z", "type": "log", "logType": "warning", "message": "..." },
     { "seq": 2, "ts": "2026-07-12T00:00:02.000Z", "type": "editor_state", "state": "playing", "isCompiling": false, "isPlaying": true }
@@ -525,7 +525,7 @@ Why poll instead of push? The MCP server runs over a stdio transport and has no 
 
 **Field notes:**
 
-- `subscriberId` — the id used across reconnects; the SSE reader keeps its cursor on the bridge across a 10-minute SSE timeout or a Godot reload.
+- `subscriberId` — the server-scoped id of the single per-process subscription. It is fixed at MCP-server startup and is **not** settable by the caller (a previously-advertised `subscriber` input param was removed because the bridge ignored it); just read it back for logging.
 - `events[].seq` — monotonic sequence. For `log` events it matches the `console_get_logs` sequence (single fan-in from the collector), so the two surfaces share a cursor vocabulary. `editor_state` events use the bridge's own sequence space.
 - `events[].type` — `log` (carries `logType`/`message`/optional `stack`), `editor_state` (carries `state`/`isCompiling`/`isPlaying`), plus control events `ready` / `missed` / `close` from the SSE wire.
 - `dropped` — events evicted from the client-side queue (capacity 500) before this pull. Non-zero only under sustained burst.
@@ -696,7 +696,7 @@ Find Nodes in the currently edited Godot scene. Two modes: (a) targeted lookup b
 
 **Result:** `{ nodes: NodeData[], notFound?, truncated? }`. An empty targeted result returns `notFound: true` (success, not error).
 
-**Errors:** `edited_scene_unavailable` (no edited scene), `invalid_node_path` (malformed path).
+**Errors:** `no_edited_scene` (no edited scene), `invalid_node_path` (malformed path).
 
 ### `godot_open_mcp_node_create`
 
@@ -723,7 +723,7 @@ The new Node's owner is set to the edited scene root so it persists in the `.tsc
 
 **Result:** `{ node: NodeData }`. Tagged with the standard `gate` block when `gate` is not `off`.
 
-**Errors:** `edited_scene_unavailable`, `invalid_node_path`, `parent_not_found`, `type_class_not_found`, `type_class_not_instantiable`, `instance_scene_not_found`, `instance_scene_invalid`, `invalid_transform` (malformed vector / wrong arity).
+**Errors:** `no_edited_scene`, `invalid_node_path`, `parent_not_found`, `type_class_not_found`, `type_class_not_instantiable`, `instance_scene_not_found`, `instance_scene_invalid`, `invalid_transform` (malformed vector / wrong arity).
 
 ### `godot_open_mcp_node_modify`
 
@@ -754,7 +754,7 @@ Modify properties of one or more Nodes in the currently edited Godot scene. Two 
 - Invalid value for a known key → `invalid_property_value` warning (per-target, non-aborting).
 - Per-target resolution miss → `node_not_found` warning (non-aborting).
 
-**Errors:** `missing_parameter` (no `node_path` and no `node_paths`), `edited_scene_unavailable`, `paths_hint_required` (when `gate` is not `off`).
+**Errors:** `missing_parameter` (no `node_path` and no `node_paths`), `no_edited_scene`, `paths_hint_required` (when `gate` is not `off`).
 
 ### `godot_open_mcp_node_set_parent`
 
@@ -775,7 +775,7 @@ Reparent a Node under a new parent via Godot's `Node.Reparent`. Cycle-safe: refu
 
 **Result:** `{ node: NodeData }`.
 
-**Errors:** `missing_parameter`, `edited_scene_unavailable`, `node_not_found`, `parent_not_found`, `cannot_reparent_root`, `cycle_detected` (proposed parent is the node itself or one of its descendants).
+**Errors:** `missing_parameter`, `no_edited_scene`, `node_not_found`, `parent_not_found`, `cannot_reparent_root`, `cycle_detected` (proposed parent is the node itself or one of its descendants).
 
 ### `godot_open_mcp_node_duplicate`
 
@@ -796,7 +796,7 @@ Duplicate a Node (and its whole sub-tree) via Godot's `Node.Duplicate`, adding t
 
 **Result:** `{ node: NodeData }`.
 
-**Errors:** `missing_parameter`, `edited_scene_unavailable`, `node_not_found`, `cannot_duplicate_root`, `parent_not_found`.
+**Errors:** `missing_parameter`, `no_edited_scene`, `node_not_found`, `cannot_duplicate_root`, `parent_not_found`.
 
 ### `godot_open_mcp_node_delete`
 
@@ -817,7 +817,7 @@ Delete one or more Nodes (and all of their children) from the currently edited G
 
 **Result:** `{ deleted: string[], count, warnings? }`. Per-target resolution misses become `node_not_found` warnings (the rest of the batch still deletes). Refuses to delete the edited scene root — close or replace the scene instead.
 
-**Errors:** `missing_parameter`, `edited_scene_unavailable`, `cannot_delete_root`.
+**Errors:** `missing_parameter`, `no_edited_scene`, `cannot_delete_root`.
 
 ## Scene tools
 
@@ -878,7 +878,7 @@ List every scene currently open in the Godot editor as a shallow snapshot.
 
 **Result:** `{ scenes: SceneSummary[], editedPath: string | null }`. The active scene carries its root Node's name and type; non-active open scenes report the path + file stem only (Godot 4.3 exposes no root accessor for non-active open scenes). A freshly-created unsaved scene is surfaced explicitly even when not listed by the editor. `editedPath` is the active/edited scene path (or `null` for a never-saved scene).
 
-**Errors:** `edited_scene_unavailable` (no scenes open).
+**Errors:** `no_edited_scene` (no scenes open).
 
 ### `godot_open_mcp_scene_get_data`
 
@@ -908,7 +908,7 @@ Read the hierarchy of a Godot scene as a structured NodeData tree. The first **l
 
 **Offline error codes:** `path_required_offline`, `invalid_path` (non-`res://`, traversal, wrong extension, invalid characters), `path_outside_project` (symlink or canonical escape), `scene_not_found`, `scene_unreadable` (permission or non-regular file), `scene_too_large` (exceeds the 8 MiB read cap), `scene_parse_error` (malformed `.tscn`), `scene_hierarchy_invalid` (orphan/duplicate/cyclic parent graph).
 
-**Live error codes:** `scene_not_edited` (the asserted `path` does not match the edited scene), `edited_scene_unavailable`, `invalid_path`.
+**Live error codes:** `scene_not_edited` (the asserted `path` does not match the edited scene), `no_edited_scene`, `invalid_path`.
 
 ### `godot_open_mcp_scene_create`
 
@@ -1376,7 +1376,7 @@ All refs are resolved completely BEFORE the current selection is cleared — a s
 
 The observed post-change selection (same shape as `editor_selection_get`) plus a `cleared` boolean. Order is preserved in the request; the observed post-state may reorder (Godot's `EditorSelection` does not guarantee order-stable reads).
 
-**Errors:** `paths_hint_required`, `selection_limit_exceeded` (request exceeds the hard maximum of 256 nodes), `edited_scene_unavailable`, `node_not_found` (a ref cannot resolve — names the offending index), `node_not_in_edited_scene`, `duplicate_node`, `selection_update_failed` (observed post-state differs from requested — observed state surfaced), `selection_unavailable` (`EditorInterface.GetSelection()` returned null).
+**Errors:** `paths_hint_required`, `selection_limit_exceeded` (request exceeds the hard maximum of 256 nodes), `no_edited_scene`, `node_not_found` (a ref cannot resolve — names the offending index), `node_not_in_edited_scene`, `duplicate_node`, `selection_update_failed` (observed post-state differs from requested — observed state surfaced), `selection_unavailable` (`EditorInterface.GetSelection()` returned null).
 
 ### `godot_open_mcp_console_get_logs`
 
@@ -1615,7 +1615,7 @@ Create a Godot 4.3+ `TileMapLayer` node in the currently edited scene and return
 
 **Result:** a NodeData object (`{ instanceId, name, path, type, scriptResourcePath, childCount, children }`) plus the standard `gate` block. Tagged with the standard gate block when `gate` is not `off`.
 
-**Errors:** `paths_hint_required`, `edited_scene_unavailable`, `parent_not_found`, `create_failed`.
+**Errors:** `paths_hint_required`, `no_edited_scene`, `parent_not_found`, `create_failed`.
 
 ### `godot_open_mcp_tilemap_set_tileset`
 
@@ -1635,7 +1635,7 @@ Assign an existing Godot `TileSet` resource to a `TileMapLayer`. No TileSet auth
 
 **Result:** `{ nodePath, tilesetPath }` plus the standard `gate` block.
 
-**Errors:** `paths_hint_required`, `missing_parameter`, `edited_scene_unavailable`, `node_not_found`, `wrong_node_type`, `resource_not_found`, `resource_load_failed`.
+**Errors:** `paths_hint_required`, `missing_parameter`, `no_edited_scene`, `node_not_found`, `wrong_node_type`, `resource_not_found`, `resource_load_failed`.
 
 ### `godot_open_mcp_tilemap_set_cell`
 
@@ -1660,7 +1660,7 @@ Paint one cell on a `TileMapLayer` using Godot's atlas addressing quadruple. The
 
 **Result:** `{ nodePath, x, y, sourceId, atlasX, atlasY, alternativeTile }` echoing the cell written, plus the standard `gate` block.
 
-**Errors:** `paths_hint_required`, `missing_parameter`, `edited_scene_unavailable`, `node_not_found`, `wrong_node_type`, `tileset_required` (no `TileSet` assigned), `invalid_parameter` (`source_id` not present in the `TileSet`).
+**Errors:** `paths_hint_required`, `missing_parameter`, `no_edited_scene`, `node_not_found`, `wrong_node_type`, `tileset_required` (no `TileSet` assigned), `invalid_parameter` (`source_id` not present in the `TileSet`).
 
 ### `godot_open_mcp_tilemap_erase_cell`
 
@@ -1681,7 +1681,7 @@ Erase one cell from a `TileMapLayer`. Erasing an already-empty cell is a no-op s
 
 **Result:** `{ nodePath, x, y, erased: true }` plus the standard `gate` block.
 
-**Errors:** `paths_hint_required`, `missing_parameter`, `edited_scene_unavailable`, `node_not_found`, `wrong_node_type`.
+**Errors:** `paths_hint_required`, `missing_parameter`, `no_edited_scene`, `node_not_found`, `wrong_node_type`.
 
 ### `godot_open_mcp_tilemap_get_used_cells`
 
@@ -1712,7 +1712,7 @@ List the used cells on a `TileMapLayer`, bounded by `max_results`. Each cell car
 
 `count` is the number of cells returned (the page); `truncated` is the remainder beyond `max_results` so an agent knows whether to page.
 
-**Errors:** `missing_parameter`, `edited_scene_unavailable`, `node_not_found`, `wrong_node_type`.
+**Errors:** `missing_parameter`, `no_edited_scene`, `node_not_found`, `wrong_node_type`.
 
 ### `godot_open_mcp_tilemap_clear`
 
@@ -1731,7 +1731,7 @@ Clear every cell on a `TileMapLayer` while keeping its `TileSet` assignment. Ide
 
 **Result:** `{ nodePath, tilesetPath, cleared: true }` plus the standard `gate` block. `tilesetPath` echoes the retained `TileSet` resource path (or `null` when the layer had no `TileSet`) so an agent can confirm the contract held.
 
-**Errors:** `paths_hint_required`, `missing_parameter`, `edited_scene_unavailable`, `node_not_found`, `wrong_node_type`.
+**Errors:** `paths_hint_required`, `missing_parameter`, `no_edited_scene`, `node_not_found`, `wrong_node_type`.
 
 ## Navigation tools
 
@@ -1780,7 +1780,7 @@ Create a `NavigationRegion2D` (`dimension: "2d"`) or `NavigationRegion3D` (`dime
 
 **Result:** a NodeData object (`{ instanceId, name, path, type, scriptResourcePath, childCount, children }`) plus the standard `gate` block.
 
-**Errors:** `paths_hint_required`, `invalid_parameter` (bad `dimension`), `edited_scene_unavailable`, `parent_not_found`, `create_failed`.
+**Errors:** `paths_hint_required`, `invalid_parameter` (bad `dimension`), `no_edited_scene`, `parent_not_found`, `create_failed`.
 
 ### `godot_open_mcp_navigation_region_set_mesh`
 
@@ -1800,7 +1800,7 @@ Assign an existing navigation resource to a `NavigationRegion2D` or `NavigationR
 
 **Result:** `{ nodePath, dimension, meshPath }` plus the standard `gate` block.
 
-**Errors:** `paths_hint_required`, `missing_parameter`, `edited_scene_unavailable`, `node_not_found`, `wrong_node_type`, `resource_not_found`, `resource_load_failed`.
+**Errors:** `paths_hint_required`, `missing_parameter`, `no_edited_scene`, `node_not_found`, `wrong_node_type`, `resource_not_found`, `resource_load_failed`.
 
 ### `godot_open_mcp_navigation_agent_create`
 
@@ -1822,7 +1822,7 @@ Create a `NavigationAgent2D` (`dimension: "2d"`) or `NavigationAgent3D` (`dimens
 
 **Result:** a NodeData object plus the standard `gate` block.
 
-**Errors:** `paths_hint_required`, `invalid_parameter` (bad `dimension`), `edited_scene_unavailable`, `parent_not_found`, `create_failed`.
+**Errors:** `paths_hint_required`, `invalid_parameter` (bad `dimension`), `no_edited_scene`, `parent_not_found`, `create_failed`.
 
 ### `godot_open_mcp_navigation_agent_configure`
 
@@ -1831,13 +1831,13 @@ Create a `NavigationAgent2D` (`dimension: "2d"`) or `NavigationAgent3D` (`dimens
 - Read-only/mutating: mutating (editor state; marks the scene unsaved)
 - Live editor requirement: requires the bridge
 
-Patch clamped scalar properties on a `NavigationAgent2D` or `NavigationAgent3D`. Only the fields you send are applied — omitted scalars are left unchanged. `radius` and the distance fields are clamped to strictly positive; `height` and `max_speed` are clamped to non-negative. A non-numeric value is silently skipped (non-aborting). The same property names apply to both the 2D and 3D agent classes.
+Patch clamped scalar properties on a `NavigationAgent2D` or `NavigationAgent3D`. Only the fields you send are applied — omitted scalars are left unchanged. `radius` and the distance fields are clamped to strictly positive; `height` and `max_speed` are clamped to non-negative. A non-numeric value is silently skipped (non-aborting). The same property names apply to both the 2D and 3D agent classes, except `height` (3D-only — see Errors).
 
 **Input:**
 
 - `node_path` (required) — scene-tree path of the target `NavigationAgent2D/3D`.
 - `radius` (optional) — agent radius (avoidance cylinder). Clamped to strictly positive. In pixels (2D) / meters (3D).
-- `height` (optional) — agent height (meaningful in 3D). Clamped to non-negative.
+- `height` (optional, 3D-only) — agent height (the 3D agent cylinder height). Clamped to non-negative. Passing this for a `NavigationAgent2D` returns `unsupported_property` (NavigationAgent2D exposes no Height property).
 - `max_speed` (optional) — maximum speed to reach the target. Clamped to non-negative. Set `0` to stop at the target.
 - `path_desired_distance` (optional) — distance to consider the next path position reached. Clamped to strictly positive.
 - `target_desired_distance` (optional) — distance to consider the target reached (sets `is_target_reached`). Clamped to strictly positive.
@@ -1845,9 +1845,9 @@ Patch clamped scalar properties on a `NavigationAgent2D` or `NavigationAgent3D`.
 - `paths_hint` (required) — mutation scope (the edited scene path). Mandatory even when `gate` is `off`.
 - `gate` (optional, default `enforce`) — `enforce` | `warn` | `off`.
 
-**Result:** `{ nodePath, applied: { …only the keys written, clamped… } }` plus the standard `gate` block.
+**Result:** `{ nodePath, applied: { radius?, height?, max_speed?, path_desired_distance?, target_desired_distance?, avoidance_enabled? } }` (only the keys written, clamped) plus the standard `gate` block.
 
-**Errors:** `paths_hint_required`, `missing_parameter`, `edited_scene_unavailable`, `node_not_found`, `wrong_node_type`.
+**Errors:** `paths_hint_required`, `missing_parameter`, `no_edited_scene`, `node_not_found`, `wrong_node_type`, `unsupported_property` (`height` sent for a 2D agent).
 
 ### `godot_open_mcp_navigation_link_create`
 
@@ -1872,7 +1872,7 @@ Create a `NavigationLink2D` (`dimension: "2d"`) or `NavigationLink3D` (`dimensio
 
 **Result:** a NodeData object plus the standard `gate` block.
 
-**Errors:** `paths_hint_required`, `invalid_parameter` (bad `dimension` or malformed start/end position), `missing_parameter`, `edited_scene_unavailable`, `parent_not_found`, `create_failed`.
+**Errors:** `paths_hint_required`, `invalid_parameter` (bad `dimension` or malformed start/end position), `missing_parameter`, `no_edited_scene`, `parent_not_found`, `create_failed`.
 
 ### `godot_open_mcp_navigation_get`
 
@@ -1887,9 +1887,9 @@ Read the scalar configuration of any navigation node — a `NavigationRegion2D/3
 
 - `node_path` (required) — scene-tree path of the target navigation node.
 
-**Result:** `{ nodePath, type, dimension, kind, … }` where `kind` is `"region"` | `"agent"` | `"link"`. For a region, `meshPath` (or `null`). For an agent, `properties: { radius, height, maxSpeed, pathDesiredDistance, targetDesiredDistance, avoidanceEnabled }`. For a link, `properties: { startPosition, endPosition, bidirectional }`.
+**Result:** `{ nodePath, type, dimension, kind, … }` where `kind` is `"region"` | `"agent"` | `"link"`. For a region, `meshPath` (or `null`). For an agent, `properties: { radius, height?, max_speed, path_desired_distance, target_desired_distance, avoidance_enabled }` — `height` is omitted for 2D agents (NavigationAgent2D has no Height property). For a link, `properties: { start_position, end_position, bidirectional }`.
 
-**Errors:** `missing_parameter`, `edited_scene_unavailable`, `node_not_found`, `wrong_node_type`.
+**Errors:** `missing_parameter`, `no_edited_scene`, `node_not_found`, `wrong_node_type`.
 
 ## Particles tools
 
@@ -1921,13 +1921,13 @@ This is a **`particles` group** family — hidden from `ListTools` until an agen
 - Read-only/mutating: read-only (pure helper — no scene required)
 - Live editor requirement: requires the bridge
 
-Return recommended starter scalars (amount, lifetime, one_shot, preprocess, speed_scale, explosiveness, randomness, fixed_fps, interpolate, fract_delta, local_coords) for a 2D or 3D emitter as a JSON object an agent can spread into `particles_create`'s initial `properties` object or use as guidance for `particles_configure`. The 2D defaults lean slightly cheaper on amount (30 vs 16); both are mid-range values inside the clamp ranges so a spread-into-configure round-trips without clamping.
+Return recommended starter scalars (amount, lifetime, one_shot, preprocess, speed_scale, explosiveness, randomness, fixed_fps, interpolate, fract_delta, local_coords) for a 2D or 3D emitter as a JSON object an agent can spread into `particles_create`'s initial `properties` object or use as guidance for `particles_configure`. The 3D default leans higher on amount (30 vs 16 in 2D) because billboarded 3D particles need more samples to read as a continuous plume; both are mid-range values inside the clamp ranges so a spread-into-configure round-trips losslessly (the result keys already match the snake_case configure schema).
 
 **Input:**
 
 - `dimension` (required) — `"2d"` | `"3d"`.
 
-**Result:** `{ dimension, properties: { amount, lifetime, oneShot, preprocess, speedScale, explosiveness, randomness, fixedFps, interpolate, fractDelta, localCoords } }`.
+**Result:** `{ dimension, properties: { amount, lifetime, one_shot, preprocess, speed_scale, explosiveness, randomness, fixed_fps, interpolate, fract_delta, local_coords } }`.
 
 **Errors:** `invalid_parameter` (`dimension` not `"2d"`/`"3d"`).
 
@@ -1946,14 +1946,14 @@ Create a `GpuParticles2D` (`dimension: "2d"`) or `GpuParticles3D` (`dimension: "
 - `name` (optional) — Node name. When omitted, Godot assigns the default (`GPUParticles3D`, etc.).
 - `parent_node_path` (optional, default edited scene root) — scene-tree path of the parent.
 - `position` (optional) — `'x,y'` (2D) or `'x,y,z'` (3D), applied because the emitter derives from `Node2D` / `Node3D`.
-- `process_material_path` (optional) — `res://` (or `uid://`) path to an existing `ProcessMaterial` (`ParticleProcessMaterial` is the typical choice). A type mismatch returns `resource_load_failed`. Omit to assign one later.
+- `process_material_path` (optional) — `res://` (or `uid://`) path to an existing `Material` (`ParticleProcessMaterial` is the typical choice; `ShaderMaterial` is also accepted). A type mismatch returns `resource_load_failed`. Omit to assign one later.
 - `properties` (optional) — initial scalar properties (same allow-list + clamps as `particles_configure`). Only the fields you send are applied.
 - `paths_hint` (required) — mutation scope (the edited scene `res://` path). Mandatory even when `gate` is `off`.
 - `gate` (optional, default `enforce`) — `enforce` | `warn` | `off`.
 
 **Result:** a NodeData object (`{ instanceId, name, path, type, scriptResourcePath, childCount, children }`) plus the standard `gate` block.
 
-**Errors:** `paths_hint_required`, `invalid_parameter` (bad `dimension`), `edited_scene_unavailable`, `parent_not_found`, `create_failed`, `resource_not_found`, `resource_load_failed` (bad process material).
+**Errors:** `paths_hint_required`, `invalid_parameter` (bad `dimension`), `no_edited_scene`, `parent_not_found`, `create_failed`, `resource_not_found`, `resource_load_failed` (bad process material).
 
 ### `godot_open_mcp_particles_configure`
 
@@ -1983,7 +1983,7 @@ Patch clamped scalar properties on a `GpuParticles2D` or `GpuParticles3D`. Only 
 
 **Result:** `{ nodePath, applied: { …only the keys written, clamped… } }` plus the standard `gate` block.
 
-**Errors:** `paths_hint_required`, `missing_parameter`, `edited_scene_unavailable`, `node_not_found`, `wrong_node_type`.
+**Errors:** `paths_hint_required`, `missing_parameter`, `no_edited_scene`, `node_not_found`, `wrong_node_type`.
 
 ### `godot_open_mcp_particles_set_emitting`
 
@@ -2004,7 +2004,7 @@ Start or stop emission on a `GpuParticles2D` or `GpuParticles3D` by setting its 
 
 **Result:** `{ nodePath, emitting, restarted }` plus the standard `gate` block.
 
-**Errors:** `paths_hint_required`, `missing_parameter`, `edited_scene_unavailable`, `node_not_found`, `wrong_node_type`.
+**Errors:** `paths_hint_required`, `missing_parameter`, `no_edited_scene`, `node_not_found`, `wrong_node_type`.
 
 ### `godot_open_mcp_particles_get`
 
@@ -2019,9 +2019,9 @@ Read the scalar configuration of a `GpuParticles2D` or `GpuParticles3D`. The res
 
 - `node_path` (required) — scene-tree path of the target `GpuParticles2D/3D`.
 
-**Result:** `{ nodePath, type, dimension, properties: { amount, lifetime, oneShot, preprocess, speedScale, explosiveness, randomness, fixedFps, interpolate, fractDelta, localCoords, emitting }, processMaterialPath }`.
+**Result:** `{ nodePath, type, dimension, properties: { amount, lifetime, one_shot, preprocess, speed_scale, explosiveness, randomness, fixed_fps, interpolate, fract_delta, local_coords, emitting }, process_material_path }`.
 
-**Errors:** `missing_parameter`, `edited_scene_unavailable`, `node_not_found`, `wrong_node_type`.
+**Errors:** `missing_parameter`, `no_edited_scene`, `node_not_found`, `wrong_node_type`.
 
 ## Animation tools
 
@@ -2071,7 +2071,7 @@ Create an `AnimationPlayer` node in the currently edited scene and return its No
 
 **Result:** a NodeData object plus the standard `gate` block.
 
-**Errors:** `paths_hint_required`, `edited_scene_unavailable`, `parent_not_found`, `create_failed`.
+**Errors:** `paths_hint_required`, `no_edited_scene`, `parent_not_found`, `create_failed`.
 
 ### `godot_open_mcp_animation_library_add`
 
@@ -2091,7 +2091,7 @@ Add an empty `AnimationLibrary` registered under a name on a target `AnimationPl
 
 **Result:** `{ nodePath, library, animationCount }` (animationCount is `0` for a fresh library) plus the standard `gate` block.
 
-**Errors:** `paths_hint_required`, `missing_parameter`, `edited_scene_unavailable`, `node_not_found`, `wrong_node_type`, `already_exists`, `create_failed`.
+**Errors:** `paths_hint_required`, `missing_parameter`, `no_edited_scene`, `node_not_found`, `wrong_node_type`, `already_exists`, `create_failed`.
 
 ### `godot_open_mcp_animation_create`
 
@@ -2114,7 +2114,7 @@ Create an `Animation` clip in a named library on a target `AnimationPlayer`, and
 
 **Result:** `{ nodePath, library, animation, length, loopMode }` plus the standard `gate` block.
 
-**Errors:** `paths_hint_required`, `missing_parameter`, `invalid_parameter` (bad `loop_mode`), `edited_scene_unavailable`, `node_not_found`, `wrong_node_type`, `already_exists`, `create_failed`.
+**Errors:** `paths_hint_required`, `missing_parameter`, `invalid_parameter` (bad `loop_mode`), `no_edited_scene`, `node_not_found`, `wrong_node_type`, `already_exists`, `create_failed`.
 
 ### `godot_open_mcp_animation_add_track`
 
@@ -2139,7 +2139,7 @@ Add a track to an `Animation` clip in a named library on a target `AnimationPlay
 
 **Result:** `{ nodePath, library, animation, trackIndex, trackType, trackPath, updateMode?, keyCount }` (`updateMode` only for value tracks; `keyCount` is `0` for a fresh track) plus the standard `gate` block.
 
-**Errors:** `paths_hint_required`, `missing_parameter`, `unsupported_track_type`, `library_not_found`, `animation_not_found`, `edited_scene_unavailable`, `node_not_found`, `wrong_node_type`, `create_failed`.
+**Errors:** `paths_hint_required`, `missing_parameter`, `unsupported_track_type`, `library_not_found`, `animation_not_found`, `no_edited_scene`, `node_not_found`, `wrong_node_type`, `create_failed`.
 
 ### `godot_open_mcp_animation_insert_key`
 
@@ -2165,7 +2165,7 @@ Insert a keyframe at the given time on a track in an `Animation` clip, and retur
 
 **Result:** `{ nodePath, library, animation, trackIndex, keyIndex, time, keyCount }` plus the standard `gate` block.
 
-**Errors:** `paths_hint_required`, `missing_parameter`, `invalid_parameter` (bad value or interpolation), `library_not_found`, `animation_not_found`, `track_not_found`, `edited_scene_unavailable`, `node_not_found`, `wrong_node_type`.
+**Errors:** `paths_hint_required`, `missing_parameter`, `invalid_parameter` (bad value or interpolation), `library_not_found`, `animation_not_found`, `track_not_found`, `no_edited_scene`, `node_not_found`, `wrong_node_type`.
 
 ### `godot_open_mcp_animation_get`
 
@@ -2186,7 +2186,7 @@ Read the libraries / animations / tracks of an `AnimationPlayer` in a bounded JS
 
 **Result:** `{ nodePath, libraries: [{ name, animations: [{ name, length, loopMode, tracks: [{ index, type, path, keyCount, keys? }] }] }] }`.
 
-**Errors:** `missing_parameter`, `edited_scene_unavailable`, `node_not_found`, `wrong_node_type`, `library_not_found`, `animation_not_found`.
+**Errors:** `missing_parameter`, `no_edited_scene`, `node_not_found`, `wrong_node_type`, `library_not_found`, `animation_not_found`.
 
 ## CSG tools
 
