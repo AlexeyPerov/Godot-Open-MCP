@@ -25,9 +25,9 @@
 // targets outside the project are excluded (never listed), in-project symlinked
 // directories appear as directories.
 
-import { readdir, stat } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import type { Dirent } from "node:fs";
-import { extname, join } from "node:path";
+import { extname, join, relative } from "node:path";
 
 import {
   canonicalRoot,
@@ -624,4 +624,339 @@ function listErr(
   message: string,
 ): { ok: false; error: OfflineListError } {
   return { ok: false, error: { code, message } };
+}
+
+// ===========================================================================
+// Recursive project walk + uid↔path index (P13.1).
+//
+// The one-level listing above backs `filesystem_list`. Reverse-reference
+// lookup needs a whole-project walk of `.tscn`/`.tres` (and optional `.gd`)
+// plus a bidirectional uid↔path map built from text sources Godot writes on
+// disk — without reading `.godot/`'s binary UID cache:
+//   - `[gd_scene]` / `[gd_resource]` header `uid=` (the file's own uid)
+//   - companion `*.uid` sidecars (Godot 4.4+; body is a single `uid://…` line)
+//   - `.import` remaps (`uid=` + `source=`)
+//
+// Re-built per request (no cache — offline-read philosophy). First-wins on
+// colliding uid declarations; duplicates are a verify concern (`duplicate_uid`).
+// ===========================================================================
+
+/** Bidirectional offline uid↔path index. Paths are canonical `res://` forms. */
+export interface UidPathIndex {
+  /** `uid://…` → `res://…`. Empty when the uid has no current path on disk. */
+  uidToPath: Map<string, string>;
+  /** `res://…` → `uid://…`. Empty when the path has no discovered uid. */
+  pathToUid: Map<string, string>;
+}
+
+/** Default extensions scanned for reverse-reference edges. */
+export const REFERENCE_SCAN_EXTENSIONS: ReadonlySet<string> = new Set([
+  ".tscn",
+  ".tres",
+]);
+
+/** Optional script extensions for `include_scripts` scans. */
+export const SCRIPT_SCAN_EXTENSIONS: ReadonlySet<string> = new Set([
+  ".gd",
+  ".cs",
+]);
+
+/**
+ * Recursively collect `res://` file paths under the project root whose
+ * extension is in `extensions`. Skips the same internal directories the
+ * one-level listing never surfaces (`.godot/`, VCS, `node_modules/`).
+ *
+ * Returns paths sorted for deterministic scan order. Never throws — unreadable
+ * directories are skipped silently (a partial index is better than failing the
+ * whole reverse lookup).
+ */
+export async function collectProjectFiles(
+  projectRoot: string,
+  extensions: ReadonlySet<string>,
+): Promise<string[]> {
+  const projectReal = canonicalRoot(projectRoot);
+  if (projectReal === null) return [];
+
+  const out: string[] = [];
+  await walkCollect(projectReal, projectReal, extensions, out);
+  out.sort();
+  return out;
+}
+
+async function walkCollect(
+  dir: string,
+  projectReal: string,
+  extensions: ReadonlySet<string>,
+  out: string[],
+): Promise<void> {
+  let dirents: Dirent[];
+  try {
+    dirents = await readdir(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const dirent of dirents) {
+    const name = dirent.name;
+    if (INTERNAL_SKIP_DIRS.has(name)) continue;
+    if (INTERNAL_SKIP_FILES.has(name)) continue;
+    const nativePath = join(dir, name);
+    if (dirent.isDirectory()) {
+      // Do not follow symlinked directories that escape (classify via realpath).
+      const real = canonicalRoot(nativePath);
+      if (real === null || !isInside(real, projectReal)) continue;
+      await walkCollect(nativePath, projectReal, extensions, out);
+      continue;
+    }
+    if (!dirent.isFile() && !dirent.isSymbolicLink()) continue;
+    const ext = extname(name).toLowerCase();
+    if (!extensions.has(ext)) continue;
+    // Symlink file whose target escapes → skip.
+    if (dirent.isSymbolicLink()) {
+      const real = canonicalRoot(nativePath);
+      if (real === null || !isInside(real, projectReal)) continue;
+    }
+    out.push(nativeToResPath(nativePath, projectReal));
+  }
+}
+
+/**
+ * Build a bidirectional uid↔path index from on-disk text sources. Re-parses
+ * every candidate file per call (no cache).
+ *
+ * Sources (first-wins on uid collision):
+ *   1. `.uid` sidecar next to any project file (body = `uid://…`)
+ *   2. `[gd_scene]` / `[gd_resource]` header `uid=` on `.tscn`/`.tres`
+ *   3. `.import` remap `uid=` → `source=`
+ */
+export async function buildUidPathIndex(
+  projectRoot: string,
+): Promise<UidPathIndex> {
+  const uidToPath = new Map<string, string>();
+  const pathToUid = new Map<string, string>();
+
+  const projectReal = canonicalRoot(projectRoot);
+  if (projectReal === null) return { uidToPath, pathToUid };
+
+  await walkUidSources(projectReal, projectReal, uidToPath, pathToUid);
+
+  return { uidToPath, pathToUid };
+}
+
+async function walkUidSources(
+  dir: string,
+  projectReal: string,
+  uidToPath: Map<string, string>,
+  pathToUid: Map<string, string>,
+): Promise<void> {
+  let dirents: Dirent[];
+  try {
+    dirents = await readdir(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const dirent of dirents) {
+    const name = dirent.name;
+    if (INTERNAL_SKIP_DIRS.has(name)) continue;
+    if (INTERNAL_SKIP_FILES.has(name)) continue;
+    const nativePath = join(dir, name);
+    if (dirent.isDirectory()) {
+      const real = canonicalRoot(nativePath);
+      if (real === null || !isInside(real, projectReal)) continue;
+      await walkUidSources(nativePath, projectReal, uidToPath, pathToUid);
+      continue;
+    }
+    if (!dirent.isFile() && !dirent.isSymbolicLink()) continue;
+    if (dirent.isSymbolicLink()) {
+      const real = canonicalRoot(nativePath);
+      if (real === null || !isInside(real, projectReal)) continue;
+    }
+
+    const lower = name.toLowerCase();
+    if (lower.endsWith(".uid")) {
+      await ingestUidSidecar(nativePath, projectReal, uidToPath, pathToUid);
+      continue;
+    }
+    if (lower.endsWith(".import")) {
+      await ingestImportSidecar(nativePath, projectReal, uidToPath, pathToUid);
+      continue;
+    }
+    if (lower.endsWith(".tscn") || lower.endsWith(".tres")) {
+      await ingestResourceHeaderUid(
+        nativePath,
+        projectReal,
+        uidToPath,
+        pathToUid,
+      );
+    }
+  }
+}
+
+/** `.uid` sidecar: body is a single `uid://…` line; asset is the path without `.uid`. */
+async function ingestUidSidecar(
+  nativePath: string,
+  projectReal: string,
+  uidToPath: Map<string, string>,
+  pathToUid: Map<string, string>,
+): Promise<void> {
+  let text: string;
+  try {
+    text = await readFile(nativePath, "utf-8");
+  } catch {
+    return;
+  }
+  const uid = extractUidToken(text.trim().split(/\r?\n/, 1)[0] ?? "");
+  if (uid === null) return;
+  // `Foo.gd.uid` → `Foo.gd`; `Foo.tscn.uid` → `Foo.tscn`.
+  const assetNative = nativePath.replace(/\.uid$/i, "");
+  const resPath = nativeToResPath(assetNative, projectReal);
+  recordUidMapping(uid, resPath, uidToPath, pathToUid);
+}
+
+/** `.import` remap: `uid=` maps to `source=` (the imported asset). */
+async function ingestImportSidecar(
+  nativePath: string,
+  projectReal: string,
+  uidToPath: Map<string, string>,
+  pathToUid: Map<string, string>,
+): Promise<void> {
+  let text: string;
+  try {
+    text = await readFile(nativePath, "utf-8");
+  } catch {
+    return;
+  }
+  const uid = extractQuotedAttr(text, "uid") ?? extractBareAttr(text, "uid");
+  const source =
+    extractQuotedAttr(text, "source") ?? extractBareAttr(text, "source");
+  if (uid === null || source === null) return;
+  if (!source.startsWith("res://")) return;
+  const normalizedUid = extractUidToken(uid);
+  if (normalizedUid === null) return;
+  // Prefer the source path from the sidecar; fall back unused.
+  void projectReal;
+  recordUidMapping(normalizedUid, source, uidToPath, pathToUid);
+}
+
+/** `[gd_scene]` / `[gd_resource]` header uid on a `.tscn`/`.tres` file. */
+async function ingestResourceHeaderUid(
+  nativePath: string,
+  projectReal: string,
+  uidToPath: Map<string, string>,
+  pathToUid: Map<string, string>,
+): Promise<void> {
+  let text: string;
+  try {
+    // Only need the first few KB for the header.
+    text = await readFile(nativePath, "utf-8");
+  } catch {
+    return;
+  }
+  const headerLine = firstHeaderLine(text);
+  if (headerLine === null) return;
+  if (
+    !headerLine.startsWith("[gd_scene") &&
+    !headerLine.startsWith("[gd_resource")
+  ) {
+    return;
+  }
+  const uidRaw = extractQuotedAttr(headerLine, "uid");
+  if (uidRaw === null) return;
+  const uid = extractUidToken(uidRaw);
+  if (uid === null) return;
+  const resPath = nativeToResPath(nativePath, projectReal);
+  recordUidMapping(uid, resPath, uidToPath, pathToUid);
+}
+
+function recordUidMapping(
+  uid: string,
+  resPath: string,
+  uidToPath: Map<string, string>,
+  pathToUid: Map<string, string>,
+): void {
+  if (!uidToPath.has(uid)) uidToPath.set(uid, resPath);
+  if (!pathToUid.has(resPath)) pathToUid.set(resPath, uid);
+}
+
+/** Resolve a `uid://…` to its `res://` path, or `null` when unknown. */
+export function resolveUidToPath(
+  index: UidPathIndex,
+  uid: string,
+): string | null {
+  const normalized = extractUidToken(uid);
+  if (normalized === null) return null;
+  return index.uidToPath.get(normalized) ?? null;
+}
+
+/** Resolve a `res://…` path to its `uid://…`, or `null` when unknown. */
+export function resolvePathToUid(
+  index: UidPathIndex,
+  resPath: string,
+): string | null {
+  return index.pathToUid.get(resPath) ?? null;
+}
+
+/** Normalize a raw uid string to `uid://…`, or null when malformed. */
+export function extractUidToken(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed.startsWith("uid://")) return null;
+  // Reject whitespace / quotes inside the token.
+  if (/[\s"']/.test(trimmed)) return null;
+  if (trimmed.length <= "uid://".length) return null;
+  return trimmed;
+}
+
+function nativeToResPath(nativePath: string, projectReal: string): string {
+  const rel = relative(projectReal, nativePath).replace(/\\/g, "/");
+  return "res://" + rel;
+}
+
+function firstHeaderLine(text: string): string | null {
+  for (const line of text.split(/\r?\n/)) {
+    const t = line.trim();
+    if (t === "" || t.startsWith(";")) continue;
+    return t;
+  }
+  return null;
+}
+
+/** Extract `key="value"` from INI/header text. Leading-space probe avoids
+ *  matching `id=` inside `uid=`. */
+function extractQuotedAttr(text: string, key: string): string | null {
+  const probe = " " + key + '="';
+  let idx = text.indexOf(probe);
+  if (idx < 0) {
+    // Header may start with `[tag key="…"]` — also try after `[` without leading space
+    // by scanning `key="` at a word boundary.
+    const alt = key + '="';
+    idx = text.indexOf(alt);
+    if (idx < 0) return null;
+    // Ensure we're not matching a longer key ending in `key`.
+    if (idx > 0 && /[A-Za-z0-9_]/.test(text[idx - 1]!)) return null;
+    const valueStart = idx + alt.length;
+    const valueEnd = text.indexOf('"', valueStart);
+    if (valueEnd < 0) return null;
+    return text.slice(valueStart, valueEnd);
+  }
+  const valueStart = idx + probe.length;
+  const valueEnd = text.indexOf('"', valueStart);
+  if (valueEnd < 0) return null;
+  return text.slice(valueStart, valueEnd);
+}
+
+/** Extract bare `key=value` (unquoted) from `.import`-style INI lines. */
+function extractBareAttr(text: string, key: string): string | null {
+  const re = new RegExp(
+    `(?:^|\\n)\\s*${key}=([^\\r\\n]+)`,
+    "m",
+  );
+  const m = re.exec(text);
+  if (!m) return null;
+  let v = m[1]!.trim();
+  if (
+    (v.startsWith('"') && v.endsWith('"')) ||
+    (v.startsWith("'") && v.endsWith("'"))
+  ) {
+    v = v.slice(1, -1);
+  }
+  return v.length > 0 ? v : null;
 }

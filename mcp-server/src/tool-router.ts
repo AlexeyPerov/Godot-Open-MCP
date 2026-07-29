@@ -48,6 +48,7 @@ import {
   SCENE_GET_DATA_TOOL,
   FILESYSTEM_LIST_TOOL,
   READ_COMPILE_ERRORS_TOOL,
+  FIND_REFERENCES_TOOL,
 } from "./capabilities/route-policy.js";
 import {
   TOOL_GROUPS,
@@ -57,7 +58,9 @@ import {
 import type { ToolSessionState } from "./tool-session-state.js";
 import { readSceneGetDataOffline } from "./offline/scene-get-data.js";
 import { listProjectDirectoryOffline } from "./offline/project-index.js";
+import { findReferencesOffline } from "./offline/references.js";
 import { identifyGodotProject } from "./offline/project-config.js";
+import { readProfileAndDetail } from "./output-profile.js";
 import { readFile } from "node:fs/promises";
 import {
   parseProjectLogSettings,
@@ -236,7 +239,9 @@ function assertNoSourceConflict(
  *     but synthesize the response in-process.
  *   - `SCENE_GET_DATA_TOOL` / `FILESYSTEM_LIST_TOOL` — live-first with offline
  *     fallback (probe once; forward live when reachable, else read disk).
- *   - `READ_COMPILE_ERRORS_TOOL` — always offline (never probes the bridge).
+ *   - `READ_COMPILE_ERRORS_TOOL` / `FIND_REFERENCES_TOOL` — always offline
+ *     (never probe the bridge).
+ */
 
 /**
  * ToolRouter selects live / offline / local per tool call. One instance per
@@ -293,6 +298,9 @@ export class ToolRouter implements Router {
     }
     if (toolName === READ_COMPILE_ERRORS_TOOL) {
       return this.routeReadCompileErrors(args);
+    }
+    if (toolName === FIND_REFERENCES_TOOL) {
+      return this.routeFindReferences(args);
     }
     if (toolName === MANAGE_TOOLS_TOOL) {
       return this.routeManageTools(args);
@@ -724,6 +732,92 @@ export class ToolRouter implements Router {
       envOverrideUsed: process.env[LOG_FILE_ENV_OVERRIDE] !== undefined,
     });
     return sourceResult(body, "offline", routeMeta);
+  }
+
+  // ── P13.1 — always-offline `find_references` ─────────────────────────────
+
+  /**
+   * `godot_open_mcp_find_references` — always-offline reverse dependency
+   * lookup. NEVER probes the bridge. Scans `.tscn`/`.tres` (optional `.gd`)
+   * for `[ext_resource]` / `uid://` references to the target path or uid.
+   *
+   * Requires exactly one of `asset_path` / `uid`. Profile defaults to
+   * compact (counts + byKind/byFolder); balanced/full return the per-asset
+   * list (paged when `page_size` is set).
+   */
+  private async routeFindReferences(
+    args: Record<string, unknown>,
+  ): Promise<CallToolResult> {
+    const routeMeta: RouteMeta = { route: "offline" };
+
+    const assetPath =
+      typeof args.asset_path === "string" ? args.asset_path : undefined;
+    const uid = typeof args.uid === "string" ? args.uid : undefined;
+    const hasPath = typeof assetPath === "string" && assetPath !== "";
+    const hasUid = typeof uid === "string" && uid !== "";
+    if (!hasPath && !hasUid) {
+      return sourceResult(
+        {
+          error: {
+            code: "missing_parameter",
+            message:
+              "find_references requires exactly one of 'asset_path' or 'uid'.",
+          },
+        },
+        "offline",
+        routeMeta,
+        true,
+      );
+    }
+    if (hasPath && hasUid) {
+      return sourceResult(
+        {
+          error: {
+            code: "invalid_request",
+            message:
+              "find_references accepts asset_path OR uid, not both.",
+          },
+        },
+        "offline",
+        routeMeta,
+        true,
+      );
+    }
+
+    const { detail } = readProfileAndDetail(args, "summary");
+    const pageSize =
+      typeof args.page_size === "number" && args.page_size > 0
+        ? Math.floor(args.page_size)
+        : undefined;
+    // When page_size is set, forward maxResults=0 (unlimited sentinel) so the
+    // inner builder does not pre-cap before paging.
+    const maxResults =
+      pageSize !== undefined
+        ? 0
+        : typeof args.max_results === "number"
+          ? args.max_results
+          : 100;
+    const maxPerFile =
+      typeof args.max_per_file === "number" && args.max_per_file > 0
+        ? Math.floor(args.max_per_file)
+        : 5;
+    const includeScripts = args.include_scripts === true;
+    const cursor =
+      typeof args.cursor === "string" ? args.cursor : undefined;
+
+    const result = await findReferencesOffline({
+      assetPath: hasPath ? assetPath : undefined,
+      uid: hasUid ? uid : undefined,
+      detail,
+      maxResults,
+      maxPerFile,
+      pageSize,
+      cursor,
+      includeScripts,
+      projectRoot: this.projectPath,
+    });
+
+    return sourceResult(result, "offline", routeMeta);
   }
 
   // ── P8.3 — local `manage_tools` (per-session visibility mutator) ────────

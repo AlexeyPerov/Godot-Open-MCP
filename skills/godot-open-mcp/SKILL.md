@@ -10,7 +10,8 @@ this file owns safe decision-making, not argument tables.
 - The MCP server was started with `GODOT_PROJECT_PATH` pointing at that project (absolute path).
 - For live tools: the Godot editor is open on the project and the bridge addon is running. The
   bridge port is deterministic per project (`20000 + sha256(path) % 10000`); never hardcode it.
-- Offline and local tools (`godot_open_mcp_read_compile_errors`, `godot_open_mcp_capabilities`,
+- Offline and local tools (`godot_open_mcp_read_compile_errors`,
+  `godot_open_mcp_find_references`, `godot_open_mcp_capabilities`,
   `godot_open_mcp_manage_tools`, `godot_open_mcp_bridge_status`, `godot_open_mcp_pull_events`,
   `godot_open_mcp_ping`) work without a live editor.
 
@@ -44,9 +45,10 @@ this file owns safe decision-making, not argument tables.
 Sessions start with **`core`** enabled (ping + the gate/verify surface:
 `godot_open_mcp_validate_edit`, `godot_open_mcp_checkpoint_create`, `godot_open_mcp_delta`,
 `godot_open_mcp_apply_fix`). Activate **`typed-editor`** to add the full typed surface (nodes,
-scenes, resources, filesystem, editor state/selection, console, screenshots, reflection). Domain
-pack groups (`tilemap`, `navigation`, `particles`, `animation`, `csg`) are reserved stubs with
-empty rosters today. `godot_open_mcp_manage_tools` actions: `list_groups`, `activate`,
+scenes, resources, filesystem, editor state/selection, console, screenshots, reflection). Activate
+**`asset-intelligence`** for offline reverse lookup (`godot_open_mcp_find_references`) before a
+move/delete. Domain pack groups (`tilemap`, `navigation`, `particles`, `animation`, `csg`) each
+carry their pack tools. `godot_open_mcp_manage_tools` actions: `list_groups`, `activate`,
 `deactivate`, `reset`. State is per-session and ephemeral; it resets to `core` only when the MCP
 server restarts.
 

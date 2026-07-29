@@ -58,6 +58,7 @@ The table below is the published view of `ALL_TOOLS`. The `scripts/check-tool-do
 | `godot_open_mcp_editor_selection_set` | editor | live | typed-editor | editor state | enforce | Replace or clear the node selection (all-or-nothing resolution). |
 | `godot_open_mcp_filesystem_list` | filesystem | live-first | typed-editor | no | n/a | List immediate children of a `res://` directory; live reads authoritative importer metadata. |
 | `godot_open_mcp_filesystem_reimport` | filesystem | live | typed-editor | disk | enforce | Reimport exact files or trigger a full scan; blocks until the import pipeline settles. |
+| `godot_open_mcp_find_references` | asset-intelligence | offline | asset-intelligence | no | n/a | Offline reverse dependency lookup — assets that reference a given `res://` path or `uid://`. |
 | `godot_open_mcp_manage_tools` | core | local | always visible | ephemeral | n/a | Per-session tool-group visibility mutator (activate/deactivate/reset/list_groups). |
 | `godot_open_mcp_navigation_agent_configure` | navigation | live | navigation | editor state | enforce | Patch clamped scalar properties on a `NavigationAgent2D`/`3D`. |
 | `godot_open_mcp_navigation_agent_create` | navigation | live | navigation | editor state | enforce | Create a `NavigationAgent2D`/`3D` node (pathfinding + avoidance) in the edited scene. |
@@ -145,6 +146,7 @@ The MCP server filters `ListTools` through a per-session `ToolSessionState` so t
 |---|---|---|
 | `core` | yes | Essential entry points + the gate/verify safety surface (`ping`, `validate_edit`, `checkpoint_create`, `delta`, `apply_fix`). The only group visible in a fresh session. |
 | `typed-editor` | no | The whole typed editor surface: nodes, scenes, resources, filesystem, editor state/selection, console, screenshots, reflection. One activate brings up the full typed surface. |
+| `asset-intelligence` | no | Offline asset-graph intelligence: reverse reference lookup (`find_references`) and related dependency readers. |
 | `tilemap` | no | Godot 4.3+ `TileMapLayer` tools: create a layer, assign a `TileSet`, set/erase/clear cells, list used cells. |
 | `navigation` | no | Godot 4.3+ navigation tools (2D + 3D): starter defaults, create `NavigationRegion`/`Agent`/`Link`, assign a region's navigation resource, configure agent scalars, inspect any navigation node. |
 | `particles` | no | Godot 4.3+ `GpuParticles2D`/`3D` tools (2D + 3D): starter defaults, create an emitter (+ optional initial scalars + process material), configure allow-listed + clamped scalars, start/stop emission (with optional restart), inspect any emitter. |
@@ -159,7 +161,7 @@ Every CallTool returns a `CallToolResult`. JSON payloads are tagged with `_sourc
 
 - **Success.** `isError: false` and a content array of one text block (the JSON body) — except screenshots, which return an image content block plus a text metadata block (see [Screenshots](#screenshot-tools)).
 - **Structured error.** `isError: true` with an `error: { code, message }` body. Error codes are stable lowercase tokens (`missing_parameter`, `invalid_path`, `resource_not_found`, `node_not_found`, `scene_dirty`, `paths_hint_required`, …). The catalog lists every code per tool.
-- **Bridge transport failure.** When the bridge is unreachable on a live route, the result is `isError: true` with a transport-shaped error (timeout / connection refused / 5xx). The local/live hybrid tools (`bridge_status`, `pull_events`) and the offline tool (`read_compile_errors`) never throw on an offline bridge — `stopped` / `unreachable` / `dead_bridge` are observed states, not execution failures.
+- **Bridge transport failure.** When the bridge is unreachable on a live route, the result is `isError: true` with a transport-shaped error (timeout / connection refused / 5xx). The local/live hybrid tools (`bridge_status`, `pull_events`) and the offline tools (`read_compile_errors`, `find_references`) never throw on an offline bridge — `stopped` / `unreachable` / `dead_bridge` are observed states, not execution failures.
 
 ### Mutation gate, paths_hint, checkpoint/delta, and rollback
 
@@ -195,6 +197,7 @@ Several readers bound their output by default and accept paging:
 
 - `filesystem_list` — `page_size` (default 100, max 500) + opaque `cursor`; directories first, then files, each group sorted by name.
 - `resource_find` — `page_size` (default 50, max 200) + `cursor` in search mode; a `total` field reports the full match count.
+- `find_references` — `profile` (`compact` default = counts only; `balanced`/`full` = per-asset list) + optional `page_size`/`cursor` over the referencing-assets list. Pagination block uses `next_cursor`.
 - `node_find` — `max_results` (default 50, minimum 1); a `truncated` count reports the remainder.
 - `reflection_method_find` — `max_results` (default 50, max 200); a `truncated` count reports the remainder.
 - `reflection_method_call` — `max_depth` (default 4) + `max_items` (default 100) bound the returned object graph.
@@ -211,6 +214,7 @@ When the bridge is unreachable:
 - `pull_events` returns `connected: false` + `lastError` (and `events: []`).
 - `read_compile_errors` is always-offline and never depends on the bridge — use it to diagnose a `dead_bridge` (the recovery hint from `bridge_status` points here).
 - Live-first readers fall back to disk: `scene_get_data` parses the `.tscn`; `filesystem_list` lists the directory.
+- `find_references` is always-offline and never depends on the bridge — use it to discover reverse dependencies before a move/delete.
 - Every other live tool surfaces a structured transport error.
 
 ### No batch route
@@ -575,6 +579,47 @@ Read C# compiler errors AND GDScript parse errors AND script/addon load failures
 **Limitations.** Godot crash backtraces may only print to the terminal and never reach the file log. A custom `--log-file` is only discoverable through `GODOT_OPEN_MCP_LOG_FILE`. File logging is OFF by default in Godot — `logging_disabled` is the expected status until `debug/file_logging/enable_file_logging = true` is set in project.godot (Project Settings > Debug > File Logging).
 
 ## Gate / verify tools
+
+### `godot_open_mcp_find_references`
+
+- Route: `offline`
+- Visibility group: `asset-intelligence` (activate via `manage_tools`)
+- Read-only/mutating: read-only
+- Live editor requirement: none — scans disk; never probes the bridge
+
+Reverse dependency lookup for Godot assets. Returns every asset that references a given `res://` path or `uid://` handle by scanning `.tscn`/`.tres` text for `[ext_resource]` declarations and bare `uid://` tokens (optional `.gd`/`preload`/`load` literals behind `include_scripts`). Use before move/delete/rename to see who depends on an asset — `resource_move` does not rewrite references.
+
+**Input:**
+
+- `asset_path` **or** `uid` (exactly one required) — target as a canonical `res://` path or `uid://` handle. uid↔path is resolved through the offline index (resource headers, `*.uid` sidecars, `.import` remaps). When a uid has no current path, the result sets `unresolvedUid: true` and still scans for that uid token.
+- `profile` (optional, default `compact`) — `compact` | `balanced` | `full`. Compact = counts + `byKind`/`byFolder` only; balanced = referencing asset paths; full = also field/header locations.
+- `page_size` / `cursor` (optional) — page the referencing-assets list (balanced/full). Response carries `pagination.next_cursor` when more remain.
+- `detail` (optional, legacy) — `summary`/`normal`/`verbose` alias for profile; ignored when `profile` is set.
+- `max_results` (optional, default 100) — single-page cap when `page_size` is omitted.
+- `max_per_file` (optional, default 5) — full profile: max locations per referencing file.
+- `include_scripts` (optional, default `false`) — also scan `.gd`/`.cs` `preload`/`load`/`ResourceLoader.load` string literals.
+
+**Result:**
+
+```json
+{
+  "queriedAssetPath": "res://Resources/DemoData.tres",
+  "queriedAssetUid": "uid://demotarget00001",
+  "unresolvedUid": false,
+  "referencedBy": [],
+  "totalCount": 2,
+  "byKind": { "scene": 2 },
+  "byFolder": { "res://Scenes/": 2 },
+  "detail": "summary",
+  "truncated": 0
+}
+```
+
+- `compact` (`detail: "summary"`) — `referencedBy` is empty; use `totalCount` + rollups.
+- `balanced` / `full` — `referencedBy[]` entries are `{ assetPath, uid?, kind, folder, locations? }`.
+- `unresolvedUid` — `true` when a uid-only query has no path in the offline index (never guesses).
+
+**Errors:** `missing_parameter` (neither selector), `invalid_request` (both selectors).
 
 ### `godot_open_mcp_validate_edit`
 

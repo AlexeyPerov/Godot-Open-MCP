@@ -64,9 +64,11 @@ const LOCAL_TOOLS: ReadonlySet<string> = new Set([
  * bridge describes (the addon is not running its listener).
  */
 export const READ_COMPILE_ERRORS_TOOL = "godot_open_mcp_read_compile_errors";
+export const FIND_REFERENCES_TOOL = "godot_open_mcp_find_references";
 
 const OFFLINE_TOOLS: ReadonlySet<string> = new Set([
   READ_COMPILE_ERRORS_TOOL,
+  FIND_REFERENCES_TOOL,
 ]);
 
 /**

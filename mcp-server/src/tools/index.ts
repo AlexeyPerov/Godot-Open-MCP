@@ -85,6 +85,7 @@ import { csgGet } from "./csg-get.js";
 import { bridgeStatus } from "./bridge-status.js";
 import { pullEvents } from "./pull-events.js";
 import { readCompileErrors } from "./read-compile-errors.js";
+import { findReferences } from "./find-references.js";
 import { manageTools } from "./manage-tools.js";
 
 /** Ordered list of every tool exposed over stdio MCP. */
@@ -277,6 +278,11 @@ export const ALL_TOOLS: Tool[] = [
   // data-dir defaults + the operator GODOT_OPEN_MCP_LOG_FILE env override (no per-call log_path —
   // no arbitrary file-read surface). Read-only, gate-free.
   readCompileErrors,
+  // P13.1 — find_references: offline reverse dependency lookup. Scans
+  // `.tscn`/`.tres` for `[ext_resource]` / `uid://` references to a target
+  // path or uid. Group `asset-intelligence` (default-off); always-offline
+  // route — never probes the bridge. Profile + paging via output-profile.ts.
+  findReferences,
   // P8.3 — manage_tools: per-session tool-group visibility mutator. Activates / deactivates /
   // resets / lists groups in the per-session ToolSessionState that ListTools consults to filter
   // tools. Always visible (capabilities + this tool + ping + bridge_status + pull_events +

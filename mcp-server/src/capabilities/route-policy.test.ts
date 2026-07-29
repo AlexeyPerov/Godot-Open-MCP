@@ -28,6 +28,7 @@ import {
   SCENE_GET_DATA_TOOL,
   FILESYSTEM_LIST_TOOL,
   READ_COMPILE_ERRORS_TOOL,
+  FIND_REFERENCES_TOOL,
   type RoutePolicy,
 } from "./route-policy.js";
 import { ALL_TOOLS } from "../tools/index.js";
@@ -47,6 +48,7 @@ const ROUTER_NAMED_HANDLERS: ReadonlySet<string> = new Set([
   SCENE_GET_DATA_TOOL,
   FILESYSTEM_LIST_TOOL,
   READ_COMPILE_ERRORS_TOOL,
+  FIND_REFERENCES_TOOL,
 ]);
 
 const REGISTERED = new Set(ALL_TOOLS.map((t) => t.name));

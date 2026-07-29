@@ -48,6 +48,7 @@ test("TOOL_GROUPS id order is pinned (stable across catalog edits)", () => {
     [
       "core",
       "typed-editor",
+      "asset-intelligence",
       "tilemap",
       "navigation",
       "particles",
@@ -405,18 +406,20 @@ test("no tool is assigned to more than one group", () => {
   }
 });
 
-test("every registered tool is meta, core, typed-editor, or a shipped domain group", () => {
-  // Regression guard: the only groups that carry tools are `core`, `typed-editor`,
-  // and the Phase 12 domain packs as they ship (tilemap landed in P12.1, navigation
-  // in P12.2, particles in P12.3, animation in P12.4, csg in P12.5 — Phase 12 is now
-  // complete, every reserved stub is filled).
+test("every registered tool is meta, core, typed-editor, asset-intelligence, or a shipped domain group", () => {
+  // Regression guard: the only groups that carry tools are `core`,
+  // `typed-editor`, `asset-intelligence` (offline asset-graph tools), and the
+  // Phase 12 domain packs (tilemap / navigation / particles / animation / csg).
   const shippedDomainGroups = new Set(["tilemap", "navigation", "particles", "animation", "csg"]);
   for (const tool of ALL_TOOLS) {
     const g = groupFor(tool.name);
     if (g === null) continue; // meta-tool
     assert.ok(
-      g === "core" || g === "typed-editor" || shippedDomainGroups.has(g),
-      `${tool.name} is in group '${g}' — only core, typed-editor, and shipped domain packs (tilemap, navigation, particles, animation, csg) carry tools`,
+      g === "core" ||
+        g === "typed-editor" ||
+        g === "asset-intelligence" ||
+        shippedDomainGroups.has(g),
+      `${tool.name} is in group '${g}' — only core, typed-editor, asset-intelligence, and shipped domain packs carry tools`,
     );
   }
 });

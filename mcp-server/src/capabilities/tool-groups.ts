@@ -33,10 +33,10 @@
 //     checkpoint_create, delta, apply_fix) into `core` so the roadmap
 //     "only core visible" line stays literally true while the safety
 //     surface stays reachable.
-//   - One umbrella `typed-editor` group. Godot does not split
-//     asset-intelligence / build-settings / diagnostics in P8 — the
-//     prompt-size win comes from hiding the whole typed surface behind one
-//     activate.
+//   - One umbrella `typed-editor` group for the typed editor surface. The
+//     `asset-intelligence` group is reserved for offline asset-graph tools
+//     (`find_references`, later `dependencies` / readers) and stays
+//     default-off until activated via manage_tools.
 //   - No `domainDefine` / `unityPackage` / `autoActivate` fields. Godot has
 //     no bridge compile inventory for packs; domain groups are always
 //     `available: true` (their tools exist in every 4.3+ build) and are
@@ -76,6 +76,14 @@ export const TOOL_GROUPS: ToolGroup[] = [
     description:
       "Typed editor surface: nodes, scenes, resources, filesystem, " +
       "editor state/selection, console, screenshots, reflection.",
+    defaultEnabled: false,
+  },
+  {
+    id: "asset-intelligence",
+    description:
+      "Offline asset-graph intelligence: reverse reference lookup " +
+      "(find_references) and related dependency readers. Hidden until " +
+      "activated via manage_tools.",
     defaultEnabled: false,
   },
   {
@@ -224,6 +232,11 @@ assign(
     "reflection_method_call",
   ].map((suffix) => `godot_open_mcp_${suffix}`),
 );
+
+// --- asset-intelligence (offline asset-graph tools) ------------------------
+// find_references lands first; dependencies (forward + impact) joins later.
+// defaultEnabled: false — activate via manage_tools.
+assign("asset-intelligence", ["godot_open_mcp_find_references"]);
 
 // Domain pack groups (tilemap / navigation / particles / animation / csg)
 // were reserved as empty stubs in P8 and filled progressively by the Phase 12
