@@ -43,7 +43,7 @@ test("broken_references emits broken_scene_reference (Error)", () => {
   const issue = rule!.issues.find((i) => i.code === "broken_scene_reference");
   assert.ok(issue, "broken_scene_reference code present");
   assert.equal(issue!.severity, "Error");
-  assert.deepEqual(issue!.fixIds, []);
+  assert.deepEqual(issue!.fixIds, ["relink_broken_reference"]);
 });
 
 test("missing_scripts emits missing_script (Error) with remove_missing_script fix", () => {
@@ -66,9 +66,11 @@ test("import_health emits orphan_import (Warning) and duplicate_uid (Error)", ()
   const orphan = rule!.issues.find((i) => i.code === "orphan_import");
   assert.ok(orphan, "orphan_import code present");
   assert.equal(orphan!.severity, "Warning");
+  assert.deepEqual(orphan!.fixIds, ["remove_orphan_import"]);
   const dup = rule!.issues.find((i) => i.code === "duplicate_uid");
   assert.ok(dup, "duplicate_uid code present");
   assert.equal(dup!.severity, "Error");
+  assert.deepEqual(dup!.fixIds, ["fix_duplicate_uid"]);
 });
 
 test("every implemented rule declares at least one issue code", () => {
@@ -92,7 +94,17 @@ test("every issue severity is Error or Warning", () => {
 // Fix catalog — mirrors FixProviderRegistry.RegisterDefaults
 // ---------------------------------------------------------------------------
 
-test("fix catalog lists remove_missing_script (Safe:true)", () => {
+test("fix catalog lists all four implemented fixes", () => {
+  const ids = FIX_CATALOG.filter((f) => f.implemented).map((f) => f.id).sort();
+  assert.deepEqual(ids, [
+    "fix_duplicate_uid",
+    "relink_broken_reference",
+    "remove_missing_script",
+    "remove_orphan_import",
+  ]);
+});
+
+test("remove_missing_script is Safe:true", () => {
   // C# source of truth: FixProviderRegistry.RegisterDefaults adds RemoveMissingScriptFix;
   // RemoveMissingScriptFix.FixId = "remove_missing_script"; Describe().Safe = true for .tscn/.tres.
   const fix = FIX_CATALOG.find((f) => f.id === "remove_missing_script");

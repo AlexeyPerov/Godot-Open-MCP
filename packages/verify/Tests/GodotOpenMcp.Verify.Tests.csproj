@@ -76,6 +76,9 @@
          they compile into this binary-less host directly. RemoveMissingScriptFix text-edits .tscn/.tres;
          FixRollback keeps byte-level temp backups. -->
     <Compile Include="..\Editor\Fixes\RemoveMissingScriptFix.cs" Link="Source\Fixes\RemoveMissingScriptFix.cs" />
+    <Compile Include="..\Editor\Fixes\RelinkBrokenReferenceFix.cs" Link="Source\Fixes\RelinkBrokenReferenceFix.cs" />
+    <Compile Include="..\Editor\Fixes\RemoveOrphanImportFix.cs" Link="Source\Fixes\RemoveOrphanImportFix.cs" />
+    <Compile Include="..\Editor\Fixes\FixDuplicateUidFix.cs" Link="Source\Fixes\FixDuplicateUidFix.cs" />
     <Compile Include="..\Editor\Fixes\FixRollback.cs" Link="Source\Fixes\FixRollback.cs" />
     <!-- P3.2 broken-references rule. The rule + parser + resolver-contract are pure-managed (no Godot
          API), so they compile into this binary-less host directly. LiveResourceResolver is #if TOOLS and

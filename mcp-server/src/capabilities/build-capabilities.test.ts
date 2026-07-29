@@ -82,7 +82,7 @@ test("buildCapabilities counts implemented rules + fixes accurately", () => {
   const result = buildCapabilities(DEPS);
   assert.equal(result.counts.rulesImplemented, 3);
   assert.equal(result.counts.rulesPlanned, 0);
-  assert.equal(result.counts.fixesImplemented, 1);
+  assert.equal(result.counts.fixesImplemented, 4);
   assert.equal(result.counts.fixesPlanned, 0);
   assert.equal(result.counts.toolsImplemented, FIXTURE_TOOLS.length);
   assert.equal(result.counts.toolsPlanned, 0);
@@ -114,7 +114,7 @@ test("buildCapabilities counts stay stable across kind filters", () => {
   // asking for `kind:rules` still learns how many tools/fixes exist.
   const rulesOnly = buildCapabilities(DEPS, { kind: "rules" });
   assert.equal(rulesOnly.counts.toolsImplemented, FIXTURE_TOOLS.length);
-  assert.equal(rulesOnly.counts.fixesImplemented, 1);
+  assert.equal(rulesOnly.counts.fixesImplemented, 4);
 });
 
 // ---------------------------------------------------------------------------

@@ -327,6 +327,9 @@
          compile into the binary-less host. ApplyFixTool calls provider.Apply/Describe; ApplyFixGateRunner
          uses FixRollback; both are exercised by the MetaTools tests with synthetic state. -->
     <Compile Include="..\..\verify\Editor\Fixes\RemoveMissingScriptFix.cs" Link="Source\Verify\Fixes\RemoveMissingScriptFix.cs" />
+    <Compile Include="..\..\verify\Editor\Fixes\RelinkBrokenReferenceFix.cs" Link="Source\Verify\Fixes\RelinkBrokenReferenceFix.cs" />
+    <Compile Include="..\..\verify\Editor\Fixes\RemoveOrphanImportFix.cs" Link="Source\Verify\Fixes\RemoveOrphanImportFix.cs" />
+    <Compile Include="..\..\verify\Editor\Fixes\FixDuplicateUidFix.cs" Link="Source\Verify\Fixes\FixDuplicateUidFix.cs" />
     <Compile Include="..\..\verify\Editor\Fixes\FixRollback.cs" Link="Source\Verify\Fixes\FixRollback.cs" />
     <Compile Include="..\..\verify\Editor\Rules\BrokenReferences\IssueCodes.cs" Link="Source\Verify\Rules\BrokenReferences\IssueCodes.cs" />
     <Compile Include="..\..\verify\Editor\Rules\BrokenReferences\IResourceResolver.cs" Link="Source\Verify\Rules\BrokenReferences\IResourceResolver.cs" />

@@ -88,7 +88,7 @@ const BROKEN_REFERENCES_ISSUES: RuleIssueDescriptor[] = [
     // BrokenReferencesRule.MakeIssue (severity Error).
     severity: "Error",
     // No fix provider yet — the eventual relink/remove fix would land here.
-    fixIds: [],
+    fixIds: ["relink_broken_reference"],
   },
 ];
 
@@ -108,14 +108,14 @@ const IMPORT_HEALTH_ISSUES: RuleIssueDescriptor[] = [
     // Warning: an orphan .import sidecar does not break scene load (the engine ignores it after a
     // rescan) — it is project-level cruft. Matches ImportHealthRule.MakeOrphanIssue (severity Warning).
     severity: "Warning",
-    fixIds: [],
+    fixIds: ["remove_orphan_import"],
   },
   {
     code: "duplicate_uid",
     // Error: a uid collision is a real integrity break — Godot refuses to reimport or silently picks
     // one. Matches ImportHealthRule.MakeDuplicateUidIssue (severity Error).
     severity: "Error",
-    fixIds: [],
+    fixIds: ["fix_duplicate_uid"],
   },
 ];
 
@@ -165,8 +165,8 @@ export const RULE_CATALOG: RuleCapability[] = [
 // ---------------------------------------------------------------------------
 // Fix capability entries.
 //
-// Mirrors the C# FixProviderRegistry.RegisterDefaults. P3.7 ships one Safe:true provider
-// (remove_missing_script). More providers register through the registry in later phases.
+// Mirrors the C# FixProviderRegistry.RegisterDefaults. P3.7 ships remove_missing_script;
+// P13.3 adds relink_broken_reference, remove_orphan_import, fix_duplicate_uid.
 // ---------------------------------------------------------------------------
 
 export const FIX_CATALOG: FixCapability[] = [
@@ -176,9 +176,31 @@ export const FIX_CATALOG: FixCapability[] = [
     status: "implemented",
     rules: ["missing_scripts"],
     issueCodes: ["missing_script"],
-    // Removing a broken script attachment cannot lose data — the attachment already points at nothing
-    // loadable. Safe to auto-suggest. Matches RemoveMissingScriptFix.Describe().Safe for .tscn/.tres.
     safe: true,
+  },
+  {
+    id: "relink_broken_reference",
+    implemented: true,
+    status: "implemented",
+    rules: ["broken_references"],
+    issueCodes: ["broken_scene_reference"],
+    safe: false,
+  },
+  {
+    id: "remove_orphan_import",
+    implemented: true,
+    status: "implemented",
+    rules: ["import_health"],
+    issueCodes: ["orphan_import"],
+    safe: true,
+  },
+  {
+    id: "fix_duplicate_uid",
+    implemented: true,
+    status: "implemented",
+    rules: ["import_health"],
+    issueCodes: ["duplicate_uid"],
+    safe: false,
   },
 ];
 

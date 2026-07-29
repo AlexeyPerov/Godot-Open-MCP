@@ -49,6 +49,7 @@ import {
   FILESYSTEM_LIST_TOOL,
   READ_COMPILE_ERRORS_TOOL,
   FIND_REFERENCES_TOOL,
+  DEPENDENCIES_TOOL,
 } from "./capabilities/route-policy.js";
 import {
   TOOL_GROUPS,
@@ -59,6 +60,7 @@ import type { ToolSessionState } from "./tool-session-state.js";
 import { readSceneGetDataOffline } from "./offline/scene-get-data.js";
 import { listProjectDirectoryOffline } from "./offline/project-index.js";
 import { findReferencesOffline } from "./offline/references.js";
+import { dependenciesOffline } from "./offline/dependencies.js";
 import { identifyGodotProject } from "./offline/project-config.js";
 import { readProfileAndDetail } from "./output-profile.js";
 import { readFile } from "node:fs/promises";
@@ -239,7 +241,8 @@ function assertNoSourceConflict(
  *     but synthesize the response in-process.
  *   - `SCENE_GET_DATA_TOOL` / `FILESYSTEM_LIST_TOOL` — live-first with offline
  *     fallback (probe once; forward live when reachable, else read disk).
- *   - `READ_COMPILE_ERRORS_TOOL` / `FIND_REFERENCES_TOOL` — always offline
+ *   - `READ_COMPILE_ERRORS_TOOL` / `FIND_REFERENCES_TOOL` /
+ *     `DEPENDENCIES_TOOL` — always offline
  *     (never probe the bridge).
  */
 
@@ -301,6 +304,9 @@ export class ToolRouter implements Router {
     }
     if (toolName === FIND_REFERENCES_TOOL) {
       return this.routeFindReferences(args);
+    }
+    if (toolName === DEPENDENCIES_TOOL) {
+      return this.routeDependencies(args);
     }
     if (toolName === MANAGE_TOOLS_TOOL) {
       return this.routeManageTools(args);
@@ -814,6 +820,73 @@ export class ToolRouter implements Router {
       pageSize,
       cursor,
       includeScripts,
+      projectRoot: this.projectPath,
+    });
+
+    return sourceResult(result, "offline", routeMeta);
+  }
+
+  /**
+   * `godot_open_mcp_dependencies` — always-offline forward + reverse
+   * dependency lookup. NEVER probes the bridge.
+   */
+  private async routeDependencies(
+    args: Record<string, unknown>,
+  ): Promise<CallToolResult> {
+    const routeMeta: RouteMeta = { route: "offline" };
+
+    const assetPath =
+      typeof args.asset_path === "string" ? args.asset_path : undefined;
+    const uid = typeof args.uid === "string" ? args.uid : undefined;
+    const hasPath = typeof assetPath === "string" && assetPath !== "";
+    const hasUid = typeof uid === "string" && uid !== "";
+    if (!hasPath && !hasUid) {
+      return sourceResult(
+        {
+          error: {
+            code: "missing_parameter",
+            message:
+              "dependencies requires exactly one of 'asset_path' or 'uid'.",
+          },
+        },
+        "offline",
+        routeMeta,
+        true,
+      );
+    }
+    if (hasPath && hasUid) {
+      return sourceResult(
+        {
+          error: {
+            code: "invalid_request",
+            message: "dependencies accepts asset_path OR uid, not both.",
+          },
+        },
+        "offline",
+        routeMeta,
+        true,
+      );
+    }
+
+    const detailRaw =
+      typeof args.detail === "string" ? args.detail : "normal";
+    const detail =
+      detailRaw === "summary" || detailRaw === "normal" ? detailRaw : "normal";
+    const maxResults =
+      typeof args.max_results === "number" ? args.max_results : 100;
+    const includeImpact = args.include_impact === true;
+    let maxImpactDepth = 5;
+    if (typeof args.max_impact_depth === "number") {
+      maxImpactDepth = Math.min(20, Math.max(1, Math.floor(args.max_impact_depth)));
+    }
+
+    const result = await dependenciesOffline({
+      assetPath: hasPath ? assetPath : undefined,
+      uid: hasUid ? uid : undefined,
+      detail,
+      maxResults,
+      includeImpact,
+      maxImpactDepth,
       projectRoot: this.projectPath,
     });
 

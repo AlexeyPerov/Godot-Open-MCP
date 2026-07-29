@@ -58,6 +58,7 @@ The table below is the published view of `ALL_TOOLS`. The `scripts/check-tool-do
 | `godot_open_mcp_editor_selection_set` | editor | live | typed-editor | editor state | enforce | Replace or clear the node selection (all-or-nothing resolution). |
 | `godot_open_mcp_filesystem_list` | filesystem | live-first | typed-editor | no | n/a | List immediate children of a `res://` directory; live reads authoritative importer metadata. |
 | `godot_open_mcp_filesystem_reimport` | filesystem | live | typed-editor | disk | enforce | Reimport exact files or trigger a full scan; blocks until the import pipeline settles. |
+| `godot_open_mcp_dependencies` | asset-intelligence | offline | asset-intelligence | no | n/a | Offline forward + reverse dependencies, broken edges, cycles, optional transitive impact. |
 | `godot_open_mcp_find_references` | asset-intelligence | offline | asset-intelligence | no | n/a | Offline reverse dependency lookup — assets that reference a given `res://` path or `uid://`. |
 | `godot_open_mcp_manage_tools` | core | local | always visible | ephemeral | n/a | Per-session tool-group visibility mutator (activate/deactivate/reset/list_groups). |
 | `godot_open_mcp_navigation_agent_configure` | navigation | live | navigation | editor state | enforce | Patch clamped scalar properties on a `NavigationAgent2D`/`3D`. |
@@ -146,7 +147,7 @@ The MCP server filters `ListTools` through a per-session `ToolSessionState` so t
 |---|---|---|
 | `core` | yes | Essential entry points + the gate/verify safety surface (`ping`, `validate_edit`, `checkpoint_create`, `delta`, `apply_fix`). The only group visible in a fresh session. |
 | `typed-editor` | no | The whole typed editor surface: nodes, scenes, resources, filesystem, editor state/selection, console, screenshots, reflection. One activate brings up the full typed surface. |
-| `asset-intelligence` | no | Offline asset-graph intelligence: reverse reference lookup (`find_references`) and related dependency readers. |
+| `asset-intelligence` | no | Offline asset-graph intelligence: reverse reference lookup (`find_references`), forward/reverse dependencies (`dependencies`), and related readers. |
 | `tilemap` | no | Godot 4.3+ `TileMapLayer` tools: create a layer, assign a `TileSet`, set/erase/clear cells, list used cells. |
 | `navigation` | no | Godot 4.3+ navigation tools (2D + 3D): starter defaults, create `NavigationRegion`/`Agent`/`Link`, assign a region's navigation resource, configure agent scalars, inspect any navigation node. |
 | `particles` | no | Godot 4.3+ `GpuParticles2D`/`3D` tools (2D + 3D): starter defaults, create an emitter (+ optional initial scalars + process material), configure allow-listed + clamped scalars, start/stop emission (with optional restart), inspect any emitter. |
@@ -215,6 +216,7 @@ When the bridge is unreachable:
 - `read_compile_errors` is always-offline and never depends on the bridge — use it to diagnose a `dead_bridge` (the recovery hint from `bridge_status` points here).
 - Live-first readers fall back to disk: `scene_get_data` parses the `.tscn`; `filesystem_list` lists the directory.
 - `find_references` is always-offline and never depends on the bridge — use it to discover reverse dependencies before a move/delete.
+- `dependencies` is always-offline — use it for forward deps, reverse deps, broken edges, cycles, and optional transitive impact before destructive ops.
 - Every other live tool surfaces a structured transport error.
 
 ### No batch route
@@ -308,14 +310,17 @@ The `rules[]` and `fixes[]` arrays mirror the C# verify package and MUST stay in
 
 | Rule id | Issue code | Severity | Fix |
 |---|---|---|---|
-| `broken_references` | `broken_scene_reference` | Error | — |
+| `broken_references` | `broken_scene_reference` | Error | `relink_broken_reference` |
 | `missing_scripts` | `missing_script` | Error | `remove_missing_script` |
-| `import_health` | `orphan_import` | Warning | — |
-| `import_health` | `duplicate_uid` | Error | — |
+| `import_health` | `orphan_import` | Warning | `remove_orphan_import` |
+| `import_health` | `duplicate_uid` | Error | `fix_duplicate_uid` |
 
 | Fix id | Resolves | Safe |
 |---|---|---|
 | `remove_missing_script` | `missing_scripts` / `missing_script` | true |
+| `relink_broken_reference` | `broken_references` / `broken_scene_reference` | false |
+| `remove_orphan_import` | `import_health` / `orphan_import` | true |
+| `fix_duplicate_uid` | `import_health` / `duplicate_uid` | false |
 
 The catalog source of truth is `mcp-server/src/capabilities/rule-catalog.ts`; the builder is `mcp-server/src/capabilities/build-capabilities.ts`.
 
@@ -621,6 +626,47 @@ Reverse dependency lookup for Godot assets. Returns every asset that references 
 
 **Errors:** `missing_parameter` (neither selector), `invalid_request` (both selectors).
 
+### `godot_open_mcp_dependencies`
+
+- Route: `offline`
+- Visibility group: `asset-intelligence` (activate via `manage_tools`)
+- Read-only/mutating: read-only
+- Live editor requirement: none — scans disk; never probes the bridge
+
+Forward + reverse dependency lookup for Godot assets. Forward edges come from the target file's `[ext_resource]` header declarations; reverse edges reuse the same scanner as `find_references`. Optional `include_impact` walks the reverse graph for a bounded transitive closure ("what breaks if I delete/move this?").
+
+**Input:**
+
+- `asset_path` **or** `uid` (exactly one required).
+- `detail` (optional, default `normal`) — `summary` = counts only; `normal` = full forward + reverse edge rosters.
+- `max_results` (optional, default 100) — cap reverse-dependencies roster (forward edges are never capped).
+- `include_impact` (optional, default `false`) — include transitive reverse closure with per-node hop depth.
+- `max_impact_depth` (optional, default 5, max 20) — depth bound for the impact BFS; sets `impact.truncated` when the frontier is non-empty at this bound.
+
+**Result:**
+
+```json
+{
+  "queriedAssetPath": "res://Resources/DemoData.tres",
+  "queriedAssetUid": "uid://demotarget00001",
+  "forwardDependencies": [{ "uid": "", "assetPath": "res://Scripts/DemoData.gd", "extResourceId": "1_script", "resolved": true }],
+  "forwardCount": 1,
+  "brokenForwardUids": [],
+  "cycles": [],
+  "reverseDependencies": [{ "assetPath": "res://Scenes/UsesData.tscn", "uid": "", "kind": "scene" }],
+  "reverseCount": 1,
+  "detail": "normal",
+  "truncated": 0,
+  "_source": "offline"
+}
+```
+
+- `impact` (when `include_impact: true`) — `{ affected[{ assetPath, depth }], affectedCount, maxDepth, truncated }`.
+- `brokenForwardUids` — distinct unresolved `uid://` targets from forward declarations.
+- `cycles` — dependency cycle path lists through the queried asset (forward-graph DFS).
+
+**Errors:** `missing_parameter` (neither selector), `invalid_request` (both selectors).
+
 ### `godot_open_mcp_validate_edit`
 
 - Route: `live`
@@ -704,6 +750,9 @@ Apply (or preview) a structured fix for a verify issue.
 - `dry_run` (optional, default `true`) — `true` previews; `false` applies.
 - `paths_hint` (required for non-dry-run under `enforce`/`warn`) — res:// paths the gate should checkpoint and re-validate (e.g. the issue's `assetPath`).
 - `gate` (optional, default `off`) — `enforce` | `warn` | `off`.
+- `target_uid` (optional) — for `relink_broken_reference`: replacement `uid://` handle.
+- `target_path` (optional) — for `relink_broken_reference`: replacement `res://` path.
+- `keep_path` (optional) — for `fix_duplicate_uid`: sidecar that retains the colliding uid.
 
 **Result:**
 
@@ -713,7 +762,14 @@ Apply (or preview) a structured fix for a verify issue.
 
 **Errors:** `missing_parameter` (empty `issue_id`), `invalid_issue_id` (malformed key), `fix_not_applicable`, `fix_failed`, `fix_error`. An unknown `fix_id` returns `ok:true` with an `error.code:unknown_fix` body listing available + applicable fix ids.
 
-**Safe provider.** The initial `Safe:true` provider is `remove_missing_script` (resolves `missing_scripts|missing_script` by removing the broken script attachment from a `.tscn`/`.tres`).
+**Fix providers.**
+
+| Fix id | Safe | Notes |
+|---|---|---|
+| `remove_missing_script` | true | Removes broken `script = ExtResource("id")` from `.tscn`/`.tres`. |
+| `relink_broken_reference` | false | Repoints a broken `[ext_resource]` to `target_uid` or `target_path`. |
+| `remove_orphan_import` | true | Deletes an orphan `.import` sidecar. |
+| `fix_duplicate_uid` | false | Re-issues `uid://` on the non-`keep_path` side of a collision. |
 
 ## Node tools
 

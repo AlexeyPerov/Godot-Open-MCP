@@ -80,10 +80,16 @@ namespace GodotOpenMcp.Bridge.Editor
             FixResult result;
             try
             {
-                // P3.7 ships only the no-param remove_missing_script provider. A later phase that adds a
-                // provider needing a judgment-call param (e.g. a relink fix needing target_guid) widens
-                // this into a typed switch like Unity's ApplyFixTool.
-                result = provider.Apply(issueId);
+                var targetUid = JsonBody.GetString(body, "target_uid");
+                var targetPath = JsonBody.GetString(body, "target_path");
+                var keepPath = JsonBody.GetString(body, "keep_path");
+
+                result = provider switch
+                {
+                    RelinkBrokenReferenceFix relink => relink.Apply(issueId, targetUid, targetPath),
+                    FixDuplicateUidFix dup => dup.Apply(issueId, keepPath),
+                    _ => provider.Apply(issueId),
+                };
             }
             catch (System.Exception e)
             {

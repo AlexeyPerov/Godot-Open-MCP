@@ -63,9 +63,12 @@ namespace GodotOpenMcp.Verify.Tests.Fixes
         [Fact]
         public void TryGetFixInfo_ResolvedProviderReportsRealSafeFlag()
         {
-            FixProviderRegistry.Register(new StubProvider("safe_fix", safe: true, canFixRule: "broken_references", canFixCode: "broken_scene_reference"));
+            // Use a synthetic rule+code no default provider handles, so the stub is the first match.
+            // (P13.3 registered real providers for broken_references/import_health, which would
+            // shadow a stub registered on those codes.)
+            FixProviderRegistry.Register(new StubProvider("safe_fix", safe: true, canFixRule: "synthetic_rule", canFixCode: "synthetic_code"));
 
-            var ok = FixProviderRegistry.TryGetFixInfo("broken_references", "broken_scene_reference", out var fixId, out var safe);
+            var ok = FixProviderRegistry.TryGetFixInfo("synthetic_rule", "synthetic_code", out var fixId, out var safe);
 
             Assert.True(ok);
             Assert.Equal("safe_fix", fixId);
@@ -75,9 +78,9 @@ namespace GodotOpenMcp.Verify.Tests.Fixes
         [Fact]
         public void TryGetFixInfo_UnsafeProviderReportsUnsafe()
         {
-            FixProviderRegistry.Register(new StubProvider("risky_fix", safe: false, canFixRule: "broken_references", canFixCode: "broken_scene_reference"));
+            FixProviderRegistry.Register(new StubProvider("risky_fix", safe: false, canFixRule: "synthetic_rule", canFixCode: "synthetic_code"));
 
-            var ok = FixProviderRegistry.TryGetFixInfo("broken_references", "broken_scene_reference", out var fixId, out var safe);
+            var ok = FixProviderRegistry.TryGetFixInfo("synthetic_rule", "synthetic_code", out var fixId, out var safe);
 
             Assert.True(ok);
             Assert.Equal("risky_fix", fixId);
@@ -108,10 +111,11 @@ namespace GodotOpenMcp.Verify.Tests.Fixes
         public void TryGetFixInfo_DescribeThrows_DefaultsToUnsafe()
         {
             // If Describe throws for any reason, the registry must default to unsafe so the gate never
-            // auto-applies something it cannot reason about.
-            FixProviderRegistry.Register(new ThrowingDescribeProvider("broken_fix", "broken_references", "broken_scene_reference"));
+            // auto-applies something it cannot reason about. Use a synthetic rule+code no default
+            // provider handles (P13.3 registered real providers on broken_references/import_health).
+            FixProviderRegistry.Register(new ThrowingDescribeProvider("broken_fix", "synthetic_rule", "synthetic_code"));
 
-            var ok = FixProviderRegistry.TryGetFixInfo("broken_references", "broken_scene_reference", out var fixId, out var safe);
+            var ok = FixProviderRegistry.TryGetFixInfo("synthetic_rule", "synthetic_code", out var fixId, out var safe);
 
             Assert.True(ok);
             Assert.Equal("broken_fix", fixId);

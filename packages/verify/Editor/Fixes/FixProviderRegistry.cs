@@ -116,6 +116,9 @@ namespace GodotOpenMcp.Verify.Fixes
             if (_defaultsRegistered) return;
             _defaultsRegistered = true;
             _providers.Add(new RemoveMissingScriptFix());
+            _providers.Add(new RelinkBrokenReferenceFix());
+            _providers.Add(new RemoveOrphanImportFix());
+            _providers.Add(new FixDuplicateUidFix());
         }
 
         /// <summary>

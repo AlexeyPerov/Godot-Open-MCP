@@ -236,7 +236,10 @@ assign(
 // --- asset-intelligence (offline asset-graph tools) ------------------------
 // find_references lands first; dependencies (forward + impact) joins later.
 // defaultEnabled: false — activate via manage_tools.
-assign("asset-intelligence", ["godot_open_mcp_find_references"]);
+assign("asset-intelligence", [
+  "godot_open_mcp_find_references",
+  "godot_open_mcp_dependencies",
+]);
 
 // Domain pack groups (tilemap / navigation / particles / animation / csg)
 // were reserved as empty stubs in P8 and filled progressively by the Phase 12

@@ -14,10 +14,8 @@
 //     (safe vs unsafe); pass it to preview (dry-run) or apply.
 //   - `dry_run` defaults to TRUE — a fix is never applied unless the agent explicitly
 //     opts out of the preview. A dry-run apply bypasses the gate (it mutates nothing).
-//   - `target_*` judgment-call params (target_guid / target_texture / target_shader in
-//     Unity) are omitted: P3.7 ships only `remove_missing_script`, which takes no extra
-//     params. A later phase that adds an unsafe provider (e.g. a relink fix) widens the
-//     schema.
+//   - `target_*` judgment-call params: `target_uid` / `target_path` for
+//     `relink_broken_reference`; `keep_path` for `fix_duplicate_uid`.
 
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
@@ -75,6 +73,21 @@ export const applyFix: Tool = {
           "Gate mode for a non-dry-run apply. Default `off` (no checkpoint/validate cycle). Pass `enforce` " +
           "to roll back the fix if it introduces new errors, or `warn` to report new errors without " +
           "rolling back.",
+      },
+      target_uid: {
+        type: "string",
+        description:
+          "For `relink_broken_reference`: replacement `uid://` handle for the broken [ext_resource].",
+      },
+      target_path: {
+        type: "string",
+        description:
+          "For `relink_broken_reference`: replacement `res://` path for the broken [ext_resource].",
+      },
+      keep_path: {
+        type: "string",
+        description:
+          "For `fix_duplicate_uid`: `res://` sidecar path that should retain the colliding uid. Apply on an issue for the other sidecar.",
       },
     },
     required: ["issue_id"],

@@ -86,6 +86,7 @@ import { bridgeStatus } from "./bridge-status.js";
 import { pullEvents } from "./pull-events.js";
 import { readCompileErrors } from "./read-compile-errors.js";
 import { findReferences } from "./find-references.js";
+import { dependencies } from "./dependencies.js";
 import { manageTools } from "./manage-tools.js";
 
 /** Ordered list of every tool exposed over stdio MCP. */
@@ -283,6 +284,9 @@ export const ALL_TOOLS: Tool[] = [
   // path or uid. Group `asset-intelligence` (default-off); always-offline
   // route — never probes the bridge. Profile + paging via output-profile.ts.
   findReferences,
+  // P13.2 — dependencies: offline forward + reverse edges, cycles, impact.
+  // Group `asset-intelligence` (default-off); always-offline route.
+  dependencies,
   // P8.3 — manage_tools: per-session tool-group visibility mutator. Activates / deactivates /
   // resets / lists groups in the per-session ToolSessionState that ListTools consults to filter
   // tools. Always visible (capabilities + this tool + ping + bridge_status + pull_events +

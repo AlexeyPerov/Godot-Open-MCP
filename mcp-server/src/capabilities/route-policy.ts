@@ -65,10 +65,12 @@ const LOCAL_TOOLS: ReadonlySet<string> = new Set([
  */
 export const READ_COMPILE_ERRORS_TOOL = "godot_open_mcp_read_compile_errors";
 export const FIND_REFERENCES_TOOL = "godot_open_mcp_find_references";
+export const DEPENDENCIES_TOOL = "godot_open_mcp_dependencies";
 
 const OFFLINE_TOOLS: ReadonlySet<string> = new Set([
   READ_COMPILE_ERRORS_TOOL,
   FIND_REFERENCES_TOOL,
+  DEPENDENCIES_TOOL,
 ]);
 
 /**
