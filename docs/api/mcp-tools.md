@@ -297,7 +297,7 @@ Discover the full capability surface in one call.
     "tools": ["godot_open_mcp_apply_fix", "godot_open_mcp_checkpoint_create", "godot_open_mcp_delta", "godot_open_mcp_ping", "godot_open_mcp_validate_edit"],
     "available": true
   }],
-  "counts": { "toolsImplemented": 40, "toolsPlanned": 0, "rulesImplemented": 3, "rulesPlanned": 0, "fixesImplemented": 1, "fixesPlanned": 0 },
+  "counts": { "toolsImplemented": 40, "toolsPlanned": 0, "rulesImplemented": 4, "rulesPlanned": 0, "fixesImplemented": 1, "fixesPlanned": 0 },
   "routing": { "liveDefault": true, "policies": ["live", "local", "offline", "live-first"] }
 }
 ```
@@ -314,6 +314,12 @@ The `rules[]` and `fixes[]` arrays mirror the C# verify package and MUST stay in
 | `missing_scripts` | `missing_script` | Error | `remove_missing_script` |
 | `import_health` | `orphan_import` | Warning | `remove_orphan_import` |
 | `import_health` | `duplicate_uid` | Error | `fix_duplicate_uid` |
+| `project_health` | `project_empty_folder` | Warning | _(none in v1)_ |
+| `project_health` | `project_uid_only_folder` | Warning | _(none in v1)_ |
+| `project_health` | `project_deep_nesting` | Warning | _(none in v1)_ |
+| `project_health` | `project_large_folder` | Warning | _(none in v1)_ |
+| `project_health` | `project_broken_asset` | Error | _(none in v1)_ |
+| `project_health` | `project_empty_scene` | Warning | _(none in v1)_ |
 
 | Fix id | Resolves | Safe |
 |---|---|---|
@@ -679,7 +685,7 @@ Run a scoped read-only verify pass over res:// paths and return the health verdi
 **Input:**
 
 - `paths` (required, non-empty) — res:// asset paths to validate (e.g. `["res://Scenes/Main.tscn"]`). The verify rules scan these paths; there is no whole-project fallback.
-- `categories` (optional) — rule-id filter. When omitted/empty, every registered rule runs (`broken_references`, `missing_scripts`, `import_health`). An unknown id returns a structured `unknown_rule` body listing the available rules.
+- `categories` (optional) — rule-id filter. When omitted/empty, every registered rule runs (`broken_references`, `missing_scripts`, `import_health`, `project_health`). An unknown id returns a structured `unknown_rule` body listing the available rules.
 
 **Result:** `{ passed, issues[], categoriesRun, rulesApplied, durationMs }`.
 

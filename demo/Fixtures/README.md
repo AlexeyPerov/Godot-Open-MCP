@@ -26,6 +26,8 @@ and the manual checklist can assert it byte-stable across runs.
 | `missing-script` | `res://Fixtures/MissingScript/MissingScript.tscn` | `missing_scripts` rule | `missing_script` (Error) | no |
 | `orphan-import` | `res://Fixtures/ImportHealth/OrphanTexture.png.import` | `import_health` rule | `orphan_import` (Warning) | cleanup allowed |
 | `duplicate-uid` | `res://Fixtures/ImportHealth/DupA.txt.import` + `DupB.txt.import` | `import_health` rule | `duplicate_uid` (Error) | no |
+| `broken-asset` | `res://Fixtures/ProjectHealth/BrokenAsset.tscn` | `project_health` rule | `project_broken_asset` (Error) | no |
+| `empty-scene` | `res://Fixtures/ProjectHealth/EmptyScene.tscn` | `project_health` rule | `project_empty_scene` (Warning) | no |
 
 ## Live vs offline
 

@@ -109,6 +109,16 @@
     <Compile Include="..\Editor\Rules\ImportHealth\IImportHealthResolver.cs" Link="Source\Rules\ImportHealth\IImportHealthResolver.cs" />
     <Compile Include="..\Editor\Rules\ImportHealth\LiveImportHealthResolver.cs" Link="Source\Rules\ImportHealth\LiveImportHealthResolver.cs" />
     <Compile Include="..\Editor\Rules\ImportHealth\ImportHealthRule.cs" Link="Source\Rules\ImportHealth\ImportHealthRule.cs" />
+    <!-- P14.1 project-health rule. The rule + asset parser + resolver-contract + issue-code constants
+         are pure-managed (no Godot API), so they compile into this binary-less host directly.
+         LiveProjectHealthResolver is #if TOOLS and GodotSharp-coupled; TOOLS is defined above so it
+         compiles, but its DirAccess/FileAccess calls are never reached in tests — the fixture always
+         injects a fake IProjectHealthResolver through the rule's internal constructor. -->
+    <Compile Include="..\Editor\Rules\ProjectHealth\IssueCodes.cs" Link="Source\Rules\ProjectHealth\IssueCodes.cs" />
+    <Compile Include="..\Editor\Rules\ProjectHealth\IProjectHealthResolver.cs" Link="Source\Rules\ProjectHealth\IProjectHealthResolver.cs" />
+    <Compile Include="..\Editor\Rules\ProjectHealth\ProjectAssetParser.cs" Link="Source\Rules\ProjectHealth\ProjectAssetParser.cs" />
+    <Compile Include="..\Editor\Rules\ProjectHealth\LiveProjectHealthResolver.cs" Link="Source\Rules\ProjectHealth\LiveProjectHealthResolver.cs" />
+    <Compile Include="..\Editor\Rules\ProjectHealth\ProjectHealthRule.cs" Link="Source\Rules\ProjectHealth\ProjectHealthRule.cs" />
   </ItemGroup>
 
 </Project>

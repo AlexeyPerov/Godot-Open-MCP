@@ -1,0 +1,8 @@
+[gd_scene load_steps=2 format=3]
+
+; Broken-asset fixture for the project_health verify rule.
+; The file opens with a valid [gd_scene] header but its body has NO [node]
+; declaration — a scene without a root node is structurally broken (Godot will
+; refuse to load it). The rule MUST emit `project_broken_asset` (Error) for
+; this file when scanned live. See demo/Fixtures/README.md.
+[ext_resource type="Script" path="res://Scripts/ValidFixture.gd" id="1_valid"]

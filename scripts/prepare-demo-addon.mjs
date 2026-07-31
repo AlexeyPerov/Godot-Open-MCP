@@ -25,7 +25,8 @@
 //   3. the broken .tscn / .tres / .import fixtures under demo/Fixtures/
 //      exhibit the exact patterns the live verify rules flag —
 //      `broken_scene_reference`, `missing_script`, `orphan_import`,
-//      `duplicate_uid` — by parsing the fixture text straight from disk.
+//      `duplicate_uid`, `project_broken_asset`, `project_empty_scene` — by
+//      parsing the fixture text straight from disk.
 //
 // Exit codes: 0 = success / check passed, 1 = install failure / check drift,
 // 2 = bootstrap error (CLI not built / demo missing).
@@ -187,6 +188,8 @@ if (CHECK) {
   checkMissingScriptFixture();
   checkOrphanImportFixture();
   checkDuplicateUidFixture();
+  checkBrokenAssetFixture();
+  checkEmptySceneFixture();
   log("  ✔ all broken fixtures exhibit expected patterns");
 
   log("PASS — materialization + fixture-shape check green");
@@ -320,4 +323,56 @@ function readOrDie(p) {
     fail(`fixture file ${p} is unexpectedly large (>256 KiB) — aborted read.`);
   }
   return readFileSync(p, "utf-8");
+}
+
+function checkBrokenAssetFixture() {
+  // The broken-asset fixture is a .tscn that opens with a valid [gd_scene]
+  // header but has NO [node] declaration — the project_health rule flags this
+  // as project_broken_asset (a scene with no root node is structurally broken).
+  const path = join(DEMO_DIR, "Fixtures", "ProjectHealth", "BrokenAsset.tscn");
+  const text = readOrDie(path);
+  const firstReal = text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .find((l) => l.length > 0 && !l.startsWith(";"));
+  if (!firstReal || !firstReal.startsWith("[gd_scene")) {
+    fail(
+      `broken-asset fixture ${path} must open with a [gd_scene] header (the parse must reach the node-count check, not fail on the header).`,
+    );
+  }
+  // Count [node headers at column 0 — the same convention SceneRefParser and
+  // ProjectAssetParser use.
+  const nodeCount = text
+    .split(/\r?\n/)
+    .filter((l) => /^\[node/.test(l)).length;
+  if (nodeCount !== 0) {
+    fail(
+      `broken-asset fixture ${path} must have zero [node] declarations (found ${nodeCount}) — the rule flags a nodeless scene as project_broken_asset.`,
+    );
+  }
+}
+
+function checkEmptySceneFixture() {
+  // The empty-scene fixture is a .tscn that parses cleanly but has exactly one
+  // [node] (the root) and no children — the project_health rule flags this as
+  // project_empty_scene.
+  const path = join(DEMO_DIR, "Fixtures", "ProjectHealth", "EmptyScene.tscn");
+  const text = readOrDie(path);
+  const firstReal = text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .find((l) => l.length > 0 && !l.startsWith(";"));
+  if (!firstReal || !firstReal.startsWith("[gd_scene")) {
+    fail(
+      `empty-scene fixture ${path} must open with a [gd_scene] header (it must parse as a valid scene, just an empty one).`,
+    );
+  }
+  const nodeCount = text
+    .split(/\r?\n/)
+    .filter((l) => /^\[node/.test(l)).length;
+  if (nodeCount !== 1) {
+    fail(
+      `empty-scene fixture ${path} must have exactly one [node] (the root, no children); found ${nodeCount}.`,
+    );
+  }
 }

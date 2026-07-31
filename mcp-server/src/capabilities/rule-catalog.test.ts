@@ -26,9 +26,14 @@ import {
 // Rule catalog — mirrors the C# verify package
 // ---------------------------------------------------------------------------
 
-test("rule catalog lists the three implemented Godot rules", () => {
+test("rule catalog lists the four implemented Godot rules", () => {
   const ids = RULE_CATALOG.filter((r) => r.implemented).map((r) => r.id);
-  assert.deepEqual(ids.sort(), ["broken_references", "import_health", "missing_scripts"]);
+  assert.deepEqual(ids.sort(), [
+    "broken_references",
+    "import_health",
+    "missing_scripts",
+    "project_health",
+  ]);
 });
 
 test("no planned rules in v1", () => {
@@ -71,6 +76,36 @@ test("import_health emits orphan_import (Warning) and duplicate_uid (Error)", ()
   assert.ok(dup, "duplicate_uid code present");
   assert.equal(dup!.severity, "Error");
   assert.deepEqual(dup!.fixIds, ["fix_duplicate_uid"]);
+});
+
+test("project_health emits the six structural codes with correct severities", () => {
+  // C# source of truth: packages/verify/Editor/Rules/ProjectHealth/IssueCodes.cs.
+  //   EmptyFolder      = "project_empty_folder"      (Warning)
+  //   UidOnlyFolder    = "project_uid_only_folder"   (Warning)
+  //   DeepNesting      = "project_deep_nesting"      (Warning)
+  //   LargeFolder      = "project_large_folder"      (Warning)
+  //   BrokenAsset      = "project_broken_asset"      (Error)
+  //   EmptyScene       = "project_empty_scene"       (Warning)
+  // No fix providers in v1 (folder/asset lifecycle fixes land in a later phase) — fixIds is [].
+  const rule = RULE_CATALOG.find((r) => r.id === "project_health");
+  assert.ok(rule);
+  const codes = rule!.issues.map((i) => i.code).sort();
+  assert.deepEqual(codes, [
+    "project_broken_asset",
+    "project_deep_nesting",
+    "project_empty_folder",
+    "project_empty_scene",
+    "project_large_folder",
+    "project_uid_only_folder",
+  ]);
+  for (const issue of rule!.issues) {
+    if (issue.code === "project_broken_asset") {
+      assert.equal(issue.severity, "Error", "broken_asset is an integrity break");
+    } else {
+      assert.equal(issue.severity, "Warning", `${issue.code} is cruft/complexity`);
+    }
+    assert.deepEqual(issue.fixIds, [], `${issue.code} has no fix provider in v1`);
+  }
 });
 
 test("every implemented rule declares at least one issue code", () => {

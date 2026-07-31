@@ -60,6 +60,11 @@ namespace GodotOpenMcp.Verify.Editor
             RegisteredRules.Add(new Rules.BrokenReferences.BrokenReferencesRule());
             RegisteredRules.Add(new Rules.MissingScripts.MissingScriptsRule());
             RegisteredRules.Add(new Rules.ImportHealth.ImportHealthRule());
+            // P14.1 project-health rule. Whole-tree structural checks (empty/deep/large folders, broken
+            // assets, empty scenes). Validate/Full only — see ProjectHealthRule.Scan. Pure-managed rule
+            // + parser + resolver-contract; LiveProjectHealthResolver is #if TOOLS and injected by the
+            // parameterless constructor.
+            RegisteredRules.Add(new Rules.ProjectHealth.ProjectHealthRule());
         }
 
         /// <summary>

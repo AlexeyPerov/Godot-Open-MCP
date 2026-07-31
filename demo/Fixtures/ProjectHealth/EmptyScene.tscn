@@ -1,0 +1,8 @@
+[gd_scene load_steps=1 format=3]
+
+; Empty-scene fixture for the project_health verify rule.
+; The scene parses cleanly (valid [gd_scene] header, one root node) but has NO
+; children — a created-but-never-populated scaffold. The rule MUST emit
+; `project_empty_scene` (Warning) for this file when scanned live.
+; See demo/Fixtures/README.md.
+[node name="EmptyScene" type="Node"]

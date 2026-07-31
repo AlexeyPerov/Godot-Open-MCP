@@ -8,12 +8,14 @@
 //
 // Adapted from Unity Open MCP's mcp-server/src/capabilities/rule-catalog.ts (copy for the catalog
 // contract / types; the rule/fix ENTRIES are Godot-specific). Intentional deltas for v1:
-//   - Godot has exactly three implemented rules (broken_references, missing_scripts, import_health)
-//     and one implemented fix (remove_missing_script). Unity's catalog carries many more rules
-//     (missing_references, scene_prefab_health, materials, shader_analysis, ...) and six fixes; those
-//     are omitted here because the Godot verify package does not implement them. There are no
-//     `planned` entries yet — when a rule is stubbed but not built (e.g. a future textures rule), add
-//     it with implemented:false + guidance so agents get a structured "not yet available" signal.
+//   - Godot ships four implemented rules (broken_references, missing_scripts, import_health,
+//     project_health) and four implemented fixes (remove_missing_script, relink_broken_reference,
+//     remove_orphan_import, fix_duplicate_uid). Unity's catalog carries many more rules
+//     (missing_references, scene_prefab_health, materials, shader_analysis, ...) and more fixes; the
+//     remaining Unity rules are omitted here because the Godot verify package does not implement them
+//     yet (P14 adds them incrementally). There are no `planned` entries — when a rule is stubbed but
+//     not built, add it with implemented:false + guidance so agents get a structured "not yet
+//     available" signal.
 //   - Unity's RuleIssueDescriptor carries rootCause + remediation fields (from an IssueExplainability
 //     taxonomy). Godot has no such taxonomy yet, so those fields are omitted (they are additive and
 //     safe to add later without breaking the contract).
@@ -119,6 +121,52 @@ const IMPORT_HEALTH_ISSUES: RuleIssueDescriptor[] = [
   },
 ];
 
+const PROJECT_HEALTH_ISSUES: RuleIssueDescriptor[] = [
+  {
+    code: "project_empty_folder",
+    // Warning: an empty folder is cruft, not a load break. Matches ProjectHealthRule's empty-folder
+    // finding (severity Warning). No fix provider yet — folder lifecycle fixes land in a later phase.
+    severity: "Warning",
+    fixIds: [],
+  },
+  {
+    code: "project_uid_only_folder",
+    // Warning: a folder of only .gd.uid sidecars is stale metadata (scripts moved away). Godot-specific
+    // (Unity's twin is project_meta_only_folder). Matches ProjectHealthRule's uid-only-folder finding
+    // (severity Warning).
+    severity: "Warning",
+    fixIds: [],
+  },
+  {
+    code: "project_deep_nesting",
+    // Warning: folder depth > 8 is a maintainability signal, not an integrity break. Matches
+    // ProjectHealthRule's deep-nesting finding (severity Warning).
+    severity: "Warning",
+    fixIds: [],
+  },
+  {
+    code: "project_large_folder",
+    // Warning: > 200 direct children is a maintainability/perf signal. Matches ProjectHealthRule's
+    // large-folder finding (severity Warning).
+    severity: "Warning",
+    fixIds: [],
+  },
+  {
+    code: "project_broken_asset",
+    // Error: a .tres/.tscn that fails to parse can fail scene load or silently drop resources — a real
+    // integrity break. Matches ProjectHealthRule's broken-asset finding (severity Error).
+    severity: "Error",
+    fixIds: [],
+  },
+  {
+    code: "project_empty_scene",
+    // Warning: a .tscn with only a root node is cruft (a created-but-never-populated scene), not a load
+    // break. Matches ProjectHealthRule's empty-scene finding (severity Warning).
+    severity: "Warning",
+    fixIds: [],
+  },
+];
+
 // ---------------------------------------------------------------------------
 // Full catalog
 // ---------------------------------------------------------------------------
@@ -159,6 +207,19 @@ export const RULE_CATALOG: RuleCapability[] = [
     implemented: true,
     status: "implemented",
     issues: IMPORT_HEALTH_ISSUES,
+  },
+  {
+    id: "project_health",
+    title: "Project health",
+    description:
+      "Offline project-wide structural integrity: empty folders, uid-sidecar-only folders, deep " +
+      "folder nesting, oversized flat folders, structurally broken .tres/.tscn assets, and " +
+      "root-only (empty) scenes.",
+    applicableAssetKinds: ["folder", "scene", "resource"],
+    applicableExtensions: [".tscn", ".tres"],
+    implemented: true,
+    status: "implemented",
+    issues: PROJECT_HEALTH_ISSUES,
   },
 ];
 
