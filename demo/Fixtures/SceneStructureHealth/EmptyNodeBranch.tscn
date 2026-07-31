@@ -1,0 +1,14 @@
+[gd_scene load_steps=1 format=3]
+
+; Empty-branch fixture for the scene_structure_health verify rule.
+; A non-root branch (`Container` and its child `Inner`) of bare `Node`s with no
+; content leaf — no script attachment, no instanced sub-scene, and no concrete
+; typed leaf node. This is leftover scaffolding. The rule MUST emit
+; `scene_empty_node_branch` (Warning) anchored on the topmost reportable empty
+; branch (`Root/Container`) when scanned live. The scene root is excluded (a
+; root-only scene is project_empty_scene's domain). See demo/Fixtures/README.md.
+[node name="Root" type="Node"]
+
+[node name="Container" type="Node" parent="."]
+
+[node name="Inner" type="Node" parent="Container"]

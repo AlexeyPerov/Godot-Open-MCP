@@ -65,6 +65,12 @@ namespace GodotOpenMcp.Verify.Editor
             // + parser + resolver-contract; LiveProjectHealthResolver is #if TOOLS and injected by the
             // parameterless constructor.
             RegisteredRules.Add(new Rules.ProjectHealth.ProjectHealthRule());
+            // P14.2 scene-structure rule. Offline node-tree walk of .tscn (deep nesting, high node count,
+            // wide sibling lists, duplicate sibling names, empty branches). Directory walk is Validate/Full
+            // only; a directly-scoped .tscn is analyzed in every mode — see SceneStructureHealthRule.Scan.
+            // Pure-managed rule + parser + resolver-contract; LiveSceneStructureResolver is #if TOOLS and
+            // injected by the parameterless constructor.
+            RegisteredRules.Add(new Rules.SceneStructureHealth.SceneStructureHealthRule());
         }
 
         /// <summary>

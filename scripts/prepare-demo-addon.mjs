@@ -25,8 +25,9 @@
 //   3. the broken .tscn / .tres / .import fixtures under demo/Fixtures/
 //      exhibit the exact patterns the live verify rules flag —
 //      `broken_scene_reference`, `missing_script`, `orphan_import`,
-//      `duplicate_uid`, `project_broken_asset`, `project_empty_scene` — by
-//      parsing the fixture text straight from disk.
+//      `duplicate_uid`, `project_broken_asset`, `project_empty_scene`,
+//      `scene_deep_nesting`, `scene_duplicate_node_name`,
+//      `scene_empty_node_branch` — by parsing the fixture text straight from disk.
 //
 // Exit codes: 0 = success / check passed, 1 = install failure / check drift,
 // 2 = bootstrap error (CLI not built / demo missing).
@@ -190,6 +191,9 @@ if (CHECK) {
   checkDuplicateUidFixture();
   checkBrokenAssetFixture();
   checkEmptySceneFixture();
+  checkDeepNestingFixture();
+  checkDuplicateNodeNameFixture();
+  checkEmptyNodeBranchFixture();
   log("  ✔ all broken fixtures exhibit expected patterns");
 
   log("PASS — materialization + fixture-shape check green");
@@ -373,6 +377,115 @@ function checkEmptySceneFixture() {
   if (nodeCount !== 1) {
     fail(
       `empty-scene fixture ${path} must have exactly one [node] (the root, no children); found ${nodeCount}.`,
+    );
+  }
+}
+
+function checkDeepNestingFixture() {
+  // The deep-nesting fixture is a .tscn whose node tree is a chain deep enough
+  // that at least one node exceeds the default depth threshold of 10 (root =
+  // depth 0). The scene_structure_health rule flags the over-threshold node(s)
+  // as scene_deep_nesting.
+  const path = join(DEMO_DIR, "Fixtures", "SceneStructureHealth", "DeepNesting.tscn");
+  const text = readOrDie(path);
+  const firstReal = text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .find((l) => l.length > 0 && !l.startsWith(";"));
+  if (!firstReal || !firstReal.startsWith("[gd_scene")) {
+    fail(
+      `deep-nesting fixture ${path} must open with a [gd_scene] header (it must parse as a valid scene).`,
+    );
+  }
+  const nodeHeaders = text.split(/\r?\n/).filter((l) => /^\[node/.test(l));
+  // The chain is Root(0) + N1..Nk(k); depth of the deepest node = nodeCount - 1.
+  // Require the chain to reach depth > 10 so the over-threshold node is present.
+  const maxDepth = nodeHeaders.length - 1;
+  if (maxDepth <= 10) {
+    fail(
+      `deep-nesting fixture ${path} must nest deeper than the default depth threshold 10 (found max depth ${maxDepth}); add deeper nodes so scene_deep_nesting fires.`,
+    );
+  }
+}
+
+function checkDuplicateNodeNameFixture() {
+  // The duplicate-node-name fixture has two sibling nodes sharing a name under
+  // one parent — the scene_structure_health rule flags the collision as
+  // scene_duplicate_node_name. Anchor on the `name=` attribute of `[node` headers
+  // sharing the same `parent=` value.
+  const path = join(DEMO_DIR, "Fixtures", "SceneStructureHealth", "DuplicateNodeName.tscn");
+  const text = readOrDie(path);
+  const firstReal = text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .find((l) => l.length > 0 && !l.startsWith(";"));
+  if (!firstReal || !firstReal.startsWith("[gd_scene")) {
+    fail(
+      `duplicate-node-name fixture ${path} must open with a [gd_scene] header (it must parse as a valid scene).`,
+    );
+  }
+  // Collect (parent, name) for every [node] header that has a parent= (non-root).
+  const siblings = new Map();
+  for (const line of text.split(/\r?\n/)) {
+    if (!/^\[node/.test(line)) continue;
+    const nameMatch = line.match(/\bname="([^"]+)"/);
+    const parentMatch = line.match(/\bparent="([^"]+)"/);
+    if (!nameMatch || !parentMatch) continue;
+    const key = parentMatch[1];
+    if (!siblings.has(key)) siblings.set(key, new Map());
+    const name = nameMatch[1];
+    siblings.get(key).set(name, (siblings.get(key).get(name) ?? 0) + 1);
+  }
+  let collision = null;
+  for (const [, names] of siblings) {
+    for (const [name, count] of names) {
+      if (count >= 2) {
+        collision = name;
+        break;
+      }
+    }
+    if (collision) break;
+  }
+  if (!collision) {
+    fail(
+      `duplicate-node-name fixture ${path} has no sibling-name collision — the scene_duplicate_node_name condition is gone.`,
+    );
+  }
+}
+
+function checkEmptyNodeBranchFixture() {
+  // The empty-node-branch fixture is a .tscn with a non-root branch of bare
+  // `Node`s whose subtree carries no content (no script, no instance, no
+  // concrete typed leaf) — leftover scaffolding. The scene_structure_health rule
+  // flags the topmost such branch as scene_empty_node_branch.
+  const path = join(DEMO_DIR, "Fixtures", "SceneStructureHealth", "EmptyNodeBranch.tscn");
+  const text = readOrDie(path);
+  const firstReal = text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .find((l) => l.length > 0 && !l.startsWith(";"));
+  if (!firstReal || !firstReal.startsWith("[gd_scene")) {
+    fail(
+      `empty-node-branch fixture ${path} must open with a [gd_scene] header (it must parse as a valid scene).`,
+    );
+  }
+  const nodeHeaders = text.split(/\r?\n/).filter((l) => /^\[node/.test(l));
+  if (nodeHeaders.length < 3) {
+    fail(
+      `empty-node-branch fixture ${path} must have a root plus a non-root branch of ≥1 child (found ${nodeHeaders.length} nodes); the empty-branch head must not be the scene root.`,
+    );
+  }
+  // Every non-root node must be a bare `Node` (type="Node") with no script so the
+  // branch has no content leaf.
+  const hasScript = /script\s*=\s*ExtResource\(/.test(text);
+  const nonRootConcrete = nodeHeaders.some((l) => {
+    if (!l.includes('parent="')) return false; // root excluded
+    const typeMatch = l.match(/\btype="([^"]+)"/);
+    return typeMatch && typeMatch[1] !== "Node";
+  });
+  if (hasScript || nonRootConcrete) {
+    fail(
+      `empty-node-branch fixture ${path} must not carry a script or a concrete-typed non-root node — that would make the branch non-empty and stop scene_empty_node_branch from firing.`,
     );
   }
 }

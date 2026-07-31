@@ -119,6 +119,16 @@
     <Compile Include="..\Editor\Rules\ProjectHealth\ProjectAssetParser.cs" Link="Source\Rules\ProjectHealth\ProjectAssetParser.cs" />
     <Compile Include="..\Editor\Rules\ProjectHealth\LiveProjectHealthResolver.cs" Link="Source\Rules\ProjectHealth\LiveProjectHealthResolver.cs" />
     <Compile Include="..\Editor\Rules\ProjectHealth\ProjectHealthRule.cs" Link="Source\Rules\ProjectHealth\ProjectHealthRule.cs" />
+    <!-- P14.2 scene-structure rule. The rule + node-tree parser + resolver-contract + issue-code
+         constants are pure-managed (no Godot API), so they compile into this binary-less host directly.
+         LiveSceneStructureResolver is #if TOOLS and GodotSharp-coupled; TOOLS is defined above so it
+         compiles, but its DirAccess/FileAccess calls are never reached in tests — the fixture always
+         injects a fake ISceneStructureResolver through the rule's internal constructor. -->
+    <Compile Include="..\Editor\Rules\SceneStructureHealth\IssueCodes.cs" Link="Source\Rules\SceneStructureHealth\IssueCodes.cs" />
+    <Compile Include="..\Editor\Rules\SceneStructureHealth\ISceneStructureResolver.cs" Link="Source\Rules\SceneStructureHealth\ISceneStructureResolver.cs" />
+    <Compile Include="..\Editor\Rules\SceneStructureHealth\SceneStructureParser.cs" Link="Source\Rules\SceneStructureHealth\SceneStructureParser.cs" />
+    <Compile Include="..\Editor\Rules\SceneStructureHealth\LiveSceneStructureResolver.cs" Link="Source\Rules\SceneStructureHealth\LiveSceneStructureResolver.cs" />
+    <Compile Include="..\Editor\Rules\SceneStructureHealth\SceneStructureHealthRule.cs" Link="Source\Rules\SceneStructureHealth\SceneStructureHealthRule.cs" />
   </ItemGroup>
 
 </Project>

@@ -26,13 +26,14 @@ import {
 // Rule catalog — mirrors the C# verify package
 // ---------------------------------------------------------------------------
 
-test("rule catalog lists the four implemented Godot rules", () => {
+test("rule catalog lists the five implemented Godot rules", () => {
   const ids = RULE_CATALOG.filter((r) => r.implemented).map((r) => r.id);
   assert.deepEqual(ids.sort(), [
     "broken_references",
     "import_health",
     "missing_scripts",
     "project_health",
+    "scene_structure_health",
   ]);
 });
 
@@ -104,6 +105,30 @@ test("project_health emits the six structural codes with correct severities", ()
     } else {
       assert.equal(issue.severity, "Warning", `${issue.code} is cruft/complexity`);
     }
+    assert.deepEqual(issue.fixIds, [], `${issue.code} has no fix provider in v1`);
+  }
+});
+
+test("scene_structure_health emits the five structural codes (all Warning)", () => {
+  // C# source of truth: packages/verify/Editor/Rules/SceneStructureHealth/IssueCodes.cs.
+  //   DeepNesting       = "scene_deep_nesting"        (Warning)
+  //   HighNodeCount     = "scene_high_node_count"     (Warning)
+  //   WideSiblingList   = "scene_wide_sibling_list"   (Warning)
+  //   DuplicateNodeName = "scene_duplicate_node_name" (Warning)
+  //   EmptyNodeBranch   = "scene_empty_node_branch"   (Warning)
+  // No fix providers in v1 (scene restructuring fixes land in a later phase) — fixIds is [].
+  const rule = RULE_CATALOG.find((r) => r.id === "scene_structure_health");
+  assert.ok(rule);
+  const codes = rule!.issues.map((i) => i.code).sort();
+  assert.deepEqual(codes, [
+    "scene_deep_nesting",
+    "scene_duplicate_node_name",
+    "scene_empty_node_branch",
+    "scene_high_node_count",
+    "scene_wide_sibling_list",
+  ]);
+  for (const issue of rule!.issues) {
+    assert.equal(issue.severity, "Warning", `${issue.code} is a complexity/cruft signal`);
     assert.deepEqual(issue.fixIds, [], `${issue.code} has no fix provider in v1`);
   }
 });

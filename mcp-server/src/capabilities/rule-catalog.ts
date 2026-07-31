@@ -8,14 +8,14 @@
 //
 // Adapted from Unity Open MCP's mcp-server/src/capabilities/rule-catalog.ts (copy for the catalog
 // contract / types; the rule/fix ENTRIES are Godot-specific). Intentional deltas for v1:
-//   - Godot ships four implemented rules (broken_references, missing_scripts, import_health,
-//     project_health) and four implemented fixes (remove_missing_script, relink_broken_reference,
-//     remove_orphan_import, fix_duplicate_uid). Unity's catalog carries many more rules
-//     (missing_references, scene_prefab_health, materials, shader_analysis, ...) and more fixes; the
-//     remaining Unity rules are omitted here because the Godot verify package does not implement them
-//     yet (P14 adds them incrementally). There are no `planned` entries — when a rule is stubbed but
-//     not built, add it with implemented:false + guidance so agents get a structured "not yet
-//     available" signal.
+//   - Godot ships five implemented rules (broken_references, missing_scripts, import_health,
+//     project_health, scene_structure_health) and four implemented fixes (remove_missing_script,
+//     relink_broken_reference, remove_orphan_import, fix_duplicate_uid). Unity's catalog carries many
+//     more rules (missing_references, scene_prefab_health, materials, shader_analysis, ...) and more
+//     fixes; the remaining Unity rules are omitted here because the Godot verify package does not
+//     implement them yet (P14 adds them incrementally). There are no `planned` entries — when a rule is
+//     stubbed but not built, add it with implemented:false + guidance so agents get a structured "not
+//     yet available" signal.
 //   - Unity's RuleIssueDescriptor carries rootCause + remediation fields (from an IssueExplainability
 //     taxonomy). Godot has no such taxonomy yet, so those fields are omitted (they are additive and
 //     safe to add later without breaking the contract).
@@ -167,6 +167,46 @@ const PROJECT_HEALTH_ISSUES: RuleIssueDescriptor[] = [
   },
 ];
 
+const SCENE_STRUCTURE_HEALTH_ISSUES: RuleIssueDescriptor[] = [
+  {
+    code: "scene_deep_nesting",
+    // Warning: a node deeper than 10 from the scene root is a maintainability signal, not an integrity
+    // break. Matches SceneStructureHealthRule's deep-nesting finding (severity Warning). No fix provider
+    // in v1 — scene restructuring fixes land in a later phase.
+    severity: "Warning",
+    fixIds: [],
+  },
+  {
+    code: "scene_high_node_count",
+    // Warning: a scene with > 1000 nodes is a maintainability/perf signal. Matches
+    // SceneStructureHealthRule's high-node-count finding (severity Warning).
+    severity: "Warning",
+    fixIds: [],
+  },
+  {
+    code: "scene_wide_sibling_list",
+    // Warning: a parent with > 100 children hurts navigability. Matches SceneStructureHealthRule's
+    // wide-sibling-list finding (severity Warning).
+    severity: "Warning",
+    fixIds: [],
+  },
+  {
+    code: "scene_duplicate_node_name",
+    // Warning: two siblings sharing a name makes $NodePath / get_node lookups ambiguous — a latent bug,
+    // not an immediate load break. Matches SceneStructureHealthRule's duplicate-name finding
+    // (severity Warning).
+    severity: "Warning",
+    fixIds: [],
+  },
+  {
+    code: "scene_empty_node_branch",
+    // Warning: a non-root branch with no content (no script, instance, or concrete leaf) is leftover
+    // scaffolding. Matches SceneStructureHealthRule's empty-branch finding (severity Warning).
+    severity: "Warning",
+    fixIds: [],
+  },
+];
+
 // ---------------------------------------------------------------------------
 // Full catalog
 // ---------------------------------------------------------------------------
@@ -220,6 +260,19 @@ export const RULE_CATALOG: RuleCapability[] = [
     implemented: true,
     status: "implemented",
     issues: PROJECT_HEALTH_ISSUES,
+  },
+  {
+    id: "scene_structure_health",
+    title: "Scene structure health",
+    description:
+      "Offline .tscn node-tree structural complexity: pathologically deep nesting, oversized node " +
+      "counts, very wide sibling lists, duplicate sibling names (which break $NodePath lookups), and " +
+      "empty branches (scaffolding with no content).",
+    applicableAssetKinds: ["scene"],
+    applicableExtensions: [".tscn"],
+    implemented: true,
+    status: "implemented",
+    issues: SCENE_STRUCTURE_HEALTH_ISSUES,
   },
 ];
 

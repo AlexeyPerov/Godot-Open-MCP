@@ -28,6 +28,9 @@ and the manual checklist can assert it byte-stable across runs.
 | `duplicate-uid` | `res://Fixtures/ImportHealth/DupA.txt.import` + `DupB.txt.import` | `import_health` rule | `duplicate_uid` (Error) | no |
 | `broken-asset` | `res://Fixtures/ProjectHealth/BrokenAsset.tscn` | `project_health` rule | `project_broken_asset` (Error) | no |
 | `empty-scene` | `res://Fixtures/ProjectHealth/EmptyScene.tscn` | `project_health` rule | `project_empty_scene` (Warning) | no |
+| `deep-nesting` | `res://Fixtures/SceneStructureHealth/DeepNesting.tscn` | `scene_structure_health` rule | `scene_deep_nesting` (Warning) | no |
+| `duplicate-node-name` | `res://Fixtures/SceneStructureHealth/DuplicateNodeName.tscn` | `scene_structure_health` rule | `scene_duplicate_node_name` (Warning) | no |
+| `empty-node-branch` | `res://Fixtures/SceneStructureHealth/EmptyNodeBranch.tscn` | `scene_structure_health` rule | `scene_empty_node_branch` (Warning) | no |
 
 ## Live vs offline
 
@@ -46,7 +49,9 @@ without a running Godot editor, so it asserts:
   file for the orphan; a shared `uid=` across the duplicate pair).
 
 The exact issue-code mapping (`broken_scene_reference`, `missing_script`,
-`orphan_import`, `duplicate_uid`) is then asserted **manually** by the
+`orphan_import`, `duplicate_uid`, `project_broken_asset`, `project_empty_scene`,
+`scene_deep_nesting`, `scene_duplicate_node_name`, `scene_empty_node_branch`) is
+then asserted **manually** by the
 [`demo/README.md` manual checklist](../README.md#manual-verification-checklist)
 against a real running editor, since headless CI cannot bind the bridge.
 

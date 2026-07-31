@@ -1,0 +1,12 @@
+[gd_scene load_steps=1 format=3]
+
+; Duplicate-sibling-name fixture for the scene_structure_health verify rule.
+; Two sibling nodes under the root share the name "Dup" — Godot node paths must be
+; unique among siblings, so this makes get_node("Root/Dup") ambiguous and breaks
+; $NodePath resolution. The rule MUST emit `scene_duplicate_node_name` (Warning)
+; for this file when scanned live. See demo/Fixtures/README.md.
+[node name="Root" type="Node"]
+
+[node name="Dup" type="Node" parent="."]
+
+[node name="Dup" type="Node" parent="."]

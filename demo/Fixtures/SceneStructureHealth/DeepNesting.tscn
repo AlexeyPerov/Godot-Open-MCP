@@ -1,0 +1,31 @@
+[gd_scene load_steps=1 format=3]
+
+; Deep-nesting fixture for the scene_structure_health verify rule.
+; A chain of 12 bare `Node`s: Root (depth 0) -> N1 (depth 1) -> ... -> N11 (depth 11).
+; Nodes at depth 11 exceed the default depth threshold of 10, so the rule MUST emit
+; `scene_deep_nesting` (Warning) for the deepest node when scanned live.
+; All nodes are bare `Node` containers (no script, no concrete type) so no other
+; structure signal fires on this file. See demo/Fixtures/README.md.
+[node name="Root" type="Node"]
+
+[node name="N1" type="Node" parent="."]
+
+[node name="N2" type="Node" parent="N1"]
+
+[node name="N3" type="Node" parent="N1/N2"]
+
+[node name="N4" type="Node" parent="N1/N2/N3"]
+
+[node name="N5" type="Node" parent="N1/N2/N3/N4"]
+
+[node name="N6" type="Node" parent="N1/N2/N3/N4/N5"]
+
+[node name="N7" type="Node" parent="N1/N2/N3/N4/N5/N6"]
+
+[node name="N8" type="Node" parent="N1/N2/N3/N4/N5/N6/N7"]
+
+[node name="N9" type="Node" parent="N1/N2/N3/N4/N5/N6/N7/N8"]
+
+[node name="N10" type="Node" parent="N1/N2/N3/N4/N5/N6/N7/N8/N9"]
+
+[node name="N11" type="Node" parent="N1/N2/N3/N4/N5/N6/N7/N8/N9/N10"]
