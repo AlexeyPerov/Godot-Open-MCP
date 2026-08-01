@@ -1,0 +1,14 @@
+[gd_resource type="ShaderMaterial" load_steps=2 format=3]
+
+; Missing-shader fixture for the materials_shader_health verify rule.
+; A ShaderMaterial whose `shader = ExtResource("1_shad")` slot resolves to
+; nothing: the `[ext_resource]` declares a path (`res://Fixtures/MaterialsShaderHealth/DeletedShader.gdshader`)
+; that does NOT exist on disk, and no `uid=` fallback is declared. Godot fails
+; to load the shader, so the material falls back to the pink error shader — a
+; silent render break. The rule MUST emit `materials_missing_shader` (Error)
+; anchored on this file when scanned live. See demo/Fixtures/README.md.
+[ext_resource type="Shader" path="res://Fixtures/MaterialsShaderHealth/DeletedShader.gdshader" id="1_shad"]
+
+[resource]
+shader = ExtResource("1_shad")
+shader_parameter/color = Color(1, 0, 0, 1)

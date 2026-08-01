@@ -297,7 +297,7 @@ Discover the full capability surface in one call.
     "tools": ["godot_open_mcp_apply_fix", "godot_open_mcp_checkpoint_create", "godot_open_mcp_delta", "godot_open_mcp_ping", "godot_open_mcp_validate_edit"],
     "available": true
   }],
-  "counts": { "toolsImplemented": 40, "toolsPlanned": 0, "rulesImplemented": 5, "rulesPlanned": 0, "fixesImplemented": 1, "fixesPlanned": 0 },
+  "counts": { "toolsImplemented": 40, "toolsPlanned": 0, "rulesImplemented": 6, "rulesPlanned": 0, "fixesImplemented": 1, "fixesPlanned": 0 },
   "routing": { "liveDefault": true, "policies": ["live", "local", "offline", "live-first"] }
 }
 ```
@@ -325,6 +325,11 @@ The `rules[]` and `fixes[]` arrays mirror the C# verify package and MUST stay in
 | `scene_structure_health` | `scene_wide_sibling_list` | Warning | _(none in v1)_ |
 | `scene_structure_health` | `scene_duplicate_node_name` | Warning | _(none in v1)_ |
 | `scene_structure_health` | `scene_empty_node_branch` | Warning | _(none in v1)_ |
+| `materials_shader_health` | `materials_missing_shader` | Error | _(none in v1 — future `reassign_missing_shader`)_ |
+| `materials_shader_health` | `materials_builtin_shader_only` | Warning | _(none in v1)_ |
+| `materials_shader_health` | `materials_orphan_shader_include` | Warning | _(none in v1)_ |
+| `materials_shader_health` | `materials_duplicate_material` | Warning | _(none in v1)_ |
+| `materials_shader_health` | `materials_unused_material` | Warning | _(none in v1)_ |
 
 | Fix id | Resolves | Safe |
 |---|---|---|
@@ -690,7 +695,7 @@ Run a scoped read-only verify pass over res:// paths and return the health verdi
 **Input:**
 
 - `paths` (required, non-empty) — res:// asset paths to validate (e.g. `["res://Scenes/Main.tscn"]`). The verify rules scan these paths; there is no whole-project fallback.
-- `categories` (optional) — rule-id filter. When omitted/empty, every registered rule runs (`broken_references`, `missing_scripts`, `import_health`, `project_health`, `scene_structure_health`). An unknown id returns a structured `unknown_rule` body listing the available rules.
+- `categories` (optional) — rule-id filter. When omitted/empty, every registered rule runs (`broken_references`, `missing_scripts`, `import_health`, `project_health`, `scene_structure_health`, `materials_shader_health`). An unknown id returns a structured `unknown_rule` body listing the available rules.
 
 **Result:** `{ passed, issues[], categoriesRun, rulesApplied, durationMs }`.
 

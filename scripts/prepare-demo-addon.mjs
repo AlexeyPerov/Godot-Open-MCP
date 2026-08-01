@@ -27,7 +27,8 @@
 //      `broken_scene_reference`, `missing_script`, `orphan_import`,
 //      `duplicate_uid`, `project_broken_asset`, `project_empty_scene`,
 //      `scene_deep_nesting`, `scene_duplicate_node_name`,
-//      `scene_empty_node_branch` — by parsing the fixture text straight from disk.
+//      `scene_empty_node_branch`, `materials_missing_shader`,
+//      `materials_orphan_shader_include` — by parsing the fixture text straight from disk.
 //
 // Exit codes: 0 = success / check passed, 1 = install failure / check drift,
 // 2 = bootstrap error (CLI not built / demo missing).
@@ -194,6 +195,8 @@ if (CHECK) {
   checkDeepNestingFixture();
   checkDuplicateNodeNameFixture();
   checkEmptyNodeBranchFixture();
+  checkMissingShaderFixture();
+  checkOrphanShaderIncludeFixture();
   log("  ✔ all broken fixtures exhibit expected patterns");
 
   log("PASS — materialization + fixture-shape check green");
@@ -487,5 +490,108 @@ function checkEmptyNodeBranchFixture() {
     fail(
       `empty-node-branch fixture ${path} must not carry a script or a concrete-typed non-root node — that would make the branch non-empty and stop scene_empty_node_branch from firing.`,
     );
+  }
+}
+
+function checkMissingShaderFixture() {
+  // The missing-shader fixture is a .tres ShaderMaterial whose `shader = ExtResource("id")`
+  // slot resolves to nothing — the declared [ext_resource] path does not exist on disk and no
+  // uid:// fallback is declared. The materials_shader_health rule flags it as
+  // materials_missing_shader (Error). Anchor on the [gd_resource type="ShaderMaterial"] header,
+  // a shader = ExtResource(...) body line, and an [ext_resource] path= that points at a missing file.
+  const path = join(DEMO_DIR, "Fixtures", "MaterialsShaderHealth", "MissingShader.tres");
+  const text = readOrDie(path);
+  const firstReal = text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .find((l) => l.length > 0 && !l.startsWith(";"));
+  if (!firstReal || !firstReal.startsWith("[gd_resource")) {
+    fail(
+      `missing-shader fixture ${path} must open with a [gd_resource header (it must parse as a valid material resource).`,
+    );
+  }
+  if (!/\btype="ShaderMaterial"/.test(firstReal)) {
+    fail(
+      `missing-shader fixture ${path} must be a ShaderMaterial (type="ShaderMaterial") — only a ShaderMaterial carries a shader slot.`,
+    );
+  }
+  const lines = text.split(/\r?\n/);
+  // There must be a `shader = ExtResource("id")` body line.
+  const shaderSlot = lines.find((l) => /^\s*shader\s*=\s*ExtResource\(/.test(l));
+  if (!shaderSlot) {
+    fail(
+      `missing-shader fixture ${path} must have a \`shader = ExtResource("id")\` body line — the materials_missing_shader condition is gone.`,
+    );
+  }
+  // Extract the id, then the matching [ext_resource] path=.
+  const idMatch = shaderSlot.match(/ExtResource\("([^"]+)"\)/);
+  if (!idMatch) {
+    fail(
+      `missing-shader fixture ${path} shader slot has no quoted ExtResource id — cannot resolve the shader target.`,
+    );
+  }
+  const id = idMatch[1];
+  const decl = lines.find((l) => /^\[ext_resource/.test(l) && new RegExp(`\\bid="${id}"`).test(l));
+  if (!decl) {
+    // A dangling id is also a valid missing-shader fixture (id never declared).
+    return;
+  }
+  // The declared path must point at a missing file (no uid:// fallback declared).
+  const pathMatch = decl.match(/\bpath="([^"]+)"/);
+  const uidMatch = decl.match(/\buid="([^"]+)"/);
+  if (!pathMatch) {
+    fail(
+      `missing-shader fixture ${path} [ext_resource id="${id}"] must declare a path= pointing at a missing shader file — the materials_missing_shader condition is gone.`,
+    );
+  }
+  const shaderPath = pathMatch[1];
+  if (existsSync(join(DEMO_DIR, shaderPath.replace(/^res:\/\//, "")))) {
+    fail(
+      `missing-shader fixture ${path} [ext_resource] path ${shaderPath} exists on disk — the shader would resolve and materials_missing_shader would NOT fire. Delete the referenced shader or repoint the path.`,
+    );
+  }
+  if (uidMatch) {
+    fail(
+      `missing-shader fixture ${path} [ext_resource id="${id}"] must not declare a uid= fallback — Godot resolves by uid when the path is stale, which would clear the missing-shader signal.`,
+    );
+  }
+}
+
+function checkOrphanShaderIncludeFixture() {
+  // The orphan-include fixture is a .gdshader whose `#include "..."` directive resolves to no
+  // file on disk. The materials_shader_health rule flags it as materials_orphan_shader_include
+  // (Warning). Anchor on a `#include "res://..."` (or relative) line whose target does not exist.
+  const path = join(DEMO_DIR, "Fixtures", "MaterialsShaderHealth", "OrphanShaderInclude.gdshader");
+  const text = readOrDie(path);
+  const lines = text.split(/\r?\n/);
+  const includes = lines
+    .map((l) => l.trim())
+    .filter((l) => l.startsWith("#include"))
+    .map((l) => {
+      const m = l.match(/^#include\s+"([^"]+)"/);
+      return m ? m[1] : null;
+    })
+    .filter((t) => t !== null);
+  if (includes.length === 0) {
+    fail(
+      `orphan-include fixture ${path} must have at least one \`#include "..."\` directive — the materials_orphan_shader_include condition is gone.`,
+    );
+  }
+  // Every include target must NOT exist on disk (so the rule flags it).
+  for (const target of includes) {
+    if (target.startsWith("res://")) {
+      const native = join(DEMO_DIR, target.replace(/^res:\/\//, ""));
+      if (existsSync(native)) {
+        fail(
+          `orphan-include fixture ${path} #include "${target}" resolves to an existing file — the include would resolve and materials_orphan_shader_include would NOT fire.`,
+        );
+      }
+    } else if (target.startsWith("uid://")) {
+      // A uid:// include cannot be resolved offline by the fixture check; the live rule resolves it
+      // via the uid table. Skip — the fixture deliberately uses a res:// include for determinism.
+      fail(
+        `orphan-include fixture ${path} should use a res:// (or relative) include, not uid://, so the fixture check can resolve it deterministically.`,
+      );
+    }
   }
 }

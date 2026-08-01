@@ -27,6 +27,9 @@ namespace GodotOpenMcp.Verify.Tests.Rules.ProjectHealth
     /// answers from the file-text map so a scope that names a <c>.tres</c>/<c>.tscn</c> directly parses.
     /// </para>
     /// </summary>
+    // Shares the VerifyRunner static-registry collection with VerifyRunnerTests so the registration
+    // tests below do not race with the Core runner tests under xUnit's default parallel execution.
+    [Collection("VerifyRunnerCollection")]
     public class ProjectHealthRuleTests
     {
         // ---- Asset fixtures ----------------------------------------------------

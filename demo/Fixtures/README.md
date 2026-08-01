@@ -31,6 +31,8 @@ and the manual checklist can assert it byte-stable across runs.
 | `deep-nesting` | `res://Fixtures/SceneStructureHealth/DeepNesting.tscn` | `scene_structure_health` rule | `scene_deep_nesting` (Warning) | no |
 | `duplicate-node-name` | `res://Fixtures/SceneStructureHealth/DuplicateNodeName.tscn` | `scene_structure_health` rule | `scene_duplicate_node_name` (Warning) | no |
 | `empty-node-branch` | `res://Fixtures/SceneStructureHealth/EmptyNodeBranch.tscn` | `scene_structure_health` rule | `scene_empty_node_branch` (Warning) | no |
+| `missing-shader` | `res://Fixtures/MaterialsShaderHealth/MissingShader.tres` | `materials_shader_health` rule | `materials_missing_shader` (Error) | no |
+| `orphan-shader-include` | `res://Fixtures/MaterialsShaderHealth/OrphanShaderInclude.gdshader` | `materials_shader_health` rule | `materials_orphan_shader_include` (Warning) | no |
 
 ## Live vs offline
 
@@ -50,7 +52,8 @@ without a running Godot editor, so it asserts:
 
 The exact issue-code mapping (`broken_scene_reference`, `missing_script`,
 `orphan_import`, `duplicate_uid`, `project_broken_asset`, `project_empty_scene`,
-`scene_deep_nesting`, `scene_duplicate_node_name`, `scene_empty_node_branch`) is
+`scene_deep_nesting`, `scene_duplicate_node_name`, `scene_empty_node_branch`,
+`materials_missing_shader`, `materials_orphan_shader_include`) is
 then asserted **manually** by the
 [`demo/README.md` manual checklist](../README.md#manual-verification-checklist)
 against a real running editor, since headless CI cannot bind the bridge.

@@ -20,7 +20,20 @@ namespace GodotOpenMcp.Verify.Tests.Core
     /// host — same seam strategy the bridge tests use for <c>BridgeLog</c>. Stubs never touch the
     /// editor, so no live Godot node is constructed.
     /// </para>
+    /// <para>
+    /// <b>Test isolation.</b> This class and every rule-test class that touches
+    /// <see cref="VerifyRunner"/>'s static registry (<c>RegisterDefaults</c>/<c>ClearRules</c>) carry the
+    /// <see cref="VerifyRunnerCollection"/> attribute. xUnit otherwise runs classes in parallel, and the
+    /// shared static <c>RegisteredRules</c> + <c>_defaultsRegistered</c> flag would race between a class
+    /// tearing down (<c>ClearRules</c>) and one registering — surfacing as phantom checkpoint/fingerprint
+    /// failures. The collection serializes them (mirrors the bridge's
+    /// <c>MainThreadDispatcherTests</c> collection).
+    /// </para>
     /// </summary>
+    [CollectionDefinition(nameof(VerifyRunnerCollection), DisableParallelization = true)]
+    public sealed class VerifyRunnerCollection { }
+
+    [Collection(nameof(VerifyRunnerCollection))]
     public class VerifyRunnerTests : IDisposable
     {
         public VerifyRunnerTests()

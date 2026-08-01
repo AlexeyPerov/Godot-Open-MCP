@@ -71,6 +71,13 @@ namespace GodotOpenMcp.Verify.Editor
             // Pure-managed rule + parser + resolver-contract; LiveSceneStructureResolver is #if TOOLS and
             // injected by the parameterless constructor.
             RegisteredRules.Add(new Rules.SceneStructureHealth.SceneStructureHealthRule());
+            // P14.3 materials-shader rule. Offline parse of .tres materials + .gdshader includes (missing
+            // shader, builtin-shader-only, orphan include, duplicate material, unused material). Per-asset
+            // detections run in every mode; the cross-asset duplicate/unused passes are Validate/Full only
+            // (unused reuses the P13.1 reverse-edge scan — see MaterialsShaderHealthRule.Scan).
+            // Pure-managed rule + parser + resolver-contract; LiveMaterialsShaderResolver is #if TOOLS and
+            // injected by the parameterless constructor.
+            RegisteredRules.Add(new Rules.MaterialsShaderHealth.MaterialsShaderHealthRule());
         }
 
         /// <summary>

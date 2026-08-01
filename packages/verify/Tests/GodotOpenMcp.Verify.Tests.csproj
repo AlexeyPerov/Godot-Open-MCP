@@ -129,6 +129,17 @@
     <Compile Include="..\Editor\Rules\SceneStructureHealth\SceneStructureParser.cs" Link="Source\Rules\SceneStructureHealth\SceneStructureParser.cs" />
     <Compile Include="..\Editor\Rules\SceneStructureHealth\LiveSceneStructureResolver.cs" Link="Source\Rules\SceneStructureHealth\LiveSceneStructureResolver.cs" />
     <Compile Include="..\Editor\Rules\SceneStructureHealth\SceneStructureHealthRule.cs" Link="Source\Rules\SceneStructureHealth\SceneStructureHealthRule.cs" />
+    <!-- P14.3 materials-shader rule. The rule + material/shader parser + resolver-contract + issue-code
+         constants are pure-managed (no Godot API), so they compile into this binary-less host directly.
+         LiveMaterialsShaderResolver is #if TOOLS and GodotSharp-coupled; TOOLS is defined above so it
+         compiles, but its DirAccess/ResourceLoader/ResourceUid/FileAccess calls are never reached in
+         tests — the fixture always injects a fake IMaterialsShaderResolver through the rule's internal
+         constructor. -->
+    <Compile Include="..\Editor\Rules\MaterialsShaderHealth\IssueCodes.cs" Link="Source\Rules\MaterialsShaderHealth\IssueCodes.cs" />
+    <Compile Include="..\Editor\Rules\MaterialsShaderHealth\IMaterialsShaderResolver.cs" Link="Source\Rules\MaterialsShaderHealth\IMaterialsShaderResolver.cs" />
+    <Compile Include="..\Editor\Rules\MaterialsShaderHealth\MaterialsShaderParser.cs" Link="Source\Rules\MaterialsShaderHealth\MaterialsShaderParser.cs" />
+    <Compile Include="..\Editor\Rules\MaterialsShaderHealth\LiveMaterialsShaderResolver.cs" Link="Source\Rules\MaterialsShaderHealth\LiveMaterialsShaderResolver.cs" />
+    <Compile Include="..\Editor\Rules\MaterialsShaderHealth\MaterialsShaderHealthRule.cs" Link="Source\Rules\MaterialsShaderHealth\MaterialsShaderHealthRule.cs" />
   </ItemGroup>
 
 </Project>

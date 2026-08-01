@@ -31,8 +31,9 @@ export const validateEdit: Tool = {
     "can match the catalog field), severity, code (mirrored as issueCode), assetPath, description, " +
     "optional evidence, and fixCandidates[] / fixId + fixSafe when a fix provider can resolve it. " +
     "categoriesRun and rulesApplied list the rule ids that actually ran; durationMs is the wall-clock " +
-    "scan time. Pass `categories` to narrow to a subset of known rule ids (null/empty runs all three " +
-    "registered rules: broken_references, missing_scripts, import_health). An unknown rule id returns " +
+    "scan time. Pass `categories` to narrow to a subset of known rule ids (null/empty runs every " +
+    "registered rule: broken_references, missing_scripts, import_health, project_health, " +
+    "scene_structure_health, materials_shader_health). An unknown rule id returns " +
     "a structured `error.code:unknown_rule` body (the tool still succeeds) listing the available " +
     "rules so the agent can self-correct.",
   inputSchema: {
@@ -52,7 +53,8 @@ export const validateEdit: Tool = {
         items: { type: "string" },
         description:
           "Optional rule-id filter. When omitted/empty, every registered rule runs " +
-          "(broken_references, missing_scripts, import_health). Pass specific ids to narrow the " +
+          "(broken_references, missing_scripts, import_health, project_health, " +
+          "scene_structure_health, materials_shader_health). Pass specific ids to narrow the " +
           "scan; an unknown id returns a structured unknown_rule body listing the available rules.",
       },
     },

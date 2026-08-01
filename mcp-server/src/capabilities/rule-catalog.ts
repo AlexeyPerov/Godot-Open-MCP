@@ -8,14 +8,14 @@
 //
 // Adapted from Unity Open MCP's mcp-server/src/capabilities/rule-catalog.ts (copy for the catalog
 // contract / types; the rule/fix ENTRIES are Godot-specific). Intentional deltas for v1:
-//   - Godot ships five implemented rules (broken_references, missing_scripts, import_health,
-//     project_health, scene_structure_health) and four implemented fixes (remove_missing_script,
-//     relink_broken_reference, remove_orphan_import, fix_duplicate_uid). Unity's catalog carries many
-//     more rules (missing_references, scene_prefab_health, materials, shader_analysis, ...) and more
-//     fixes; the remaining Unity rules are omitted here because the Godot verify package does not
-//     implement them yet (P14 adds them incrementally). There are no `planned` entries — when a rule is
-//     stubbed but not built, add it with implemented:false + guidance so agents get a structured "not
-//     yet available" signal.
+//   - Godot ships six implemented rules (broken_references, missing_scripts, import_health,
+//     project_health, scene_structure_health, materials_shader_health) and four implemented fixes
+//     (remove_missing_script, relink_broken_reference, remove_orphan_import, fix_duplicate_uid). Unity's
+//     catalog carries many more rules (missing_references, scene_prefab_health, materials,
+//     shader_analysis, ...) and more fixes; the remaining Unity rules are omitted here because the Godot
+//     verify package does not implement them yet (P14 adds them incrementally). There are no `planned`
+//     entries — when a rule is stubbed but not built, add it with implemented:false + guidance so agents
+//     get a structured "not yet available" signal.
 //   - Unity's RuleIssueDescriptor carries rootCause + remediation fields (from an IssueExplainability
 //     taxonomy). Godot has no such taxonomy yet, so those fields are omitted (they are additive and
 //     safe to add later without breaking the contract).
@@ -207,6 +207,47 @@ const SCENE_STRUCTURE_HEALTH_ISSUES: RuleIssueDescriptor[] = [
   },
 ];
 
+const MATERIALS_SHADER_HEALTH_ISSUES: RuleIssueDescriptor[] = [
+  {
+    code: "materials_missing_shader",
+    // Error: a ShaderMaterial whose shader = ExtResource("id") is dangling or resolves to nothing falls
+    // back to the pink error shader — a render-integrity break. Matches MaterialsShaderHealthRule's
+    // missing-shader finding (severity Error). The future reassign_missing_shader fix lands in a later
+    // phase (P13.3 pattern) — fixIds is empty for now.
+    severity: "Error",
+    fixIds: [],
+  },
+  {
+    code: "materials_builtin_shader_only",
+    // Warning: a StandardMaterial3D/ORMMaterial3D with no property overrides is a never-configured
+    // default. Matches MaterialsShaderHealthRule's builtin-shader-only finding (severity Warning).
+    severity: "Warning",
+    fixIds: [],
+  },
+  {
+    code: "materials_orphan_shader_include",
+    // Warning: a .gdshader #include that does not resolve on disk (offline may false-positive on a
+    // global-search-path-only include, hence Warning not Error). Matches MaterialsShaderHealthRule's
+    // orphan-include finding (severity Warning). Greenfield for Godot.
+    severity: "Warning",
+    fixIds: [],
+  },
+  {
+    code: "materials_duplicate_material",
+    // Warning: two .tres materials with identical normalized property sets — one is redundant. Matches
+    // MaterialsShaderHealthRule's duplicate-material finding (severity Warning, Full-mode only).
+    severity: "Warning",
+    fixIds: [],
+  },
+  {
+    code: "materials_unused_material",
+    // Warning: a .tres material not referenced by any scene/resource/script (P13.1 reverse-edge scan).
+    // Matches MaterialsShaderHealthRule's unused-material finding (severity Warning, Full-mode only).
+    severity: "Warning",
+    fixIds: [],
+  },
+];
+
 // ---------------------------------------------------------------------------
 // Full catalog
 // ---------------------------------------------------------------------------
@@ -273,6 +314,20 @@ export const RULE_CATALOG: RuleCapability[] = [
     implemented: true,
     status: "implemented",
     issues: SCENE_STRUCTURE_HEALTH_ISSUES,
+  },
+  {
+    id: "materials_shader_health",
+    title: "Materials & shader health",
+    description:
+      "Offline material + shader integrity: ShaderMaterials whose shader reference is missing, " +
+      "StandardMaterial3D/ORMMaterial3D using only builtin defaults, .gdshader #include paths that do " +
+      "not resolve, duplicate .tres materials, and materials not referenced anywhere (P13.1 reverse-edge " +
+      "scan).",
+    applicableAssetKinds: ["resource", "shader"],
+    applicableExtensions: [".tres", ".gdshader"],
+    implemented: true,
+    status: "implemented",
+    issues: MATERIALS_SHADER_HEALTH_ISSUES,
   },
 ];
 

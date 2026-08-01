@@ -22,6 +22,9 @@ namespace GodotOpenMcp.Verify.Tests.Rules.SceneStructureHealth
     /// <see cref="InMemoryResolver"/> + an in-memory file map, so no Godot API and no disk access — the
     /// binary-less xUnit host runs the full rule.
     /// </summary>
+    // Shares the VerifyRunner static-registry collection with VerifyRunnerTests so the registration
+    // tests below do not race with the Core runner tests under xUnit's default parallel execution.
+    [Collection("VerifyRunnerCollection")]
     public class SceneStructureHealthRuleTests
     {
         // ---- Scene fixtures ----------------------------------------------------
