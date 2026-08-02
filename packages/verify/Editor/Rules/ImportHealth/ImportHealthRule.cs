@@ -252,15 +252,19 @@ namespace GodotOpenMcp.Verify.Rules.ImportHealth
 
         private static VerifyIssue MakeOrphanIssue(ImportFileDecl decl, string description)
         {
+            // P14.5: materialize the explainability taxonomy (rootCause + remediation) onto the issue.
+            IssueExplainability.TryGet(RuleId, IssueCodes.OrphanImport, out var ex);
             return new VerifyIssue(RuleId, VerifySeverity.Warning, decl.SidecarPath,
-                IssueCodes.OrphanImport, description, BuildOrphanEvidence(decl));
+                IssueCodes.OrphanImport, description, BuildOrphanEvidence(decl), ex?.RootCause, ex?.Remediation);
         }
 
         private static VerifyIssue MakeDuplicateUidIssue(
             string sidecar, string uid, IReadOnlyList<string> conflicting, string description)
         {
+            // P14.5: materialize the explainability taxonomy (rootCause + remediation) onto the issue.
+            IssueExplainability.TryGet(RuleId, IssueCodes.DuplicateUid, out var ex);
             return new VerifyIssue(RuleId, VerifySeverity.Error, sidecar,
-                IssueCodes.DuplicateUid, description, BuildDuplicateEvidence(uid, conflicting));
+                IssueCodes.DuplicateUid, description, BuildDuplicateEvidence(uid, conflicting), ex?.RootCause, ex?.Remediation);
         }
 
         private static IReadOnlyDictionary<string, string> BuildOrphanEvidence(ImportFileDecl decl)

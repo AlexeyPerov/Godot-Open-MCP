@@ -106,6 +106,19 @@ namespace GodotOpenMcp.Bridge.Editor
                 sb.Append("\"assetPath\":").Append(BridgeJson.EscapeString(issue.AssetPath)).Append(',');
                 sb.Append("\"description\":").Append(BridgeJson.EscapeString(issue.Description));
 
+                // P14.5 — surface the explainability taxonomy (rootCause + remediation) so an agent can
+                // branch on the stable root-cause code and read the clean remediation guidance. Both are
+                // optional on VerifyIssue; omit the fields entirely when a rule did not supply them (older
+                // issues / pre-P14.5 paths) so the envelope stays backward-compatible.
+                if (!string.IsNullOrEmpty(issue.RootCause))
+                {
+                    sb.Append(",\"rootCause\":").Append(BridgeJson.EscapeString(issue.RootCause));
+                }
+                if (!string.IsNullOrEmpty(issue.Remediation))
+                {
+                    sb.Append(",\"remediation\":").Append(BridgeJson.EscapeString(issue.Remediation));
+                }
+
                 if (issue.Evidence != null && issue.Evidence.Count > 0)
                 {
                     sb.Append(",\"evidence\":{");

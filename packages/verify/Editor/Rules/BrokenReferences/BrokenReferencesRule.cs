@@ -209,8 +209,11 @@ namespace GodotOpenMcp.Verify.Rules.BrokenReferences
             // Severity is Error per the P3.2 acceptance criteria ("surfaced as broken_scene_reference
             // errors") — a broken reference means the scene will fail to load or load with a null, which
             // is a gate failure, not a warning.
+            //
+            // P14.5: materialize the explainability taxonomy (rootCause + remediation) onto the issue.
+            IssueExplainability.TryGet(RuleId, IssueCodes.BrokenSceneReference, out var ex);
             return new VerifyIssue(RuleId, VerifySeverity.Error, assetPath,
-                IssueCodes.BrokenSceneReference, description, evidence);
+                IssueCodes.BrokenSceneReference, description, evidence, ex?.RootCause, ex?.Remediation);
         }
 
         private static IReadOnlyDictionary<string, string> BuildEvidence(string kind, ExtResourceDecl ext, string target)

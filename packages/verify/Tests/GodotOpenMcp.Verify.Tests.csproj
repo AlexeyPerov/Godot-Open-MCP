@@ -65,6 +65,7 @@
     <Compile Include="..\Editor\Core\VerifySeverity.cs" Link="Source\VerifySeverity.cs" />
     <Compile Include="..\Editor\Core\VerifyScope.cs" Link="Source\VerifyScope.cs" />
     <Compile Include="..\Editor\Core\VerifyIssue.cs" Link="Source\VerifyIssue.cs" />
+    <Compile Include="..\Editor\Core\IssueExplainability.cs" Link="Source\IssueExplainability.cs" />
     <Compile Include="..\Editor\Core\IssueKey.cs" Link="Source\IssueKey.cs" />
     <Compile Include="..\Editor\Core\IVerifyRule.cs" Link="Source\IVerifyRule.cs" />
     <Compile Include="..\Editor\Core\VerifyResult.cs" Link="Source\VerifyResult.cs" />
@@ -151,6 +152,17 @@
     <Compile Include="..\Editor\Rules\ScriptAudit\ScriptClassParser.cs" Link="Source\Rules\ScriptAudit\ScriptClassParser.cs" />
     <Compile Include="..\Editor\Rules\ScriptAudit\LiveScriptAuditResolver.cs" Link="Source\Rules\ScriptAudit\LiveScriptAuditResolver.cs" />
     <Compile Include="..\Editor\Rules\ScriptAudit\ScriptAuditRule.cs" Link="Source\Rules\ScriptAudit\ScriptAuditRule.cs" />
+
+    <!-- P14.5 animation-analysis rule. Same pure-managed discipline as the sibling P14 rules: IssueCodes +
+         AnimationParser + AnimationAnalysisRule + IAnimationAnalysisResolver are pure-managed and compile
+         directly; LiveAnimationAnalysisResolver is #if TOOLS and GodotSharp-coupled; TOOLS is defined above
+         so it compiles, but its DirAccess/FileAccess/ResourceUID calls are never reached in tests — the
+         fixture injects a fake IAnimationAnalysisResolver through the rule's internal constructor. -->
+    <Compile Include="..\Editor\Rules\AnimationAnalysis\IssueCodes.cs" Link="Source\Rules\AnimationAnalysis\IssueCodes.cs" />
+    <Compile Include="..\Editor\Rules\AnimationAnalysis\IAnimationAnalysisResolver.cs" Link="Source\Rules\AnimationAnalysis\IAnimationAnalysisResolver.cs" />
+    <Compile Include="..\Editor\Rules\AnimationAnalysis\AnimationParser.cs" Link="Source\Rules\AnimationAnalysis\AnimationParser.cs" />
+    <Compile Include="..\Editor\Rules\AnimationAnalysis\LiveAnimationAnalysisResolver.cs" Link="Source\Rules\AnimationAnalysis\LiveAnimationAnalysisResolver.cs" />
+    <Compile Include="..\Editor\Rules\AnimationAnalysis\AnimationAnalysisRule.cs" Link="Source\Rules\AnimationAnalysis\AnimationAnalysisRule.cs" />
   </ItemGroup>
 
 </Project>

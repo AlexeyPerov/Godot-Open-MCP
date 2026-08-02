@@ -26,9 +26,10 @@ import {
 // Rule catalog — mirrors the C# verify package
 // ---------------------------------------------------------------------------
 
-test("rule catalog lists the seven implemented Godot rules", () => {
+test("rule catalog lists the eight implemented Godot rules", () => {
   const ids = RULE_CATALOG.filter((r) => r.implemented).map((r) => r.id);
   assert.deepEqual(ids.sort(), [
+    "animation_analysis",
     "broken_references",
     "import_health",
     "materials_shader_health",
@@ -183,6 +184,34 @@ test("script_audit emits the three script-class codes (all Warning)", () => {
   }
 });
 
+test("animation_analysis emits the five animation codes with correct severities", () => {
+  // C# source of truth: packages/verify/Editor/Rules/AnimationAnalysis/IssueCodes.cs.
+  //   MissingClip       = "missing_clip"        (Error)
+  //   EmptyClip         = "empty_clip"          (Warning)
+  //   UnreachableState  = "unreachable_state"   (Warning, Full-only)
+  //   ParameterMismatch = "parameter_mismatch"  (Warning, Full-only)
+  //   DuplicateClip     = "duplicate_clip"      (Warning, Full-only scan)
+  // No fix providers in v1 (animation lifecycle fixes land in a later phase) — fixIds is [].
+  const rule = RULE_CATALOG.find((r) => r.id === "animation_analysis");
+  assert.ok(rule);
+  const codes = rule!.issues.map((i) => i.code).sort();
+  assert.deepEqual(codes, [
+    "duplicate_clip",
+    "empty_clip",
+    "missing_clip",
+    "parameter_mismatch",
+    "unreachable_state",
+  ]);
+  for (const issue of rule!.issues) {
+    if (issue.code === "missing_clip") {
+      assert.equal(issue.severity, "Error", "missing_clip is a runtime integrity break");
+    } else {
+      assert.equal(issue.severity, "Warning", `${issue.code} is cruft/complexity`);
+    }
+    assert.deepEqual(issue.fixIds, [], `${issue.code} has no fix provider in v1`);
+  }
+});
+
 test("every implemented rule declares at least one issue code", () => {
   for (const rule of implementedRules()) {
     assert.ok(rule.issues.length > 0, `rule ${rule.id} declares no issue codes`);
@@ -195,6 +224,37 @@ test("every issue severity is Error or Warning", () => {
       assert.ok(
         issue.severity === "Error" || issue.severity === "Warning",
         `issue ${rule.id}/${issue.code} has invalid severity ${issue.severity}`,
+      );
+    }
+  }
+});
+
+test("every implemented issue carries a stable rootCause", () => {
+  // P14.5 — the explainability taxonomy pins a rootCause on every implemented descriptor, mirroring the C#
+  // IssueExplainability.Table. The stable set (IssueExplainability.RootCauses): an agent may branch on any
+  // of these; anything else is a drift bug.
+  const stableRootCauses = new Set([
+    "missing_guid_reference",
+    "missing_fileid_reference",
+    "missing_script_class",
+    "missing_dependency",
+    "configuration_mismatch",
+    "structural_complexity",
+    "orphaned_meta",
+    "duplicate_guid",
+    "resource_missing",
+    "build_blocker",
+    // Godot-only codes (no Unity twin).
+    "missing_uid_reference",
+    "duplicate_uid",
+    "orphaned_import",
+  ]);
+  for (const rule of implementedRules()) {
+    for (const issue of rule.issues) {
+      assert.ok(issue.rootCause, `issue ${rule.id}/${issue.code} is missing a rootCause`);
+      assert.ok(
+        stableRootCauses.has(issue.rootCause!),
+        `issue ${rule.id}/${issue.code} rootCause '${issue.rootCause}' is not in the stable taxonomy`,
       );
     }
   }

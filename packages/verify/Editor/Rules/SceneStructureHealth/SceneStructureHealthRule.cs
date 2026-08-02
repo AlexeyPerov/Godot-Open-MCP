@@ -384,10 +384,15 @@ namespace GodotOpenMcp.Verify.Rules.SceneStructureHealth
 
         // ---- Issue construction ------------------------------------------------
 
+        // P14.5: materialize the explainability taxonomy (rootCause + remediation) onto the issue. The
+        // pair is resolved by issueCode, so each scene_structure_health code gets its own rootCause.
         private static VerifyIssue MakeIssue(
             string assetPath, VerifySeverity severity, string issueCode, string description,
             IReadOnlyDictionary<string, string> evidence)
-            => new VerifyIssue(RuleId, severity, assetPath, issueCode, description, evidence);
+        {
+            IssueExplainability.TryGet(RuleId, issueCode, out var ex);
+            return new VerifyIssue(RuleId, severity, assetPath, issueCode, description, evidence, ex?.RootCause, ex?.Remediation);
+        }
 
         private static IReadOnlyDictionary<string, string> BuildEvidence(
             string kind, string assetPath, string? nodePath = null, string? depth = null,

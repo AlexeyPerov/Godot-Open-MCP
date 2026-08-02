@@ -200,8 +200,11 @@ namespace GodotOpenMcp.Verify.Rules.MissingScripts
             // Severity is Error: a missing script means the node runs without its intended behavior (or
             // fails to load in strict modes) — a gate failure, not a warning. Matches Unity's
             // missing_script severity and the P3.2 precedent.
+            //
+            // P14.5: materialize the explainability taxonomy (rootCause + remediation) onto the issue.
+            IssueExplainability.TryGet(RuleId, IssueCodes.MissingScript, out var ex);
             return new VerifyIssue(RuleId, VerifySeverity.Error, assetPath,
-                IssueCodes.MissingScript, description, evidence);
+                IssueCodes.MissingScript, description, evidence, ex?.RootCause, ex?.Remediation);
         }
 
         private static IReadOnlyDictionary<string, string> BuildEvidence(

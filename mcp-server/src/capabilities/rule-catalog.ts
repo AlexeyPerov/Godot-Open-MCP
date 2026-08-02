@@ -8,17 +8,19 @@
 //
 // Adapted from Unity Open MCP's mcp-server/src/capabilities/rule-catalog.ts (copy for the catalog
 // contract / types; the rule/fix ENTRIES are Godot-specific). Intentional deltas for v1:
-//   - Godot ships seven implemented rules (broken_references, missing_scripts, import_health,
-//     project_health, scene_structure_health, materials_shader_health, script_audit) and four implemented
-//     fixes (remove_missing_script, relink_broken_reference, remove_orphan_import, fix_duplicate_uid).
+//   - Godot ships eight implemented rules (broken_references, missing_scripts, import_health,
+//     project_health, scene_structure_health, materials_shader_health, script_audit, animation_analysis)
+//     and four implemented fixes (remove_missing_script, relink_broken_reference, remove_orphan_import,
+//     fix_duplicate_uid).
 //     Unity's catalog carries many more rules (missing_references, scene_prefab_health, materials,
 //     shader_analysis, ...) and more fixes; the remaining Unity rules are omitted here because the Godot
 //     verify package does not implement them yet (P14 adds them incrementally). There are no `planned`
 //     entries — when a rule is stubbed but not built, add it with implemented:false + guidance so agents
 //     get a structured "not yet available" signal.
 //   - Unity's RuleIssueDescriptor carries rootCause + remediation fields (from an IssueExplainability
-//     taxonomy). Godot has no such taxonomy yet, so those fields are omitted (they are additive and
-//     safe to add later without breaking the contract).
+//     taxonomy). Godot now ships its own IssueExplainability taxonomy (P14.5) — every descriptor carries
+//     a stable `rootCause` code that mirrors the C# `IssueExplainability.Table`. The remediation copy
+//     lives on the C# side (resolved per-instance onto each VerifyIssue) and is not duplicated here.
 //
 // KEEP IN SYNC with the C# verify package on every rule/fix change — the drift-detection test in
 // rule-catalog.test.ts pins the issue codes / severities / fix mappings against the C# constants
@@ -35,6 +37,13 @@ export interface RuleIssueDescriptor {
   code: string;
   /** Default severity (`Error` | `Warning`) — matches the severity the rule's `MakeIssue` sets. */
   severity: "Error" | "Warning";
+  /**
+   * Stable root-cause code from the explainability taxonomy (P14.5). Mirrors the C#
+   * `IssueExplainability.Table[ruleId|issueCode].RootCause` — one of `IssueExplainability.RootCauses`.
+   * Agents may branch on it; the code is identical across every instance of the same issue code. Additive
+   * (optional on the type for backward-compat with planned stubs, but every implemented descriptor sets it).
+   */
+  rootCause?: string;
   /** Fix IDs that can resolve this issue code, if any (empty when no fix provider handles it yet). */
   fixIds: string[];
 }
@@ -89,6 +98,8 @@ const BROKEN_REFERENCES_ISSUES: RuleIssueDescriptor[] = [
     // Error: a broken reference can fail scene load or silently drop a node/resource. Matches
     // BrokenReferencesRule.MakeIssue (severity Error).
     severity: "Error",
+    // P14.5 rootCause — mirrors C# IssueExplainability.Table["broken_references|broken_scene_reference"].
+    rootCause: "missing_uid_reference",
     // No fix provider yet — the eventual relink/remove fix would land here.
     fixIds: ["relink_broken_reference"],
   },
@@ -100,6 +111,7 @@ const MISSING_SCRIPTS_ISSUES: RuleIssueDescriptor[] = [
     // Error: a node runs without its intended behavior (or fails to load in strict modes). Matches
     // MissingScriptsRule.MakeIssue (severity Error).
     severity: "Error",
+    rootCause: "missing_script_class",
     fixIds: ["remove_missing_script"],
   },
 ];
@@ -110,6 +122,7 @@ const IMPORT_HEALTH_ISSUES: RuleIssueDescriptor[] = [
     // Warning: an orphan .import sidecar does not break scene load (the engine ignores it after a
     // rescan) — it is project-level cruft. Matches ImportHealthRule.MakeOrphanIssue (severity Warning).
     severity: "Warning",
+    rootCause: "orphaned_import",
     fixIds: ["remove_orphan_import"],
   },
   {
@@ -117,6 +130,7 @@ const IMPORT_HEALTH_ISSUES: RuleIssueDescriptor[] = [
     // Error: a uid collision is a real integrity break — Godot refuses to reimport or silently picks
     // one. Matches ImportHealthRule.MakeDuplicateUidIssue (severity Error).
     severity: "Error",
+    rootCause: "duplicate_uid",
     fixIds: ["fix_duplicate_uid"],
   },
 ];
@@ -127,6 +141,7 @@ const PROJECT_HEALTH_ISSUES: RuleIssueDescriptor[] = [
     // Warning: an empty folder is cruft, not a load break. Matches ProjectHealthRule's empty-folder
     // finding (severity Warning). No fix provider yet — folder lifecycle fixes land in a later phase.
     severity: "Warning",
+    rootCause: "structural_complexity",
     fixIds: [],
   },
   {
@@ -135,6 +150,7 @@ const PROJECT_HEALTH_ISSUES: RuleIssueDescriptor[] = [
     // (Unity's twin is project_meta_only_folder). Matches ProjectHealthRule's uid-only-folder finding
     // (severity Warning).
     severity: "Warning",
+    rootCause: "orphaned_import",
     fixIds: [],
   },
   {
@@ -142,6 +158,7 @@ const PROJECT_HEALTH_ISSUES: RuleIssueDescriptor[] = [
     // Warning: folder depth > 8 is a maintainability signal, not an integrity break. Matches
     // ProjectHealthRule's deep-nesting finding (severity Warning).
     severity: "Warning",
+    rootCause: "structural_complexity",
     fixIds: [],
   },
   {
@@ -149,6 +166,7 @@ const PROJECT_HEALTH_ISSUES: RuleIssueDescriptor[] = [
     // Warning: > 200 direct children is a maintainability/perf signal. Matches ProjectHealthRule's
     // large-folder finding (severity Warning).
     severity: "Warning",
+    rootCause: "structural_complexity",
     fixIds: [],
   },
   {
@@ -156,6 +174,7 @@ const PROJECT_HEALTH_ISSUES: RuleIssueDescriptor[] = [
     // Error: a .tres/.tscn that fails to parse can fail scene load or silently drop resources — a real
     // integrity break. Matches ProjectHealthRule's broken-asset finding (severity Error).
     severity: "Error",
+    rootCause: "build_blocker",
     fixIds: [],
   },
   {
@@ -163,6 +182,7 @@ const PROJECT_HEALTH_ISSUES: RuleIssueDescriptor[] = [
     // Warning: a .tscn with only a root node is cruft (a created-but-never-populated scene), not a load
     // break. Matches ProjectHealthRule's empty-scene finding (severity Warning).
     severity: "Warning",
+    rootCause: "structural_complexity",
     fixIds: [],
   },
 ];
@@ -174,6 +194,7 @@ const SCENE_STRUCTURE_HEALTH_ISSUES: RuleIssueDescriptor[] = [
     // break. Matches SceneStructureHealthRule's deep-nesting finding (severity Warning). No fix provider
     // in v1 — scene restructuring fixes land in a later phase.
     severity: "Warning",
+    rootCause: "structural_complexity",
     fixIds: [],
   },
   {
@@ -181,6 +202,7 @@ const SCENE_STRUCTURE_HEALTH_ISSUES: RuleIssueDescriptor[] = [
     // Warning: a scene with > 1000 nodes is a maintainability/perf signal. Matches
     // SceneStructureHealthRule's high-node-count finding (severity Warning).
     severity: "Warning",
+    rootCause: "structural_complexity",
     fixIds: [],
   },
   {
@@ -188,6 +210,7 @@ const SCENE_STRUCTURE_HEALTH_ISSUES: RuleIssueDescriptor[] = [
     // Warning: a parent with > 100 children hurts navigability. Matches SceneStructureHealthRule's
     // wide-sibling-list finding (severity Warning).
     severity: "Warning",
+    rootCause: "structural_complexity",
     fixIds: [],
   },
   {
@@ -196,6 +219,7 @@ const SCENE_STRUCTURE_HEALTH_ISSUES: RuleIssueDescriptor[] = [
     // not an immediate load break. Matches SceneStructureHealthRule's duplicate-name finding
     // (severity Warning).
     severity: "Warning",
+    rootCause: "configuration_mismatch",
     fixIds: [],
   },
   {
@@ -203,6 +227,7 @@ const SCENE_STRUCTURE_HEALTH_ISSUES: RuleIssueDescriptor[] = [
     // Warning: a non-root branch with no content (no script, instance, or concrete leaf) is leftover
     // scaffolding. Matches SceneStructureHealthRule's empty-branch finding (severity Warning).
     severity: "Warning",
+    rootCause: "structural_complexity",
     fixIds: [],
   },
 ];
@@ -215,6 +240,7 @@ const MATERIALS_SHADER_HEALTH_ISSUES: RuleIssueDescriptor[] = [
     // missing-shader finding (severity Error). The future reassign_missing_shader fix lands in a later
     // phase (P13.3 pattern) — fixIds is empty for now.
     severity: "Error",
+    rootCause: "resource_missing",
     fixIds: [],
   },
   {
@@ -222,6 +248,7 @@ const MATERIALS_SHADER_HEALTH_ISSUES: RuleIssueDescriptor[] = [
     // Warning: a StandardMaterial3D/ORMMaterial3D with no property overrides is a never-configured
     // default. Matches MaterialsShaderHealthRule's builtin-shader-only finding (severity Warning).
     severity: "Warning",
+    rootCause: "configuration_mismatch",
     fixIds: [],
   },
   {
@@ -230,6 +257,7 @@ const MATERIALS_SHADER_HEALTH_ISSUES: RuleIssueDescriptor[] = [
     // global-search-path-only include, hence Warning not Error). Matches MaterialsShaderHealthRule's
     // orphan-include finding (severity Warning). Greenfield for Godot.
     severity: "Warning",
+    rootCause: "missing_dependency",
     fixIds: [],
   },
   {
@@ -237,6 +265,7 @@ const MATERIALS_SHADER_HEALTH_ISSUES: RuleIssueDescriptor[] = [
     // Warning: two .tres materials with identical normalized property sets — one is redundant. Matches
     // MaterialsShaderHealthRule's duplicate-material finding (severity Warning, Full-mode only).
     severity: "Warning",
+    rootCause: "structural_complexity",
     fixIds: [],
   },
   {
@@ -244,6 +273,7 @@ const MATERIALS_SHADER_HEALTH_ISSUES: RuleIssueDescriptor[] = [
     // Warning: a .tres material not referenced by any scene/resource/script (P13.1 reverse-edge scan).
     // Matches MaterialsShaderHealthRule's unused-material finding (severity Warning, Full-mode only).
     severity: "Warning",
+    rootCause: "structural_complexity",
     fixIds: [],
   },
 ];
@@ -256,6 +286,7 @@ const SCRIPT_AUDIT_ISSUES: RuleIssueDescriptor[] = [
     // compile, and a mismatch may be intentional during a refactor. Matches ScriptAuditRule's
     // class-mismatch finding (severity Warning). No fix provider in v1 — fixIds is empty.
     severity: "Warning",
+    rootCause: "configuration_mismatch",
     fixIds: [],
   },
   {
@@ -264,6 +295,7 @@ const SCRIPT_AUDIT_ISSUES: RuleIssueDescriptor[] = [
     // but limited editor type registration. Matches ScriptAuditRule's missing-class-name finding
     // (severity Warning). Emitted once per attached script. No fix provider in v1 — fixIds is empty.
     severity: "Warning",
+    rootCause: "configuration_mismatch",
     fixIds: [],
   },
   {
@@ -272,6 +304,50 @@ const SCRIPT_AUDIT_ISSUES: RuleIssueDescriptor[] = [
     // ScriptAuditRule's cyclic-class-name finding (severity Warning, Full-mode only). C# class collisions
     // are not flagged (need the compiled assembly). No fix provider in v1 — fixIds is empty.
     severity: "Warning",
+    rootCause: "configuration_mismatch",
+    fixIds: [],
+  },
+];
+
+const ANIMATION_ANALYSIS_ISSUES: RuleIssueDescriptor[] = [
+  {
+    code: "missing_clip",
+    // Error: an AnimationPlayer references a clip/library resource that does not resolve — a runtime
+    // integrity break. Matches AnimationAnalysisRule's missing-clip finding (severity Error).
+    severity: "Error",
+    rootCause: "resource_missing",
+    fixIds: [],
+  },
+  {
+    code: "empty_clip",
+    // Warning: an Animation clip declares no tracks, so it animates nothing. Matches
+    // AnimationAnalysisRule's empty-clip finding (severity Warning).
+    severity: "Warning",
+    rootCause: "configuration_mismatch",
+    fixIds: [],
+  },
+  {
+    code: "unreachable_state",
+    // Warning: an AnimationNodeStateMachine state has no inbound transition (and is not the entry state).
+    // Matches AnimationAnalysisRule's unreachable-state finding (severity Warning, Full-mode only).
+    severity: "Warning",
+    rootCause: "structural_complexity",
+    fixIds: [],
+  },
+  {
+    code: "parameter_mismatch",
+    // Warning: a state-machine transition references a parameter not in the blackboard. Matches
+    // AnimationAnalysisRule's parameter-mismatch finding (severity Warning, Full-mode only).
+    severity: "Warning",
+    rootCause: "configuration_mismatch",
+    fixIds: [],
+  },
+  {
+    code: "duplicate_clip",
+    // Warning: two or more clips have identical track data. Matches AnimationAnalysisRule's
+    // duplicate-clip finding (severity Warning, Full-mode only scan).
+    severity: "Warning",
+    rootCause: "structural_complexity",
     fixIds: [],
   },
 ];
@@ -370,6 +446,20 @@ export const RULE_CATALOG: RuleCapability[] = [
     implemented: true,
     status: "implemented",
     issues: SCRIPT_AUDIT_ISSUES,
+  },
+  {
+    id: "animation_analysis",
+    title: "Animation analysis",
+    description:
+      "Offline animation integrity: AnimationPlayer references to missing clip/library resources, " +
+      "Animation clips with zero tracks, unreachable AnimationNodeStateMachine states (no inbound " +
+      "transition), state-machine transitions referencing parameters not in the blackboard, and clips " +
+      "with identical track data (duplicates).",
+    applicableAssetKinds: ["resource", "animation"],
+    applicableExtensions: [".tres"],
+    implemented: true,
+    status: "implemented",
+    issues: ANIMATION_ANALYSIS_ISSUES,
   },
 ];
 

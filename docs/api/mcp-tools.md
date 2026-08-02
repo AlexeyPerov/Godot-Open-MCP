@@ -297,7 +297,7 @@ Discover the full capability surface in one call.
     "tools": ["godot_open_mcp_apply_fix", "godot_open_mcp_checkpoint_create", "godot_open_mcp_delta", "godot_open_mcp_ping", "godot_open_mcp_validate_edit"],
     "available": true
   }],
-  "counts": { "toolsImplemented": 40, "toolsPlanned": 0, "rulesImplemented": 7, "rulesPlanned": 0, "fixesImplemented": 1, "fixesPlanned": 0 },
+  "counts": { "toolsImplemented": 40, "toolsPlanned": 0, "rulesImplemented": 8, "rulesPlanned": 0, "fixesImplemented": 1, "fixesPlanned": 0 },
   "routing": { "liveDefault": true, "policies": ["live", "local", "offline", "live-first"] }
 }
 ```
@@ -306,7 +306,7 @@ Each capability carries an `implemented` boolean; planned-but-unbuilt items retu
 
 #### Rule + fix catalog
 
-The `rules[]` and `fixes[]` arrays mirror the C# verify package and MUST stay in sync on every rule/fix change. The drift-detection tests in `mcp-server/src/capabilities/rule-catalog.test.ts` pin the issue codes, severities, and fix mappings against the C# constants:
+The `rules[]` and `fixes[]` arrays mirror the C# verify package and MUST stay in sync on every rule/fix change. The drift-detection tests in `mcp-server/src/capabilities/rule-catalog.test.ts` pin the issue codes, severities, root-cause codes, and fix mappings against the C# constants. Each issue descriptor also carries a stable `rootCause` code from the explainability taxonomy (mirrors the C# `IssueExplainability.Table`): a machine-readable category an agent can branch on (`resource_missing`, `configuration_mismatch`, `structural_complexity`, `missing_script_class`, `orphaned_import`, …). The remediation copy lives on each emitted `VerifyIssue` (resolved per-instance) and is not duplicated in the catalog.
 
 | Rule id | Issue code | Severity | Fix |
 |---|---|---|---|
@@ -333,6 +333,11 @@ The `rules[]` and `fixes[]` arrays mirror the C# verify package and MUST stay in
 | `script_audit` | `script_class_mismatch` | Warning | _(none in v1)_ |
 | `script_audit` | `script_missing_class_name` | Warning | _(none in v1)_ |
 | `script_audit` | `script_cyclic_class_name` | Warning | _(none in v1)_ |
+| `animation_analysis` | `missing_clip` | Error | _(none in v1)_ |
+| `animation_analysis` | `empty_clip` | Warning | _(none in v1)_ |
+| `animation_analysis` | `unreachable_state` | Warning | _(none in v1)_ |
+| `animation_analysis` | `parameter_mismatch` | Warning | _(none in v1)_ |
+| `animation_analysis` | `duplicate_clip` | Warning | _(none in v1)_ |
 
 | Fix id | Resolves | Safe |
 |---|---|---|
@@ -698,12 +703,12 @@ Run a scoped read-only verify pass over res:// paths and return the health verdi
 **Input:**
 
 - `paths` (required, non-empty) — res:// asset paths to validate (e.g. `["res://Scenes/Main.tscn"]`). The verify rules scan these paths; there is no whole-project fallback.
-- `categories` (optional) — rule-id filter. When omitted/empty, every registered rule runs (`broken_references`, `missing_scripts`, `import_health`, `project_health`, `scene_structure_health`, `materials_shader_health`, `script_audit`). An unknown id returns a structured `unknown_rule` body listing the available rules.
+- `categories` (optional) — rule-id filter. When omitted/empty, every registered rule runs (`broken_references`, `missing_scripts`, `import_health`, `project_health`, `scene_structure_health`, `materials_shader_health`, `script_audit`, `animation_analysis`). An unknown id returns a structured `unknown_rule` body listing the available rules.
 
 **Result:** `{ passed, issues[], categoriesRun, rulesApplied, durationMs }`.
 
 - `passed` — strict-error: any Error severity issue flips it to `false`.
-- `issues[]` — `{ ruleId, categoryId, severity, code, issueCode, assetPath, description, evidence?, fixCandidates?, fixId?, fixSafe? }`. `categoryId` mirrors `ruleId` and `issueCode` mirrors `code` so agents can match the catalog field either way.
+- `issues[]` — `{ ruleId, categoryId, severity, code, issueCode, assetPath, description, rootCause?, remediation?, evidence?, fixCandidates?, fixId?, fixSafe? }`. `categoryId` mirrors `ruleId` and `issueCode` mirrors `code` so agents can match the catalog field either way. `rootCause` (a stable explainability code such as `resource_missing` / `configuration_mismatch`) and `remediation` (clean user-visible fix guidance) are present whenever the emitting rule attached them (every P14 rule + the backfilled P3 rules).
 - `categoriesRun` / `rulesApplied` — the rule ids that actually ran.
 - `durationMs` — wall-clock scan time.
 

@@ -316,6 +316,7 @@
     <Compile Include="..\..\verify\Editor\Core\VerifySeverity.cs" Link="Source\Verify\Core\VerifySeverity.cs" />
     <Compile Include="..\..\verify\Editor\Core\VerifyScope.cs" Link="Source\Verify\Core\VerifyScope.cs" />
     <Compile Include="..\..\verify\Editor\Core\VerifyIssue.cs" Link="Source\Verify\Core\VerifyIssue.cs" />
+    <Compile Include="..\..\verify\Editor\Core\IssueExplainability.cs" Link="Source\Verify\Core\IssueExplainability.cs" />
     <Compile Include="..\..\verify\Editor\Core\IssueKey.cs" Link="Source\Verify\Core\IssueKey.cs" />
     <Compile Include="..\..\verify\Editor\Core\IVerifyRule.cs" Link="Source\Verify\Core\IVerifyRule.cs" />
     <Compile Include="..\..\verify\Editor\Core\VerifyResult.cs" Link="Source\Verify\Core\VerifyResult.cs" />
@@ -344,6 +345,36 @@
     <Compile Include="..\..\verify\Editor\Rules\ImportHealth\IImportHealthResolver.cs" Link="Source\Verify\Rules\ImportHealth\IImportHealthResolver.cs" />
     <Compile Include="..\..\verify\Editor\Rules\ImportHealth\LiveImportHealthResolver.cs" Link="Source\Verify\Rules\ImportHealth\LiveImportHealthResolver.cs" />
     <Compile Include="..\..\verify\Editor\Rules\ImportHealth\ImportHealthRule.cs" Link="Source\Verify\Rules\ImportHealth\ImportHealthRule.cs" />
+    <!-- P14 rules — linked so VerifyRunner.RegisterDefaults (which references every rule) compiles. The
+         rule bodies are pure-managed; the live resolvers are #if TOOLS and TOOLS is defined above so they
+         compile, but their Godot-API call paths never execute in tests (the bridge test host stubs the
+         gate and only exercises pure types via VerifyGateAdapter). -->
+    <Compile Include="..\..\verify\Editor\Rules\ProjectHealth\IssueCodes.cs" Link="Source\Verify\Rules\ProjectHealth\IssueCodes.cs" />
+    <Compile Include="..\..\verify\Editor\Rules\ProjectHealth\IProjectHealthResolver.cs" Link="Source\Verify\Rules\ProjectHealth\IProjectHealthResolver.cs" />
+    <Compile Include="..\..\verify\Editor\Rules\ProjectHealth\ProjectAssetParser.cs" Link="Source\Verify\Rules\ProjectHealth\ProjectAssetParser.cs" />
+    <Compile Include="..\..\verify\Editor\Rules\ProjectHealth\LiveProjectHealthResolver.cs" Link="Source\Verify\Rules\ProjectHealth\LiveProjectHealthResolver.cs" />
+    <Compile Include="..\..\verify\Editor\Rules\ProjectHealth\ProjectHealthRule.cs" Link="Source\Verify\Rules\ProjectHealth\ProjectHealthRule.cs" />
+    <Compile Include="..\..\verify\Editor\Rules\SceneStructureHealth\IssueCodes.cs" Link="Source\Verify\Rules\SceneStructureHealth\IssueCodes.cs" />
+    <Compile Include="..\..\verify\Editor\Rules\SceneStructureHealth\ISceneStructureResolver.cs" Link="Source\Verify\Rules\SceneStructureHealth\ISceneStructureResolver.cs" />
+    <Compile Include="..\..\verify\Editor\Rules\SceneStructureHealth\SceneStructureParser.cs" Link="Source\Verify\Rules\SceneStructureHealth\SceneStructureParser.cs" />
+    <Compile Include="..\..\verify\Editor\Rules\SceneStructureHealth\LiveSceneStructureResolver.cs" Link="Source\Verify\Rules\SceneStructureHealth\LiveSceneStructureResolver.cs" />
+    <Compile Include="..\..\verify\Editor\Rules\SceneStructureHealth\SceneStructureHealthRule.cs" Link="Source\Verify\Rules\SceneStructureHealth\SceneStructureHealthRule.cs" />
+    <Compile Include="..\..\verify\Editor\Rules\MaterialsShaderHealth\IssueCodes.cs" Link="Source\Verify\Rules\MaterialsShaderHealth\IssueCodes.cs" />
+    <Compile Include="..\..\verify\Editor\Rules\MaterialsShaderHealth\IMaterialsShaderResolver.cs" Link="Source\Verify\Rules\MaterialsShaderHealth\IMaterialsShaderResolver.cs" />
+    <Compile Include="..\..\verify\Editor\Rules\MaterialsShaderHealth\MaterialsShaderParser.cs" Link="Source\Verify\Rules\MaterialsShaderHealth\MaterialsShaderParser.cs" />
+    <Compile Include="..\..\verify\Editor\Rules\MaterialsShaderHealth\LiveMaterialsShaderResolver.cs" Link="Source\Verify\Rules\MaterialsShaderHealth\LiveMaterialsShaderResolver.cs" />
+    <Compile Include="..\..\verify\Editor\Rules\MaterialsShaderHealth\MaterialsShaderHealthRule.cs" Link="Source\Verify\Rules\MaterialsShaderHealth\MaterialsShaderHealthRule.cs" />
+    <Compile Include="..\..\verify\Editor\Rules\ScriptAudit\IssueCodes.cs" Link="Source\Verify\Rules\ScriptAudit\IssueCodes.cs" />
+    <Compile Include="..\..\verify\Editor\Rules\ScriptAudit\IScriptAuditResolver.cs" Link="Source\Verify\Rules\ScriptAudit\IScriptAuditResolver.cs" />
+    <Compile Include="..\..\verify\Editor\Rules\ScriptAudit\ScriptClassParser.cs" Link="Source\Verify\Rules\ScriptAudit\ScriptClassParser.cs" />
+    <Compile Include="..\..\verify\Editor\Rules\ScriptAudit\LiveScriptAuditResolver.cs" Link="Source\Verify\Rules\ScriptAudit\LiveScriptAuditResolver.cs" />
+    <Compile Include="..\..\verify\Editor\Rules\ScriptAudit\ScriptAuditRule.cs" Link="Source\Verify\Rules\ScriptAudit\ScriptAuditRule.cs" />
+    <!-- P14.5 animation-analysis rule. -->
+    <Compile Include="..\..\verify\Editor\Rules\AnimationAnalysis\IssueCodes.cs" Link="Source\Verify\Rules\AnimationAnalysis\IssueCodes.cs" />
+    <Compile Include="..\..\verify\Editor\Rules\AnimationAnalysis\IAnimationAnalysisResolver.cs" Link="Source\Verify\Rules\AnimationAnalysis\IAnimationAnalysisResolver.cs" />
+    <Compile Include="..\..\verify\Editor\Rules\AnimationAnalysis\AnimationParser.cs" Link="Source\Verify\Rules\AnimationAnalysis\AnimationParser.cs" />
+    <Compile Include="..\..\verify\Editor\Rules\AnimationAnalysis\LiveAnimationAnalysisResolver.cs" Link="Source\Verify\Rules\AnimationAnalysis\LiveAnimationAnalysisResolver.cs" />
+    <Compile Include="..\..\verify\Editor\Rules\AnimationAnalysis\AnimationAnalysisRule.cs" Link="Source\Verify\Rules\AnimationAnalysis\AnimationAnalysisRule.cs" />
   </ItemGroup>
 
 </Project>

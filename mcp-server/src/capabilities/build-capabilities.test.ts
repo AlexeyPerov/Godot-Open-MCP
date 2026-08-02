@@ -80,7 +80,7 @@ test("buildCapabilities passes the full rule + fix catalog through by default", 
 
 test("buildCapabilities counts implemented rules + fixes accurately", () => {
   const result = buildCapabilities(DEPS);
-  assert.equal(result.counts.rulesImplemented, 7);
+  assert.equal(result.counts.rulesImplemented, 8);
   assert.equal(result.counts.rulesPlanned, 0);
   assert.equal(result.counts.fixesImplemented, 4);
   assert.equal(result.counts.fixesPlanned, 0);

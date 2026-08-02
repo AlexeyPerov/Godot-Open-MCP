@@ -80,11 +80,18 @@ namespace GodotOpenMcp.Verify.Editor
             RegisteredRules.Add(new Rules.MaterialsShaderHealth.MaterialsShaderHealthRule());
             // P14.4 script-audit rule. Offline resolve of scene `script = ExtResource(...)` against
             // `class_name` GDScript + `.cs` file-name heuristics (class mismatch, missing class_name,
-            // cyclic class_name). Per-asset detections run in every mode; the cyclic class_name pass is
+            // cyclic class name). Per-asset detections run in every mode; the cyclic class_name pass is
             // Validate/Full only (needs the full .gd set as context — see ScriptAuditRule.Scan).
             // Pure-managed rule + parser + resolver-contract; LiveScriptAuditResolver is #if TOOLS and
             // injected by the parameterless constructor.
             RegisteredRules.Add(new Rules.ScriptAudit.ScriptAuditRule());
+            // P14.5 animation-analysis rule. Offline parse of .tres AnimationPlayer / AnimationLibrary /
+            // Animation / AnimationNodeStateMachine (missing clip, empty clip, unreachable state,
+            // parameter mismatch, duplicate clip). Per-asset detections run in every mode; the duplicate-clip
+            // pass is Validate/Full only (needs the full clip set as context — see AnimationAnalysisRule.Scan).
+            // Pure-managed rule + parser + resolver-contract; LiveAnimationAnalysisResolver is #if TOOLS and
+            // injected by the parameterless constructor.
+            RegisteredRules.Add(new Rules.AnimationAnalysis.AnimationAnalysisRule());
         }
 
         /// <summary>

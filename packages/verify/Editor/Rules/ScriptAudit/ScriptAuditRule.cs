@@ -297,10 +297,15 @@ namespace GodotOpenMcp.Verify.Rules.ScriptAudit
 
         // ---- Issue construction ------------------------------------------------
 
+        // P14.5: materialize the explainability taxonomy (rootCause + remediation) onto the issue. The
+        // pair is resolved by issueCode, so each script_audit code gets its own rootCause.
         private static VerifyIssue MakeIssue(
             string assetPath, VerifySeverity severity, string issueCode, string description,
             IReadOnlyDictionary<string, string> evidence)
-            => new VerifyIssue(RuleId, severity, assetPath, issueCode, description, evidence);
+        {
+            IssueExplainability.TryGet(RuleId, issueCode, out var ex);
+            return new VerifyIssue(RuleId, severity, assetPath, issueCode, description, evidence, ex?.RootCause, ex?.Remediation);
+        }
 
         private static IReadOnlyDictionary<string, string> BuildMismatchEvidence(
             string assetPath, string recordedClass, string resolvedClass, string scriptPath, string resolution)

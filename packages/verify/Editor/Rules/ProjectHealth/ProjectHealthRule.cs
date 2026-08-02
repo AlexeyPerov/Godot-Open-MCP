@@ -340,15 +340,23 @@ namespace GodotOpenMcp.Verify.Rules.ProjectHealth
 
         // ---- Issue construction ------------------------------------------------
 
+        // P14.5: both helpers materialize the explainability taxonomy (rootCause + remediation) onto the
+        // issue. The pair is resolved by issueCode, so each project_health code gets its own rootCause.
         private static VerifyIssue MakeFolderIssue(
             string assetPath, VerifySeverity severity, string issueCode, string description,
             IReadOnlyDictionary<string, string> evidence)
-            => new VerifyIssue(RuleId, severity, assetPath, issueCode, description, evidence);
+        {
+            IssueExplainability.TryGet(RuleId, issueCode, out var ex);
+            return new VerifyIssue(RuleId, severity, assetPath, issueCode, description, evidence, ex?.RootCause, ex?.Remediation);
+        }
 
         private static VerifyIssue MakeAssetIssue(
             string assetPath, VerifySeverity severity, string issueCode, string description,
             IReadOnlyDictionary<string, string> evidence)
-            => new VerifyIssue(RuleId, severity, assetPath, issueCode, description, evidence);
+        {
+            IssueExplainability.TryGet(RuleId, issueCode, out var ex);
+            return new VerifyIssue(RuleId, severity, assetPath, issueCode, description, evidence, ex?.RootCause, ex?.Remediation);
+        }
 
         private static IReadOnlyDictionary<string, string> BuildFolderEvidence(
             string kind, string folderPath, string? childCount = null, string? depth = null,

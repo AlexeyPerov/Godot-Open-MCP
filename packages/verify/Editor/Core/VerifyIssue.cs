@@ -20,8 +20,14 @@ namespace GodotOpenMcp.Verify.Core
     ///   <item><see cref="Severity"/> is set per-issue, not per-rule, so one scanner can emit both
     ///     errors and warnings.</item>
     ///   <item><see cref="Evidence"/> is additive and optional — the per-instance trigger (broken ref
-    ///     uid, line number, expected vs actual). The static root-cause/remediation text does NOT
-    ///     live here; it is keyed by ruleId|issueCode elsewhere so it is not repeated per issue.</item>
+    ///     uid, line number, expected vs actual).</item>
+    ///   <item><see cref="RootCause"/> + <see cref="Remediation"/> (P14.5) carry the explainability
+    ///     taxonomy for this issue code: a stable machine-readable root-cause code (see
+    ///     <see cref="IssueExplainability.RootCauses"/>) + clean user-visible remediation copy. They are
+    ///     keyed by ruleId|issueCode in <see cref="IssueExplainability"/> and materialized per-instance by
+    ///     each rule's <c>MakeIssue</c> helper. Optional — the 5-arg / 6-arg constructors leave them null
+    ///     (backward-compatible: existing gate/delta logic ignores them, and <see cref="IssueKey"/> does
+    ///     not include them).</item>
     /// </list>
     /// </para>
     ///
@@ -57,13 +63,33 @@ namespace GodotOpenMcp.Verify.Core
         /// </summary>
         public IReadOnlyDictionary<string, string>? Evidence { get; }
 
+        /// <summary>
+        /// Stable, machine-readable root-cause code from the explainability taxonomy (one of
+        /// <see cref="IssueExplainability.RootCauses"/>), or null when not supplied. Agents may branch on
+        /// this; the code is identical across every instance of the same issue code. P14.5 (additive).
+        /// </summary>
+        public string? RootCause { get; }
+
+        /// <summary>
+        /// Clean, user-visible remediation guidance for this issue code (no internal ids), or null when
+        /// not supplied. Identical across every instance of the same issue code. P14.5 (additive).
+        /// </summary>
+        public string? Remediation { get; }
+
         public VerifyIssue(string ruleId, VerifySeverity severity, string assetPath, string issueCode, string description)
-            : this(ruleId, severity, assetPath, issueCode, description, null)
-        {
-        }
+            : this(ruleId, severity, assetPath, issueCode, description, null) { }
 
         public VerifyIssue(string ruleId, VerifySeverity severity, string assetPath, string issueCode,
             string description, IReadOnlyDictionary<string, string>? evidence)
+            : this(ruleId, severity, assetPath, issueCode, description, evidence, null, null) { }
+
+        /// <summary>
+        /// Full constructor (P14.5): carries evidence + the explainability taxonomy pair. Rules' MakeIssue
+        /// helpers resolve the pair via <see cref="IssueExplainability.TryGet"/> and forward it here.
+        /// </summary>
+        public VerifyIssue(string ruleId, VerifySeverity severity, string assetPath, string issueCode,
+            string description, IReadOnlyDictionary<string, string>? evidence,
+            string? rootCause, string? remediation)
         {
             RuleId = ruleId;
             Severity = severity;
@@ -71,6 +97,8 @@ namespace GodotOpenMcp.Verify.Core
             IssueCode = issueCode;
             Description = description;
             Evidence = evidence;
+            RootCause = rootCause;
+            Remediation = remediation;
         }
     }
 }
