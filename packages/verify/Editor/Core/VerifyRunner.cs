@@ -78,6 +78,13 @@ namespace GodotOpenMcp.Verify.Editor
             // Pure-managed rule + parser + resolver-contract; LiveMaterialsShaderResolver is #if TOOLS and
             // injected by the parameterless constructor.
             RegisteredRules.Add(new Rules.MaterialsShaderHealth.MaterialsShaderHealthRule());
+            // P14.4 script-audit rule. Offline resolve of scene `script = ExtResource(...)` against
+            // `class_name` GDScript + `.cs` file-name heuristics (class mismatch, missing class_name,
+            // cyclic class_name). Per-asset detections run in every mode; the cyclic class_name pass is
+            // Validate/Full only (needs the full .gd set as context — see ScriptAuditRule.Scan).
+            // Pure-managed rule + parser + resolver-contract; LiveScriptAuditResolver is #if TOOLS and
+            // injected by the parameterless constructor.
+            RegisteredRules.Add(new Rules.ScriptAudit.ScriptAuditRule());
         }
 
         /// <summary>

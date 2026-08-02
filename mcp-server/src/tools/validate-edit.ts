@@ -33,7 +33,7 @@ export const validateEdit: Tool = {
     "categoriesRun and rulesApplied list the rule ids that actually ran; durationMs is the wall-clock " +
     "scan time. Pass `categories` to narrow to a subset of known rule ids (null/empty runs every " +
     "registered rule: broken_references, missing_scripts, import_health, project_health, " +
-    "scene_structure_health, materials_shader_health). An unknown rule id returns " +
+    "scene_structure_health, materials_shader_health, script_audit). An unknown rule id returns " +
     "a structured `error.code:unknown_rule` body (the tool still succeeds) listing the available " +
     "rules so the agent can self-correct.",
   inputSchema: {
@@ -54,7 +54,7 @@ export const validateEdit: Tool = {
         description:
           "Optional rule-id filter. When omitted/empty, every registered rule runs " +
           "(broken_references, missing_scripts, import_health, project_health, " +
-          "scene_structure_health, materials_shader_health). Pass specific ids to narrow the " +
+          "scene_structure_health, materials_shader_health, script_audit). Pass specific ids to narrow the " +
           "scan; an unknown id returns a structured unknown_rule body listing the available rules.",
       },
     },

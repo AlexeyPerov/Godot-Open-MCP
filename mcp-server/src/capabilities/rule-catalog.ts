@@ -8,10 +8,10 @@
 //
 // Adapted from Unity Open MCP's mcp-server/src/capabilities/rule-catalog.ts (copy for the catalog
 // contract / types; the rule/fix ENTRIES are Godot-specific). Intentional deltas for v1:
-//   - Godot ships six implemented rules (broken_references, missing_scripts, import_health,
-//     project_health, scene_structure_health, materials_shader_health) and four implemented fixes
-//     (remove_missing_script, relink_broken_reference, remove_orphan_import, fix_duplicate_uid). Unity's
-//     catalog carries many more rules (missing_references, scene_prefab_health, materials,
+//   - Godot ships seven implemented rules (broken_references, missing_scripts, import_health,
+//     project_health, scene_structure_health, materials_shader_health, script_audit) and four implemented
+//     fixes (remove_missing_script, relink_broken_reference, remove_orphan_import, fix_duplicate_uid).
+//     Unity's catalog carries many more rules (missing_references, scene_prefab_health, materials,
 //     shader_analysis, ...) and more fixes; the remaining Unity rules are omitted here because the Godot
 //     verify package does not implement them yet (P14 adds them incrementally). There are no `planned`
 //     entries — when a rule is stubbed but not built, add it with implemented:false + guidance so agents
@@ -248,6 +248,34 @@ const MATERIALS_SHADER_HEALTH_ISSUES: RuleIssueDescriptor[] = [
   },
 ];
 
+const SCRIPT_AUDIT_ISSUES: RuleIssueDescriptor[] = [
+  {
+    code: "script_class_mismatch",
+    // Warning: a scene/resource header records script_class="X" but the resolved script file declares a
+    // different class. Advisory because offline C# resolution is heuristic (file-name fallback) without
+    // compile, and a mismatch may be intentional during a refactor. Matches ScriptAuditRule's
+    // class-mismatch finding (severity Warning). No fix provider in v1 — fixIds is empty.
+    severity: "Warning",
+    fixIds: [],
+  },
+  {
+    code: "script_missing_class_name",
+    // Warning: an attached .gd (referenced via script = ExtResource) declares no class_name — valid Godot
+    // but limited editor type registration. Matches ScriptAuditRule's missing-class-name finding
+    // (severity Warning). Emitted once per attached script. No fix provider in v1 — fixIds is empty.
+    severity: "Warning",
+    fixIds: [],
+  },
+  {
+    code: "script_cyclic_class_name",
+    // Warning: two .gd files declare the same class_name (Godot refuses to load one). Matches
+    // ScriptAuditRule's cyclic-class-name finding (severity Warning, Full-mode only). C# class collisions
+    // are not flagged (need the compiled assembly). No fix provider in v1 — fixIds is empty.
+    severity: "Warning",
+    fixIds: [],
+  },
+];
+
 // ---------------------------------------------------------------------------
 // Full catalog
 // ---------------------------------------------------------------------------
@@ -328,6 +356,20 @@ export const RULE_CATALOG: RuleCapability[] = [
     implemented: true,
     status: "implemented",
     issues: MATERIALS_SHADER_HEALTH_ISSUES,
+  },
+  {
+    id: "script_audit",
+    title: "Script audit",
+    description:
+      "Offline script-class integrity: scene/resource headers whose recorded script_class no longer " +
+      "matches the class the resolved .gd/.cs declares, attached .gd scripts with no class_name (limits " +
+      "editor type registration), and two .gd files declaring the same class_name (Godot refuses to load " +
+      "one). C# class resolution is heuristic (file-name fallback) without compile.",
+    applicableAssetKinds: ["scene", "resource", "script"],
+    applicableExtensions: [".tscn", ".tres", ".gd", ".cs"],
+    implemented: true,
+    status: "implemented",
+    issues: SCRIPT_AUDIT_ISSUES,
   },
 ];
 

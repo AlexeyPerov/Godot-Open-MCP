@@ -26,7 +26,7 @@ import {
 // Rule catalog — mirrors the C# verify package
 // ---------------------------------------------------------------------------
 
-test("rule catalog lists the six implemented Godot rules", () => {
+test("rule catalog lists the seven implemented Godot rules", () => {
   const ids = RULE_CATALOG.filter((r) => r.implemented).map((r) => r.id);
   assert.deepEqual(ids.sort(), [
     "broken_references",
@@ -35,6 +35,7 @@ test("rule catalog lists the six implemented Godot rules", () => {
     "missing_scripts",
     "project_health",
     "scene_structure_health",
+    "script_audit",
   ]);
 });
 
@@ -158,6 +159,26 @@ test("materials_shader_health emits the five materials/shader codes with correct
     } else {
       assert.equal(issue.severity, "Warning", `${issue.code} is cruft/complexity`);
     }
+    assert.deepEqual(issue.fixIds, [], `${issue.code} has no fix provider in v1`);
+  }
+});
+
+test("script_audit emits the three script-class codes (all Warning)", () => {
+  // C# source of truth: packages/verify/Editor/Rules/ScriptAudit/IssueCodes.cs.
+  //   ClassMismatch      = "script_class_mismatch"        (Warning)
+  //   MissingClassName   = "script_missing_class_name"    (Warning)
+  //   CyclicClassName    = "script_cyclic_class_name"     (Warning, Full-only)
+  // No fix providers in v1 (script lifecycle fixes land in a later phase) — fixIds is [].
+  const rule = RULE_CATALOG.find((r) => r.id === "script_audit");
+  assert.ok(rule);
+  const codes = rule!.issues.map((i) => i.code).sort();
+  assert.deepEqual(codes, [
+    "script_class_mismatch",
+    "script_cyclic_class_name",
+    "script_missing_class_name",
+  ]);
+  for (const issue of rule!.issues) {
+    assert.equal(issue.severity, "Warning", `${issue.code} is an advisory signal`);
     assert.deepEqual(issue.fixIds, [], `${issue.code} has no fix provider in v1`);
   }
 });

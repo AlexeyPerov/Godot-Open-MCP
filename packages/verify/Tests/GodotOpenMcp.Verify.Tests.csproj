@@ -140,6 +140,17 @@
     <Compile Include="..\Editor\Rules\MaterialsShaderHealth\MaterialsShaderParser.cs" Link="Source\Rules\MaterialsShaderHealth\MaterialsShaderParser.cs" />
     <Compile Include="..\Editor\Rules\MaterialsShaderHealth\LiveMaterialsShaderResolver.cs" Link="Source\Rules\MaterialsShaderHealth\LiveMaterialsShaderResolver.cs" />
     <Compile Include="..\Editor\Rules\MaterialsShaderHealth\MaterialsShaderHealthRule.cs" Link="Source\Rules\MaterialsShaderHealth\MaterialsShaderHealthRule.cs" />
+
+    <!-- P14.4 script-audit rule. Same pure-managed discipline as the sibling P14 rules: IssueCodes +
+         ScriptClassParser + ScriptAuditRule + IScriptAuditResolver are pure-managed and compile directly;
+         LiveScriptAuditResolver is #if TOOLS and GodotSharp-coupled; TOOLS is defined above so it compiles,
+         but its DirAccess calls are never reached in tests — the fixture injects a fake
+         IScriptAuditResolver through the rule's internal constructor. -->
+    <Compile Include="..\Editor\Rules\ScriptAudit\IssueCodes.cs" Link="Source\Rules\ScriptAudit\IssueCodes.cs" />
+    <Compile Include="..\Editor\Rules\ScriptAudit\IScriptAuditResolver.cs" Link="Source\Rules\ScriptAudit\IScriptAuditResolver.cs" />
+    <Compile Include="..\Editor\Rules\ScriptAudit\ScriptClassParser.cs" Link="Source\Rules\ScriptAudit\ScriptClassParser.cs" />
+    <Compile Include="..\Editor\Rules\ScriptAudit\LiveScriptAuditResolver.cs" Link="Source\Rules\ScriptAudit\LiveScriptAuditResolver.cs" />
+    <Compile Include="..\Editor\Rules\ScriptAudit\ScriptAuditRule.cs" Link="Source\Rules\ScriptAudit\ScriptAuditRule.cs" />
   </ItemGroup>
 
 </Project>
