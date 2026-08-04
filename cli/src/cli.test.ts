@@ -856,6 +856,18 @@ test("helpText: mentions key sections and options", () => {
   assert.ok(text.includes("  configure [path]"));
   assert.ok(text.includes("--get <key>"));
   assert.ok(text.includes("--set <key=value>"));
+  // P15.2 verify / baseline / regression commands + flags are advertised.
+  assert.ok(text.includes("  verify [path]"));
+  assert.ok(text.includes("  baseline create|update [path]"));
+  assert.ok(text.includes("  regression check [path]"));
+  assert.ok(text.includes("--fail-on"));
+  assert.ok(text.includes("--baseline-path"));
+  assert.ok(text.includes("--threshold <n>"));
+  assert.ok(text.includes("--per-category-threshold"));
+  assert.ok(text.includes("--platform-profile"));
+  // Exit-code contract advertises baseline-missing (2) + baseline-invalid (3).
+  assert.ok(text.includes("baseline missing"));
+  assert.ok(text.includes("baseline invalid"));
   assert.ok(!text.includes("coming soon"), "no command should still be tagged coming soon");
   assert.ok(text.includes("GODOT_PROJECT_PATH"));
   assert.ok(text.includes("GODOT_OPEN_MCP_BRIDGE_PORT"));

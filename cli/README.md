@@ -70,11 +70,16 @@ node dist/index.js wait-for-ready /absolute/path/to/MyGame
 | `ping [path] [--json]` | One-shot bridge `/ping` probe. |
 | `status [path] [--json]` | Detect a running Godot editor for the project, probe bridge health, fold the signals into a coarse `status` token aligned with the MCP `godot_open_mcp_bridge_status` tool. |
 | `configure [path] [--list] [--get <key>] [--set key=value]... [--json]` | Read / write the bridge's project-local settings (`authMode`, `bindAddress`) at `<project>/.godot-open-mcp/settings.json`. |
+| `verify [path] [--fail-on error\|warn\|none] [--json]` | Offline scan for broken references + missing scripts; exit `0` clean / `1` issues at/above `--fail-on`. No editor needed. |
+| `baseline create\|update [path] [--baseline-path <file>] [--platform-profile <p>] [--json]` | Offline scan → write a schema-v1 regression baseline JSON (default `CI/godot-open-mcp-baseline.json`). No editor needed. |
+| `regression check [path] [--baseline-path <file>] [--threshold <n>] [--per-category-threshold <ruleId=N>]... [--json]` | Compare the current scan against the baseline; exit `0` ok / `1` regression / `2` baseline missing / `3` baseline invalid. No editor needed. |
 
 Every command accepts `--json` for machine-readable output and exits `0` on
 success (including idempotent `changed: false` results), `1` on errors, and `3`
 on timeout. Failure payloads carry a stable `error.code` so CI can branch
-without parsing prose.
+without parsing prose. `regression check` adds two regression-specific codes:
+`2` (baseline missing) and `3` (baseline invalid) — see the
+[CI templates](../docs/ci/README.md) for the full contract.
 
 ## `install-plugin`
 
@@ -197,6 +202,37 @@ garbage the bridge would fail-closed on. The bridge refuses a remote bind
 (`0.0.0.0`) unless `authMode` is `required` — the CLI surfaces the same
 invariant. Tool enable/disable is **not** here; that is the MCP
 `godot_open_mcp_manage_tools` tool.
+
+## `verify` + `baseline` + `regression check` — the CI gate
+
+These three commands wrap the **offline disk scanner** — they parse `.tscn` /
+`.tres` files directly and need **no Godot editor and no running bridge**. Only
+Node.js is required, which keeps CI fast and license-free. Ready-to-use
+[GitHub Actions and GitLab CI templates](../docs/ci/README.md) wire them into a
+verify-on-PR + regression-on-main pipeline.
+
+```bash
+# Verify — scan now, fail on errors (default --fail-on error).
+node dist/index.js verify /absolute/path/MyGame --fail-on error --json
+
+# Baseline — snapshot the current issue set as the regression reference.
+node dist/index.js baseline create /absolute/path/MyGame --json
+# baseline update is an alias (overwrite the baseline after a clean main).
+
+# Regression — compare the current scan against the committed baseline.
+node dist/index.js regression check /absolute/path/MyGame \
+  --baseline-path CI/godot-open-mcp-baseline.json \
+  --threshold 0 --json
+```
+
+The offline scanner covers **`broken_references`** (an `[ext_resource]` whose
+`path=` and `uid=` both fail to resolve) and **`missing_scripts`** (a node's
+`script = ExtResource(...)` pointing at nothing). The richer verify rules
+(scene structure, materials/shaders, script audit, …) run through the **live**
+`validate_edit` surface inside the editor and are CI-excluded from the offline
+baseline; the baseline records them in `ciExcludedRules` so "absent offline" is
+never mistaken for "clean". See the [CI README](../docs/ci/README.md) for
+threshold semantics and the full exit-code contract.
 
 ## Library API
 

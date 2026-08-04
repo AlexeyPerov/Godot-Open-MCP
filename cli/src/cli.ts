@@ -27,6 +27,9 @@ import { waitForReadyCommand } from "./commands/wait-for-ready.js";
 import { pingCommand } from "./commands/ping.js";
 import { statusCommand } from "./commands/status.js";
 import { configureCommand } from "./commands/configure.js";
+import { verifyCommand, type FailOn } from "./commands/verify.js";
+import { baselineCommand } from "./commands/baseline.js";
+import { regressionCommand } from "./commands/regression.js";
 import { EXIT } from "./exit-codes.js";
 import { DEFAULT_BIN_NAME, PROJECT_PATH_ENV_VAR } from "./env.js";
 import { readPackageVersion } from "./package-version.js";
@@ -180,6 +183,44 @@ export async function runCli(opts: CliRunOptions): Promise<CliRunOutcome> {
     return { handled: true, exitCode: result.exitCode };
   }
 
+  // P15.2 — verify / baseline / regression. These wrap the offline scanner
+  // (no editor, no bridge) and give CI pipelines first-class exit codes.
+  if (parsed.command === "verify") {
+    const projectPath = resolveProjectPath(parsed);
+    const result = await verifyCommand({
+      projectPath,
+      failOn: (parsed.failOn ?? "error") as FailOn,
+    });
+    await emitResult(result, parsed.json);
+    return { handled: true, exitCode: result.exitCode };
+  }
+
+  if (parsed.command === "baseline") {
+    const projectPath = resolveProjectPath(parsed);
+    const result = await baselineCommand({
+      projectPath,
+      subcommand: parsed.subcommand as "create" | "update",
+      baselinePath: parsed.baselinePath,
+      platformProfile: parsed.platformProfile,
+    });
+    await emitResult(result, parsed.json);
+    return { handled: true, exitCode: result.exitCode };
+  }
+
+  if (parsed.command === "regression") {
+    const projectPath = resolveProjectPath(parsed);
+    const result = await regressionCommand({
+      projectPath,
+      subcommand: "check",
+      baselinePath: parsed.baselinePath,
+      threshold: parsed.threshold,
+      perCategoryThresholds: parsePerCategoryThresholds(parsed.perCategoryThresholds),
+      platformProfile: parsed.platformProfile,
+    });
+    await emitResult(result, parsed.json);
+    return { handled: true, exitCode: result.exitCode };
+  }
+
   // No command and no error — shouldn't happen (parseCliArgs defaults to
   // "help"), but guard so we never exit silently.
   await writeAndDrain(process.stdout, helpText(binName) + "\n");
@@ -197,6 +238,27 @@ function resolveProjectPath(parsed: { projectPath?: string; positionalPath?: str
   const env = process.env[PROJECT_PATH_ENV_VAR];
   if (env && env.length > 0) return env;
   return process.cwd();
+}
+
+/**
+ * Parse the repeatable `--per-category-threshold ruleId=N` flags into a
+ * `Map<ruleId, number>`. Mirrors the MCP tool's `parsePerCategoryThresholds` —
+ * invalid entries (non-numeric / negative N) are skipped rather than erroring,
+ * so a typo degrades to the global threshold instead of aborting the gate.
+ * Returns `null` when no valid entries remain (signals global-only compare).
+ */
+function parsePerCategoryThresholds(raw: string[]): Map<string, number> | null {
+  if (raw.length === 0) return null;
+  const map = new Map<string, number>();
+  for (const entry of raw) {
+    const eq = entry.indexOf("=");
+    if (eq < 0) continue;
+    const ruleId = entry.slice(0, eq).trim();
+    const n = Number(entry.slice(eq + 1));
+    if (ruleId === "" || !Number.isInteger(n) || n < 0) continue;
+    map.set(ruleId, n);
+  }
+  return map.size > 0 ? map : null;
 }
 
 /**

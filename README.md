@@ -86,6 +86,7 @@ For users:
 - [Bridge HTTP contract](docs/api/bridge-http.md) — `/ping`, `/tools/*`, `/events`, envelopes, and errors.
 - [Agent skills](docs/skills.md) — the canonical agent playbook and install-target map.
 - [CLI](cli/README.md) — `godot-open-mcp-cli` command matrix.
+- [CI templates](docs/ci/README.md) — GitHub Actions + GitLab CI pipelines for the offline verify / baseline / regression gate.
 
 For contributors:
 

@@ -1,0 +1,59 @@
+# GitLab CI template — Godot Open MCP verify + regression.
+#
+# Copy this file into your game repo as .gitlab-ci.yml (or `include:` it from a
+# shared location) and adjust the variables block for your project.
+#
+# The verify / baseline / regression commands run through an OFFLINE disk
+# scanner (parses .tscn / .tres from disk) — NO Godot editor needs to be
+# installed on the runner. Only Node.js 18+ is required.
+#
+# Two jobs:
+#   1. verify-mr       — verify the project on merge requests (fail on errors)
+#   2. regression      — regression check + baseline refresh on pushes to main
+
+variables:
+  GODOT_PROJECT_PATH: "$CI_PROJECT_DIR"
+
+stages:
+  - verify
+  - regression
+
+# -------------------------------------------------------------------------
+# 1) Verify on MR — offline scan, fail on errors.
+# -------------------------------------------------------------------------
+godot:verify-mr:
+  stage: verify
+  image: node:22
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  script:
+    # Exit 1 = errors found at/above --fail-on error (default).
+    # The offline scanner covers broken_references + missing_scripts.
+    - npx godot-open-mcp-cli verify --fail-on error --json
+
+# -------------------------------------------------------------------------
+# 2) Regression on main — compare against baseline, then refresh it.
+# -------------------------------------------------------------------------
+godot:regression:
+  stage: regression
+  image: node:22
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main" && $CI_PIPELINE_SOURCE == "push"
+  script:
+    # Exit 0 = no regression; 1 = regression; 2 = baseline missing; 3 = invalid.
+    - |
+      npx godot-open-mcp-cli regression check \
+        --baseline-path CI/godot-open-mcp-baseline.json \
+        --threshold 0 \
+        --json
+    # Only reached when the regression check passed (exit 0).
+    - |
+      npx godot-open-mcp-cli baseline update \
+        --baseline-path CI/godot-open-mcp-baseline.json \
+        --json
+    # Commit the refreshed baseline back to main.
+    - git config user.name "godot-verify-bot"
+    - git config user.email "bot@gitlab.local"
+    - git add CI/godot-open-mcp-baseline.json
+    - git commit -m "chore(ci): refresh godot-open-mcp regression baseline" || echo "no baseline changes"
+    - git push "https://gitlab-ci-token:$CI_JOB_TOKEN@$CI_SERVER_HOST/$CI_PROJECT_PATH.git" HEAD:main

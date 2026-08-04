@@ -1,0 +1,92 @@
+# GitHub Actions template — Godot Open MCP verify + regression.
+#
+# Copy this file into your game repo at .github/workflows/godot-verify.yml and
+# adjust the env block (GODOT_PROJECT_PATH) for your project.
+#
+# The verify / baseline / regression commands run through an OFFLINE disk
+# scanner (parses .tscn / .tres from disk) — NO Godot editor needs to be
+# installed on the runner. Only Node.js 18+ is required. This is a major
+# simplification vs editor-based CI pipelines.
+#
+# Two jobs:
+#   1. verify-pr       — verify the project on pull requests (fail on errors)
+#   2. regression      — regression check + baseline refresh on pushes to main
+#
+# The baseline file (CI/godot-open-mcp-baseline.json by default) is committed
+# to your repo. `baseline update` runs on main after a regression check passes,
+# so the next PR is compared against the known-good state.
+
+name: godot-verify
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "**/*.tscn"
+      - "**/*.tres"
+      - "**/*.gd"
+      - "**/*.cs"
+      - "CI/godot-open-mcp-baseline.json"
+  push:
+    branches:
+      - main
+    paths:
+      - "**/*.tscn"
+      - "**/*.tres"
+      - "**/*.gd"
+      - "**/*.cs"
+
+# Adjust for your project (defaults to the repo root).
+env:
+  GODOT_PROJECT_PATH: ${{ github.workspace }}
+
+jobs:
+  # -------------------------------------------------------------------------
+  # 1) Verify on PR — offline scan, fail on errors.
+  # -------------------------------------------------------------------------
+  verify-pr:
+    name: Godot verify (offline)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify (fail on errors)
+        # Exit 1 = errors found at/above --fail-on error (default).
+        # The offline scanner covers broken_references + missing_scripts.
+        run: npx godot-open-mcp-cli verify --fail-on error --json
+
+  # -------------------------------------------------------------------------
+  # 2) Regression on main — compare against baseline, then refresh it.
+  # -------------------------------------------------------------------------
+  regression:
+    name: Godot regression + baseline refresh
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Regression check
+        # Exit 0 = no regression; 1 = regression; 2 = baseline missing; 3 = invalid.
+        run: |
+          npx godot-open-mcp-cli regression check \
+            --baseline-path CI/godot-open-mcp-baseline.json \
+            --threshold 0 \
+            --json
+
+      - name: Update baseline (commit back to main)
+        # Only reached when the regression check passed (exit 0).
+        run: |
+          npx godot-open-mcp-cli baseline update \
+            --baseline-path CI/godot-open-mcp-baseline.json \
+            --json
+
+      - name: Commit refreshed baseline
+        run: |
+          git config user.name "godot-verify-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add CI/godot-open-mcp-baseline.json
+          git commit -m "chore(ci): refresh godot-open-mcp regression baseline" || echo "no baseline changes"
+          git push

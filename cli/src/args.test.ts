@@ -15,6 +15,7 @@ import assert from "node:assert/strict";
 import {
   parseCliArgs,
   KNOWN_COMMANDS,
+  emptyParsed,
   type ParsedCli,
 } from "./args.js";
 
@@ -457,4 +458,168 @@ test("parseCliArgs: --port still rejects zero, negatives and non-integers", () =
       `--port ${bad} must be rejected`,
     );
   }
+});
+
+// ---------------------------------------------------------------------------
+// P15.2 — verify / baseline / regression + subcommands + new flags
+// ---------------------------------------------------------------------------
+
+test("parseCliArgs: KNOWN_COMMANDS includes verify / baseline / regression (P15.2)", () => {
+  assert.ok([...KNOWN_COMMANDS].includes("verify"));
+  assert.ok([...KNOWN_COMMANDS].includes("baseline"));
+  assert.ok([...KNOWN_COMMANDS].includes("regression"));
+});
+
+// --- verify ---
+
+test("parseCliArgs: verify with default --fail-on (omitted) → failOn undefined", () => {
+  const p = parse(["verify"]);
+  assert.equal(p.command, "verify");
+  assert.equal(p.failOn, undefined);
+  assert.equal(p.error, undefined);
+});
+
+test("parseCliArgs: verify --fail-on error|warn|none", () => {
+  assert.equal(parse(["verify", "--fail-on", "error"]).failOn, "error");
+  assert.equal(parse(["verify", "--fail-on", "warn"]).failOn, "warn");
+  assert.equal(parse(["verify", "--fail-on", "none"]).failOn, "none");
+});
+
+test("parseCliArgs: verify --fail-on rejects invalid values", () => {
+  for (const bad of ["errors", "all", "critical"]) {
+    assert.match(parse(["verify", "--fail-on", bad]).error ?? "", /error, warn, none/);
+  }
+});
+
+test("parseCliArgs: verify --fail-on requires a value", () => {
+  assert.match(parse(["verify", "--fail-on"]).error ?? "", /requires a severity/);
+});
+
+test("parseCliArgs: verify [path] sets positionalPath", () => {
+  const p = parse(["verify", "/proj"]);
+  assert.equal(p.command, "verify");
+  assert.equal(p.positionalPath, "/proj");
+});
+
+// --- baseline create|update ---
+
+test("parseCliArgs: baseline create → command + subcommand", () => {
+  const p = parse(["baseline", "create"]);
+  assert.equal(p.command, "baseline");
+  assert.equal(p.subcommand, "create");
+  assert.equal(p.error, undefined);
+});
+
+test("parseCliArgs: baseline update → subcommand update", () => {
+  const p = parse(["baseline", "update"]);
+  assert.equal(p.command, "baseline");
+  assert.equal(p.subcommand, "update");
+});
+
+test("parseCliArgs: baseline create [path] → subcommand + positionalPath", () => {
+  const p = parse(["baseline", "create", "/proj"]);
+  assert.equal(p.subcommand, "create");
+  assert.equal(p.positionalPath, "/proj");
+});
+
+test("parseCliArgs: baseline with unknown subcommand → error", () => {
+  const p = parse(["baseline", "bogus"]);
+  assert.equal(p.command, "baseline");
+  assert.match(p.error ?? "", /Unknown baseline subcommand 'bogus'/);
+  assert.match(p.error ?? "", /create, update/);
+});
+
+test("parseCliArgs: bare baseline (no subcommand) → error", () => {
+  const p = parse(["baseline"]);
+  assert.equal(p.command, "baseline");
+  assert.match(p.error ?? "", /baseline requires a subcommand/);
+});
+
+test("parseCliArgs: baseline create --baseline-path <file>", () => {
+  const p = parse(["baseline", "create", "--baseline-path", "CI/baseline.json"]);
+  assert.equal(p.baselinePath, "CI/baseline.json");
+});
+
+test("parseCliArgs: baseline create --platform-profile mobile", () => {
+  const p = parse(["baseline", "create", "--platform-profile", "mobile"]);
+  assert.equal(p.platformProfile, "mobile");
+});
+
+test("parseCliArgs: --platform-profile rejects invalid values", () => {
+  assert.match(parse(["baseline", "create", "--platform-profile", "web"]).error ?? "", /mobile, console, desktop/);
+});
+
+// --- regression check ---
+
+test("parseCliArgs: regression check → command + subcommand", () => {
+  const p = parse(["regression", "check"]);
+  assert.equal(p.command, "regression");
+  assert.equal(p.subcommand, "check");
+  assert.equal(p.error, undefined);
+});
+
+test("parseCliArgs: regression check [path] → subcommand + positionalPath", () => {
+  const p = parse(["regression", "check", "/proj"]);
+  assert.equal(p.subcommand, "check");
+  assert.equal(p.positionalPath, "/proj");
+});
+
+test("parseCliArgs: regression with unknown subcommand → error", () => {
+  const p = parse(["regression", "bogus"]);
+  assert.equal(p.command, "regression");
+  assert.match(p.error ?? "", /Unknown regression subcommand 'bogus'/);
+  assert.match(p.error ?? "", /check/);
+});
+
+test("parseCliArgs: bare regression (no subcommand) → error", () => {
+  const p = parse(["regression"]);
+  assert.match(p.error ?? "", /regression requires a subcommand/);
+});
+
+test("parseCliArgs: regression check --threshold N", () => {
+  assert.equal(parse(["regression", "check", "--threshold", "3"]).threshold, 3);
+  assert.equal(parse(["regression", "check", "--threshold", "0"]).threshold, 0);
+});
+
+test("parseCliArgs: regression check --threshold rejects negatives + non-integers", () => {
+  for (const bad of ["-1", "1.5", "abc"]) {
+    assert.match(parse(["regression", "check", "--threshold", bad]).error ?? "", /non-negative integer/);
+  }
+});
+
+test("parseCliArgs: regression check --per-category-threshold (repeatable)", () => {
+  const p = parse([
+    "regression", "check",
+    "--per-category-threshold", "broken_references=2",
+    "--per-category-threshold", "missing_scripts=1",
+  ]);
+  assert.deepEqual(p.perCategoryThresholds, ["broken_references=2", "missing_scripts=1"]);
+});
+
+test("parseCliArgs: regression check --per-category-threshold requires ruleId=N", () => {
+  assert.match(
+    parse(["regression", "check", "--per-category-threshold", "noequals"]).error ?? "",
+    /ruleId=N/,
+  );
+  assert.match(
+    parse(["regression", "check", "--per-category-threshold"]).error ?? "",
+    /ruleId=N/,
+  );
+});
+
+test("parseCliArgs: regression check --baseline-path <file>", () => {
+  const p = parse(["regression", "check", "--baseline-path", "CI/baseline.json"]);
+  assert.equal(p.baselinePath, "CI/baseline.json");
+});
+
+// --- emptyParsed carries the new fields ---
+
+test("emptyParsed: includes P15.2 fields with defaults", () => {
+  const e = emptyParsed();
+  assert.equal(e.failOn, undefined);
+  assert.equal(e.baselinePath, undefined);
+  assert.equal(e.threshold, undefined);
+  assert.deepEqual(e.perCategoryThresholds, []);
+  assert.equal(e.platformProfile, undefined);
+  assert.equal(e.subcommand, undefined);
 });
