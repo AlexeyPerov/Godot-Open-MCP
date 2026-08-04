@@ -32,6 +32,7 @@ import {
   DEPENDENCIES_TOOL,
   BASELINE_CREATE_TOOL,
   REGRESSION_CHECK_TOOL,
+  RESTART_EDITOR_TOOL,
   type RoutePolicy,
 } from "./route-policy.js";
 import { ALL_TOOLS } from "../tools/index.js";
@@ -55,6 +56,7 @@ const ROUTER_NAMED_HANDLERS: ReadonlySet<string> = new Set([
   DEPENDENCIES_TOOL,
   BASELINE_CREATE_TOOL,
   REGRESSION_CHECK_TOOL,
+  RESTART_EDITOR_TOOL,
 ]);
 
 const REGISTERED = new Set(ALL_TOOLS.map((t) => t.name));
@@ -146,6 +148,10 @@ test("representative pin: read_compile_errors → offline", () => {
   assert.equal(routePolicyFor("godot_open_mcp_read_compile_errors"), "offline");
 });
 
+test("representative pin: restart_editor → local", () => {
+  assert.equal(routePolicyFor("godot_open_mcp_restart_editor"), "local");
+});
+
 test("representative pins: scene_get_data / filesystem_list → live-first", () => {
   assert.equal(routePolicyFor("godot_open_mcp_scene_get_data"), "live-first");
   assert.equal(routePolicyFor("godot_open_mcp_filesystem_list"), "live-first");
@@ -219,4 +225,5 @@ test("the router named-handler constants are the expected tool names", () => {
   assert.equal(READ_COMPILE_ERRORS_TOOL, "godot_open_mcp_read_compile_errors");
   assert.equal(BASELINE_CREATE_TOOL, "godot_open_mcp_baseline_create");
   assert.equal(REGRESSION_CHECK_TOOL, "godot_open_mcp_regression_check");
+  assert.equal(RESTART_EDITOR_TOOL, "godot_open_mcp_restart_editor");
 });

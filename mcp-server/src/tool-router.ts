@@ -52,6 +52,7 @@ import {
   DEPENDENCIES_TOOL,
   BASELINE_CREATE_TOOL,
   REGRESSION_CHECK_TOOL,
+  RESTART_EDITOR_TOOL,
 } from "./capabilities/route-policy.js";
 import {
   TOOL_GROUPS,
@@ -74,7 +75,7 @@ import {
   type PlatformProfile,
 } from "./baseline/baseline-schema.js";
 import { compareBaselines, formatRegressionSummary } from "./baseline/regression-compare.js";
-import { readProfileAndDetail } from "./output-profile.js";
+import { readProfileAndDetail, parseResultBody } from "./output-profile.js";
 import { readFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import {
@@ -92,6 +93,27 @@ import {
   type GodotLogPlatform,
 } from "./godot-log.js";
 import { extractCompileDiagnostics } from "./compiler-errors.js";
+import {
+  readInstanceLock,
+  isPidAlive,
+  HEARTBEAT_STALE_MS,
+} from "./instance-discovery.js";
+import {
+  killEditorProcess,
+  detectHangSignature,
+  DEFAULT_KILL_GRACE_MS,
+  MAX_KILL_WAIT_MS,
+  type KillResult,
+  type HangSignatureResult,
+} from "./editor-process-control.js";
+
+/**
+ * Tool name for the live `scene_list_opened` handler, used by
+ * `routeRestartEditor`'s opportunistic dirty-scene probe. Not part of a
+ * route-policy override set (it is a live tool); kept here as a named constant
+ * so a rename is caught at compile time rather than as a routing drift.
+ */
+const SCENE_LIST_OPENED_TOOL = "godot_open_mcp_scene_list_opened";
 
 // ---------------------------------------------------------------------------
 // Route vocabulary + metadata helpers (P7.1 §2).
@@ -326,6 +348,9 @@ export class ToolRouter implements Router {
     }
     if (toolName === REGRESSION_CHECK_TOOL) {
       return this.routeRegressionCheck(args);
+    }
+    if (toolName === RESTART_EDITOR_TOOL) {
+      return this.routeRestartEditor(args);
     }
     if (toolName === MANAGE_TOOLS_TOOL) {
       return this.routeManageTools(args);
@@ -1088,6 +1113,351 @@ export class ToolRouter implements Router {
     return isAbsolute(relOrAbsolute)
       ? relOrAbsolute
       : join(this.projectPath, relOrAbsolute);
+  }
+
+  // ── P15.3 — local `restart_editor` (terminate a wedged Godot process) ───
+
+  /**
+   * `godot_open_mcp_restart_editor` — terminate the hung Godot editor after
+   * confirming the Godot hang signature (crash marker in the log OR frozen
+   * main thread: live PID + unreachable /ping + stale log). Requires explicit
+   * `confirm: true`. The relaunch half is intentionally deferred (the Hub /
+   * operator owns the interactive-Godot launch recipe); the response tells the
+   * operator/agent to relaunch via the Hub/CLI.
+   *
+   * Local route: the bridge is the thing that dies on a hang, so the tool may
+   * NOT depend on it for its primary path. It consults the bridge
+   * OPPORTUNISTICALLY for two signals — the /ping reachability (feeds the
+   * frozen signature) and the active-scene-dirty summary (surfaced as a
+   * warning before the kill). A failure on either probe leaves the file-based
+   * verdict standing.
+   *
+   * Safety contract:
+   *   1. Dry-run (confirm false/absent) — return the PID + diagnosis, no side
+   *      effect.
+   *   2. Refuse when the hang signature is ABSENT — never restart on a
+   *      fixable compile failure.
+   *   3. Refuse when no live Godot PID matches the project's instance lock.
+   *   4. Surface `dirtyScenesWarning` when the bridge is still reachable.
+   *   5. Kill: SIGTERM → grace window → SIGKILL (POSIX) / taskkill /T /F
+   *      (Windows).
+   *
+   * Adapted from Unity Open MCP's `routeRestartEditor` (copy for the
+   * confirm-gate + dry-run + signature-check + dirty-scenes composition);
+   * intentional deltas:
+   *   - Signature is Godot-specific (crash marker OR frozen). Unity keys on an
+   *     fd-exhaustion string; Godot has no equivalent.
+   *   - PID resolution from the instance lock (instance-discovery.ts), not an
+   *     OS process scan (`findUnityForProject`). Godot writes its PID to the
+   *     lock on startup.
+   *   - No live-console signature fallback (Unity probes the live console for
+   *     the fd-exhaustion exception). Godot's hang is not a logged exception
+   *     with a discoverable console entry, so the log file is authoritative.
+   *   - Dirty scenes via `godot_open_mcp_scene_list_opened` (Godot has no
+   *     dedicated dirty-summary tool; scene_list_opened carries `isDirty` per
+   *     open scene).
+   */
+  private async routeRestartEditor(
+    args: Record<string, unknown>,
+  ): Promise<CallToolResult> {
+    const routeMeta: RouteMeta = { route: "local" };
+    const confirm = args.confirm === true;
+    const graceMs =
+      typeof args.kill_grace_ms === "number" &&
+      Number.isInteger(args.kill_grace_ms) &&
+      args.kill_grace_ms >= 0 &&
+      args.kill_grace_ms <= MAX_KILL_WAIT_MS
+        ? args.kill_grace_ms
+        : DEFAULT_KILL_GRACE_MS;
+
+    // 1. Resolve the Godot PID from the instance lock. The bridge writes its
+    //    PID there on startup; readInstanceLock never throws (returns null on
+    //    missing/unreadable/unparseable). The MCP server already trusts this
+    //    file for port resolution (P1.6).
+    const lock = readInstanceLock(this.projectPath);
+    const lockPid = lock && typeof lock.pid === "number" ? lock.pid : null;
+    const pidAlive = lockPid !== null && lockPid > 0 && isPidAlive(lockPid);
+
+    // 2. Read the Godot log tail + detect the hang signature. Reuses the same
+    //    offline log-path resolution + bounded tail read as read_compile_errors
+    //    so the diagnosis is consistent with what the agent already saw. The
+    //    log read is best-effort: a missing/unreadable log degrades to
+    //    "logExists: false" (the frozen signature requires a log to exist).
+    const { logTail, logExists, logStale, hasCompileErrors, logPath } =
+      await this.readGodotLogForRestart();
+
+    // 3. /ping reachability (feeds the frozen signature). Opportunistic: a
+    //    failure leaves the file-based crash-marker verdict standing.
+    let pingUnreachable = true;
+    try {
+      if (typeof this.live.isLiveAvailable === "function") {
+        pingUnreachable = !(await this.live.isLiveAvailable());
+      }
+    } catch {
+      pingUnreachable = true;
+    }
+
+    const signature = detectHangSignature({
+      logTail,
+      logExists,
+      hasCompileErrors,
+      logStale,
+      pingUnreachable,
+      pidAlive,
+    });
+
+    // 4. Dry-run branch: confirm was false/absent. Return the diagnosis + the
+    //    PID the tool WOULD kill, with no side effect.
+    if (!confirm) {
+      return sourceResult(
+        {
+          action: "restart_editor",
+          confirm: false,
+          dryRun: true,
+          signaturePresent: signature.present,
+          ...(signature.source !== null ? { signatureSource: signature.source } : {}),
+          ...(lockPid !== null && pidAlive ? { wouldKillPid: lockPid } : {}),
+          ...(lockPid !== null && !pidAlive
+            ? { pidFromLock: lockPid, pidAlive: false }
+            : {}),
+          ...(logPath !== null ? { logPath } : {}),
+          diagnosis: signature.note,
+          projectPath: this.projectPath,
+          message: signature.present
+            ? "Dry-run preview. The Godot editor appears wedged. Pass " +
+              "confirm: true to terminate the hung process. Killing the " +
+              "editor can destroy unsaved scene work and in-flight asset " +
+              "imports — relaunch via the Hub/CLI afterward."
+            : "Dry-run preview. " + signature.note,
+        },
+        "local",
+        routeMeta,
+      );
+    }
+
+    // 5. Confirmed-path refusals. Each guard surfaces a structured code so an
+    //    agent can branch on why the kill did not happen.
+    if (!signature.present) {
+      return sourceResult(
+        {
+          error: {
+            code: "restart_signature_absent",
+            message: signature.note,
+            ...(logPath !== null ? { logPath } : {}),
+          },
+        },
+        "local",
+        routeMeta,
+        true,
+      );
+    }
+    if (!pidAlive || lockPid === null) {
+      return sourceResult(
+        {
+          error: {
+            code: "godot_process_not_found",
+            message:
+              "No live Godot process matches this project's instance lock. " +
+              "The editor may have already exited, or the instance lock is " +
+              "missing/stale. Relaunch Godot for this project via the Hub/CLI.",
+            projectPath: this.projectPath,
+            ...(lockPid !== null ? { pidFromLock: lockPid, pidAlive: false } : {}),
+          },
+        },
+        "local",
+        routeMeta,
+        true,
+      );
+    }
+
+    // 6. Opportunistic active-scene-dirty check. The editor is hung, but the
+    //    bridge HTTP listener might still be up long enough to answer a
+    //    read-only status call. If so, surface dirtyScenes[] as a warning so
+    //    the operator knows what unsaved work the kill will lose. This does
+    //    NOT block the kill — the editor is hung, saving is not an option.
+    const dirtyScenesWarning = await this.collectDirtyScenesWarning();
+
+    // 7. Kill the editor.
+    const kill = await killEditorProcess(lockPid, graceMs);
+    return this.buildRestartEditorKillResponse(
+      lockPid,
+      graceMs,
+      kill,
+      dirtyScenesWarning,
+      signature,
+    );
+  }
+
+  /**
+   * Read the Godot log tail + derive the inputs the hang-signature detector
+   * needs. Reuses the same log-path resolution + bounded tail read as
+   * `routeReadCompileErrors` so the diagnosis is consistent. Returns
+   * `logExists: false` when no log was found (missing or logging disabled),
+   * and `logStale: false` when the log exists and was written recently (a
+   * fresh log means the editor is actively writing — not frozen). Never
+   * throws; a read failure degrades to an empty tail.
+   */
+  private async readGodotLogForRestart(): Promise<{
+    logTail: string;
+    logExists: boolean;
+    logStale: boolean;
+    hasCompileErrors: boolean;
+    logPath: string | null;
+  }> {
+    const empty = {
+      logTail: "",
+      logExists: false,
+      logStale: false,
+      hasCompileErrors: false,
+      logPath: null as string | null,
+    };
+    try {
+      const project = await identifyGodotProject(this.projectPath);
+      if (!project.ok) return empty;
+      const projectRoot = project.info.projectRoot;
+      const projectGodotText = await readFile(`${projectRoot}/project.godot`, "utf-8");
+      const settings = parseProjectLogSettings(projectGodotText);
+      const platform = process.platform as GodotLogPlatform;
+      const userDataRoot = godotUserDataRoot(settings, platform);
+      const resolved = resolveLogPaths(settings, userDataRoot);
+      const selected = selectLog(resolved.currentLogPath, resolved.logDir, {
+        includeRotated: true,
+        maxLogFiles: settings.maxLogFiles || DEFAULT_MAX_LOG_FILES,
+        loggingDisabled: !settings.fileLoggingEnabled,
+      });
+      if (selected.notFound) return empty;
+      const tail = readLogTail(selected.path, DEFAULT_LOG_TAIL_BYTES);
+      if (tail.error !== undefined || !tail.exists) return empty;
+      const diagnostics = extractCompileDiagnostics(tail.content);
+      // Compile errors are FIXABLE failures — their presence forces the hang
+      // signature ABSENT regardless of any other signal. We key on C# +
+      // GDScript + load errors (the diagnostic kinds that point at source
+      // code a fix would address), NOT the conservative `other` fallback.
+      const hasCompileErrors = diagnostics.some(
+        (d) =>
+          d.severity === "error" &&
+          (d.kind === "csharp" ||
+            d.kind === "gdscript" ||
+            d.kind === "script_load" ||
+            d.kind === "addon_load"),
+      );
+      // A live Godot editor writes to its log periodically; a stale log (older
+      // than HEARTBEAT_STALE_MS) + live PID + unreachable /ping is the frozen
+      // signature. Use the same threshold as the instance-lock classifier so
+      // the two views agree.
+      const logStale =
+        tail.mtimeMs !== undefined && Date.now() - tail.mtimeMs > HEARTBEAT_STALE_MS;
+      return {
+        logTail: tail.content,
+        logExists: true,
+        logStale,
+        hasCompileErrors,
+        logPath: selected.path,
+      };
+    } catch {
+      return empty;
+    }
+  }
+
+  /**
+   * Opportunistic active-scene-dirty probe. Calls `scene_list_opened` through
+   * the live client (only when the bridge is reachable) and extracts the
+   * scenes carrying `isDirty: true`. Returns null when the bridge is down OR
+   * no dirty scenes were found. Never throws — the dirty-scene signal is
+   * opportunistic, not load-bearing.
+   */
+  private async collectDirtyScenesWarning(): Promise<
+    Array<{ name: string; path: string; isDirty: boolean }> | null
+  > {
+    try {
+      if (typeof this.live.isLiveAvailable !== "function") return null;
+      const liveAvailable = await this.live.isLiveAvailable();
+      if (!liveAvailable) return null;
+      const result = await this.live.route(SCENE_LIST_OPENED_TOOL, {});
+      const body = parseResultBody(result);
+      if (!body || !Array.isArray(body.scenes)) return null;
+      const dirty = (body.scenes as Array<Record<string, unknown>>)
+        .filter((s) => s.isDirty === true)
+        .map((s) => ({
+          name: typeof s.name === "string" ? s.name : "",
+          path: typeof s.path === "string" ? s.path : "",
+          isDirty: true,
+        }));
+      return dirty.length > 0 ? dirty : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Build the confirmed-kill response from a {@link KillResult}. */
+  private buildRestartEditorKillResponse(
+    pid: number,
+    graceMs: number,
+    kill: KillResult,
+    dirtyScenesWarning: Array<{ name: string; path: string; isDirty: boolean }> | null,
+    signature: HangSignatureResult,
+  ): CallToolResult {
+    const routeMeta: RouteMeta = { route: "local" };
+    if (kill.terminated) {
+      return sourceResult(
+        {
+          action: "restart_editor",
+          confirm: true,
+          killed: true,
+          pid: kill.pid,
+          method: kill.method,
+          elapsedMs: kill.elapsedMs,
+          graceMs,
+          ...(signature.source !== null ? { signatureSource: signature.source } : {}),
+          ...(dirtyScenesWarning !== null
+            ? {
+                dirtyScenesWarning,
+                dirtyScenesNote:
+                  "These scenes had unsaved changes when the editor was " +
+                  "killed — that work is lost. Saving is not an option when " +
+                  "the editor is hung; surface this to the operator.",
+              }
+            : {}),
+          nextSteps: [
+            "Godot editor terminated. Relaunch Godot for this project via " +
+              "the Hub/CLI (the MCP server does not own the interactive-editor " +
+              "launch recipe — the flags the Hub/operator used at original " +
+              "launch are not knowable from here).",
+            "After relaunch, poll godot_open_mcp_bridge_status until it " +
+              'returns status: "running" to confirm the bridge reconnected ' +
+              "and wrote a fresh instance lock.",
+          ],
+        },
+        "local",
+        routeMeta,
+      );
+    }
+    // Kill failed — the editor is still alive (or its state is unknown).
+    return sourceResult(
+      {
+        action: "restart_editor",
+        confirm: true,
+        killed: false,
+        pid: kill.pid,
+        reason: kill.reason,
+        message: kill.message,
+        graceMs,
+        nextSteps: [
+          "The automated kill did not terminate the editor. The operator " +
+            "must force-quit Godot manually (Activity Monitor / Task " +
+            "Manager / `kill -9 <pid>`).",
+          kill.reason === "not_found"
+            ? "The PID vanished between the scan and the kill — the editor " +
+              "may have exited on its own. Re-run godot_open_mcp_bridge_status " +
+              "to confirm state before retrying."
+            : "After a manual force-quit, relaunch Godot via the Hub/CLI and " +
+              "poll godot_open_mcp_bridge_status until running.",
+        ],
+      },
+      "local",
+      routeMeta,
+      true,
+    );
   }
 
   // ── P8.3 — local `manage_tools` (per-session visibility mutator) ────────

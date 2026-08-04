@@ -166,6 +166,7 @@ const EXPECTED_ALWAYS_VISIBLE = [
   "godot_open_mcp_bridge_status",
   "godot_open_mcp_pull_events",
   "godot_open_mcp_read_compile_errors",
+  "godot_open_mcp_restart_editor",
 ];
 
 test("ALWAYS_VISIBLE_TOOL_NAMES matches EXPECTED_ALWAYS_VISIBLE", () => {

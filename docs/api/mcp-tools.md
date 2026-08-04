@@ -84,6 +84,7 @@ The table below is the published view of `ALL_TOOLS`. The `scripts/check-tool-do
 | `godot_open_mcp_pull_events` | core | local | always visible | no | n/a | Drain incremental bridge events (console logs + editor-state transitions) since the last pull. |
 | `godot_open_mcp_read_compile_errors` | core | offline | always visible | no | n/a | Offline diagnostic: read a bounded Godot log tail and extract structured C#/GDScript/load errors. |
 | `godot_open_mcp_regression_check` | core | offline | core | no | n/a | Compare the current offline scan against a baseline; returns exitCode 0/1/2/3 for CI. |
+| `godot_open_mcp_restart_editor` | core | local | always visible | OS process | n/a | Terminate a wedged Godot editor process after confirming a hang/crash signature; requires `confirm: true`. |
 | `godot_open_mcp_reflection_method_call` | reflection | live | typed-editor | disk | enforce | Invoke a C# method via reflection (static or instance) and return a JSON-serializable result. |
 | `godot_open_mcp_reflection_method_find` | reflection | live | typed-editor | no | n/a | Discover C# types/methods/properties across loaded Godot/.NET assemblies. |
 | `godot_open_mcp_resource_create` | resource | live | typed-editor | disk | enforce | Instantiate a Resource subclass via ClassDB and persist via ResourceSaver (no overwrite). |
@@ -128,7 +129,7 @@ Every registered tool follows exactly one route policy. The policy is descriptiv
 | Policy | Meaning |
 |---|---|
 | **live** | The CallTool handler POSTs to the bridge; the bridge handler runs on the editor main thread. Requires the bridge; no disk substitute. The default for any tool not in an override set. |
-| **local** | The CallTool handler resolves the response in the MCP process — no `POST /tools/{name}` bridge hop. `bridge_status` and `pull_events` may touch the live transport (one bounded `/ping` probe; one SSE-driven queue drain) but the call is synthesized locally; the bridge has no dedicated handler for them. |
+| **local** | The CallTool handler resolves the response in the MCP process — no `POST /tools/{name}` bridge hop. `bridge_status` and `pull_events` may touch the live transport (one bounded `/ping` probe; one SSE-driven queue drain) but the call is synthesized locally; the bridge has no dedicated handler for them. `restart_editor` acts on the OS process directly (`process.kill` / `taskkill`) — the bridge is the thing that dies on a hang, so it may not depend on it for its primary path (it consults the bridge only opportunistically for the `/ping` reachability signal and the dirty-scene warning). |
 | **offline** | The CallTool handler NEVER probes the bridge and NEVER POSTs to it — it reads disk/config straight. Used for diagnostics that must work in the exact state a dead bridge describes (the addon is not running its listener). |
 | **live-first** | The CallTool handler probes the bridge once; if reachable it forwards to the live handler (reflecting unsaved editor state / authoritative import metadata), otherwise it reads from disk with no editor required. A live semantic error (e.g. `scene_not_edited`, `directory_not_found`) is authoritative and does NOT trigger the fallback — only an unreachable bridge does. |
 
@@ -143,7 +144,7 @@ Every registered tool follows exactly one route policy. The policy is descriptiv
 
 ### Tool groups and session visibility
 
-The MCP server filters `ListTools` through a per-session `ToolSessionState` so the prompt surface stays small. Every registered tool maps to exactly one group via `groupFor(toolName)`; meta-tools (`capabilities`, `bridge_status`, `pull_events`, `read_compile_errors`, `manage_tools`) map to `null` and are always visible.
+The MCP server filters `ListTools` through a per-session `ToolSessionState` so the prompt surface stays small. Every registered tool maps to exactly one group via `groupFor(toolName)`; meta-tools (`capabilities`, `bridge_status`, `pull_events`, `read_compile_errors`, `manage_tools`, `restart_editor`) map to `null` and are always visible.
 
 | Group id | Default-on | Covers |
 |---|---|---|
@@ -219,6 +220,7 @@ When the bridge is unreachable:
 - Live-first readers fall back to disk: `scene_get_data` parses the `.tscn`; `filesystem_list` lists the directory.
 - `find_references` is always-offline and never depends on the bridge — use it to discover reverse dependencies before a move/delete.
 - `dependencies` is always-offline — use it for forward deps, reverse deps, broken edges, cycles, and optional transitive impact before destructive ops.
+- `restart_editor` is the acting recovery tool when the editor is truly wedged (crash marker in the log, or frozen: live PID + unreachable `/ping` + stale log). It terminates the hung Godot process after explicit `confirm: true`; relaunch is manual (via the Hub/CLI). It refuses when the hang signature is absent — never restart on a fixable compile failure.
 - Every other live tool surfaces a structured transport error.
 
 ### No batch route
@@ -229,7 +231,7 @@ Godot has no headless editor batch equivalent. There is no `batch` policy, no `b
 
 | Family | Tools | Mutating | Notes |
 |---|---|---|---|
-| core | `ping`, `validate_edit`, `checkpoint_create`, `delta`, `apply_fix`, `capabilities`, `bridge_status`, `pull_events`, `read_compile_errors`, `manage_tools` | `apply_fix` only | Always visible in `ListTools`. `manage_tools` is the per-session visibility mutator. |
+| core | `ping`, `validate_edit`, `checkpoint_create`, `delta`, `apply_fix`, `capabilities`, `bridge_status`, `pull_events`, `read_compile_errors`, `manage_tools`, `baseline_create`, `regression_check`, `restart_editor` | `apply_fix` + `restart_editor` (OS process kill) | Always visible in `ListTools`. `manage_tools` is the per-session visibility mutator. `baseline_create`/`regression_check` are the CI regression gate; `restart_editor` is the wedged-editor recovery (kill-only — relaunch is manual). |
 | node | `node_find`, `node_create`, `node_modify`, `node_set_parent`, `node_duplicate`, `node_delete` | create/modify/set-parent/duplicate/delete | Scene-tree operations. |
 | scene | `scene_open`, `scene_save`, `scene_list_opened`, `scene_get_data`, `scene_create` | open/save/create | Scene lifecycle + read. |
 | resource | `resource_find`, `resource_get_data`, `resource_create`, `resource_modify`, `resource_move`, `resource_delete` | create/modify/move/delete | `.tres`/`.res` discovery + bounded property inspection (read-only) + gated create/modify + file lifecycle move/delete. |
@@ -784,6 +786,81 @@ Compare the current offline scan against a baseline file by error-count delta an
 - `isError` (the MCP-level flag) is `true` when `exitCode` is 1 (regression), `false` otherwise. Exit codes 2/3 are surfaced as `isError: true` with an `error` block.
 
 **Errors:** `missing_parameter` (empty `baseline_path`), `baseline_missing` (exit 2), `baseline_invalid` (exit 3).
+
+### `godot_open_mcp_restart_editor`
+
+- Route: `local` (acts on the OS process — no `POST /tools/restart_editor` on the bridge; the bridge is the thing that dies on a hang, so the tool may not depend on it for its primary path)
+- Visibility group: always visible (meta-tool — survives any group teardown so an operator can always recover)
+- Read-only/mutating: mutates the OS process (kills the Godot editor); does NOT touch project source
+- Live editor requirement: none for the kill path; the bridge is consulted opportunistically for the `/ping` reachability signal and the active-scene-dirty warning
+
+Auto-recover from a wedged Godot editor by terminating the hung Godot process. Use ONLY when the editor is truly hung: `bridge_status` reports `unreachable` (live PID, `/ping` not responding) or `dead_bridge`, AND the Godot log shows a crash marker (backtrace / segfault / abort / fatal) or a frozen signature (live PID + unreachable `/ping` + no recent log writes). The tool refuses when the hang signature is absent — never restart on a fixable compile failure (use `read_compile_errors` + fix the source instead).
+
+Relaunch is NOT automatic — the interactive Godot editor's launch recipe (the flags the Hub/operator used) is not knowable from the server, so the response carries "relaunch via the Hub/CLI" guidance instead. After relaunch, poll `godot_open_mcp_bridge_status` until it returns `running`.
+
+**Input:**
+
+- `confirm` (optional, default `false`) — must be `true` to actually terminate the editor. When false/absent the call is a dry-run: it returns the PID + diagnosis it would act on without any side effect.
+- `kill_grace_ms` (optional, default 5000) — SIGTERM→SIGKILL grace window in milliseconds on macOS/Linux. Ignored on Windows (`taskkill /F` is forced).
+
+**Hang signature.** The kill is gated on a confirmed signature (so the tool never restarts on a fixable failure):
+
+| Signal | Source | Verdict |
+|---|---|---|
+| Compile/parse errors in the log | `read_compile_errors` extractor | **Absent** — fixable failure; recovery is "fix the source", never "kill the editor". Runs first, overrides everything. |
+| Crash marker (backtrace / segfault / abort / fatal) | Godot log tail | **Present** (`godot_log_crash`) — definitive crash. |
+| Frozen main thread (live PID + `/ping` unreachable + stale log) | instance lock + `/ping` + log mtime | **Present** (`godot_log_frozen`) — editor wedged, not making forward progress. |
+| Anything else | — | **Absent** — re-confirm with `bridge_status` + `read_compile_errors` before killing. |
+
+**Dry-run result** (`confirm` false/absent — no side effect):
+
+```json
+{
+  "action": "restart_editor",
+  "confirm": false,
+  "dryRun": true,
+  "signaturePresent": true,
+  "signatureSource": "godot_log_crash",
+  "wouldKillPid": 4242,
+  "logPath": "/abs/path/to/godot.log",
+  "diagnosis": "A crash marker ... is present in the Godot log tail ...",
+  "projectPath": "/abs/path/to/project",
+  "message": "Dry-run preview. The Godot editor appears wedged. Pass confirm: true ...",
+  "_source": "local",
+  "_route": { "route": "local" }
+}
+```
+
+**Confirmed-kill result** (`confirm: true` — process terminated):
+
+```json
+{
+  "action": "restart_editor",
+  "confirm": true,
+  "killed": true,
+  "pid": 4242,
+  "method": "sigterm",
+  "elapsedMs": 120,
+  "graceMs": 5000,
+  "signatureSource": "godot_log_crash",
+  "dirtyScenesWarning": [{ "name": "Main", "path": "res://Main.tscn", "isDirty": true }],
+  "dirtyScenesNote": "These scenes had unsaved changes when the editor was killed ...",
+  "nextSteps": [
+    "Godot editor terminated. Relaunch Godot for this project via the Hub/CLI ...",
+    "After relaunch, poll godot_open_mcp_bridge_status until it returns status: \"running\" ..."
+  ],
+  "_source": "local",
+  "_route": { "route": "local" }
+}
+```
+
+- `method` — `sigterm` | `sigkill` (POSIX) | `taskkill` (Windows).
+- `dirtyScenesWarning` — present only when the bridge was still reachable AND dirty scenes were found. Surfaced as a warning (does NOT block the kill — the editor is hung, saving is not an option).
+- `nextSteps` — relaunch guidance. `isError: false` on a successful kill.
+
+**Kill-failed result** (`isError: true`) — the automated kill did not terminate the editor. `reason` is `not_found` | `timeout` | `signal_error` | `spawn_failed` | `invalid_pid`; the operator must force-quit manually (Activity Monitor / Task Manager / `kill -9 <pid>`).
+
+**Errors:** `restart_signature_absent` (no hang signature — the note explains what was checked), `godot_process_not_found` (no live PID matches the project's instance lock).
 
 ### `godot_open_mcp_validate_edit`
 

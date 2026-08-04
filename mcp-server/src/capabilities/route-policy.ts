@@ -50,12 +50,16 @@ export const CAPABILITIES_TOOL = "godot_open_mcp_capabilities";
 export const BRIDGE_STATUS_TOOL = "godot_open_mcp_bridge_status";
 export const PULL_EVENTS_TOOL = "godot_open_mcp_pull_events";
 export const MANAGE_TOOLS_TOOL = "godot_open_mcp_manage_tools";
+// P15.3 — terminate a wedged Godot editor. Local: acts on the OS process; the
+// bridge is the thing that dies on a hang, so the tool may not depend on it.
+export const RESTART_EDITOR_TOOL = "godot_open_mcp_restart_editor";
 
 const LOCAL_TOOLS: ReadonlySet<string> = new Set([
   CAPABILITIES_TOOL,
   BRIDGE_STATUS_TOOL,
   PULL_EVENTS_TOOL,
   MANAGE_TOOLS_TOOL,
+  RESTART_EDITOR_TOOL,
 ]);
 
 /**

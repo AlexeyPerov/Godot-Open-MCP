@@ -75,6 +75,10 @@ const ALWAYS_VISIBLE_TOOLS: ReadonlySet<string> = new Set([
   "godot_open_mcp_bridge_status",
   "godot_open_mcp_pull_events",
   "godot_open_mcp_read_compile_errors",
+  // P15.3 — restart_editor is the recovery tool for a wedged editor. It must
+  // survive any group teardown so an operator can always recover, even when no
+  // group (including core) is active.
+  "godot_open_mcp_restart_editor",
 ]);
 
 /**

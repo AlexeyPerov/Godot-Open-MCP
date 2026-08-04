@@ -90,6 +90,7 @@ import { dependencies } from "./dependencies.js";
 import { manageTools } from "./manage-tools.js";
 import { baselineCreate } from "./baseline-create.js";
 import { regressionCheck } from "./regression-check.js";
+import { restartEditor } from "./restart-editor.js";
 
 /** Ordered list of every tool exposed over stdio MCP. */
 export const ALL_TOOLS: Tool[] = [
@@ -304,4 +305,14 @@ export const ALL_TOOLS: Tool[] = [
   // offline disk scanner — Godot has no headless editor, so there is no editor spawn.
   baselineCreate,
   regressionCheck,
+  // P15.3 — restart_editor: terminate a wedged Godot editor process. Acts on the OS process via
+  // process.kill (SIGTERM → SIGKILL on macOS/Linux) or taskkill /T /F on Windows — no bridge
+  // round-trip, no Godot spawn. Requires explicit `confirm: true` (dry-run by default); refuses
+  // when the Godot hang signature (crash marker OR frozen main thread: live PID + unreachable
+  // /ping + stale log) is absent — never restarts on a fixable compile failure. Relaunch is NOT
+  // automatic; the response carries "relaunch via the Hub/CLI" guidance. Always-visible meta-tool
+  // (no group); local route — the bridge is the thing that dies on a hang, so the tool may not
+  // depend on it for its primary path (it consults the bridge only opportunistically for the
+  // active-scene-dirty signal before the kill).
+  restartEditor,
 ];
