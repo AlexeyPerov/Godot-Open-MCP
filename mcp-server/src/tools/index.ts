@@ -88,6 +88,8 @@ import { readCompileErrors } from "./read-compile-errors.js";
 import { findReferences } from "./find-references.js";
 import { dependencies } from "./dependencies.js";
 import { manageTools } from "./manage-tools.js";
+import { baselineCreate } from "./baseline-create.js";
+import { regressionCheck } from "./regression-check.js";
 
 /** Ordered list of every tool exposed over stdio MCP. */
 export const ALL_TOOLS: Tool[] = [
@@ -294,4 +296,12 @@ export const ALL_TOOLS: Tool[] = [
   // endpoint on the bridge. The router special-cases the name and mutates the shared session
   // store; P8.4 wires the tools/list_changed notification that follows a visibility change.
   manageTools,
+  // P15.1 — CI regression baseline + check (group `core`, always-offline route).
+  // baseline_create runs the offline whole-project scan and writes a schema-v1 baseline JSON
+  // (severity summary + per-rule issue keys + ciExcludedRules); regression_check compares the
+  // current scan against that baseline by error-count delta and returns the exit-code contract
+  // (0 no regression / 1 regression / 2 baseline missing / 3 baseline invalid). Both reuse the
+  // offline disk scanner — Godot has no headless editor, so there is no editor spawn.
+  baselineCreate,
+  regressionCheck,
 ];

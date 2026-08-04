@@ -178,6 +178,12 @@ assign("core", [
   "godot_open_mcp_checkpoint_create",
   "godot_open_mcp_delta",
   "godot_open_mcp_apply_fix",
+  // P15.1 — CI regression baseline + check. Offline-routed but conceptually
+  // part of the gate/verify safety surface (the project-level "did this PR
+  // introduce new errors?" gate). Folded into core so they are always visible
+  // alongside checkpoint_create/delta.
+  "godot_open_mcp_baseline_create",
+  "godot_open_mcp_regression_check",
 ]);
 
 // --- typed-editor (umbrella group for the whole typed editor surface) -------

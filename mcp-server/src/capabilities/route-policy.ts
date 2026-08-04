@@ -66,11 +66,17 @@ const LOCAL_TOOLS: ReadonlySet<string> = new Set([
 export const READ_COMPILE_ERRORS_TOOL = "godot_open_mcp_read_compile_errors";
 export const FIND_REFERENCES_TOOL = "godot_open_mcp_find_references";
 export const DEPENDENCIES_TOOL = "godot_open_mcp_dependencies";
+// P15.1 — CI regression baseline + check. Always offline: the baseline is
+// built from the offline disk scanner (Godot has no headless editor).
+export const BASELINE_CREATE_TOOL = "godot_open_mcp_baseline_create";
+export const REGRESSION_CHECK_TOOL = "godot_open_mcp_regression_check";
 
 const OFFLINE_TOOLS: ReadonlySet<string> = new Set([
   READ_COMPILE_ERRORS_TOOL,
   FIND_REFERENCES_TOOL,
   DEPENDENCIES_TOOL,
+  BASELINE_CREATE_TOOL,
+  REGRESSION_CHECK_TOOL,
 ]);
 
 /**

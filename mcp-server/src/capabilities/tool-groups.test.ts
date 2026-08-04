@@ -252,6 +252,8 @@ test("groupFor assigns ping + the gate surface to core", () => {
     "godot_open_mcp_checkpoint_create",
     "godot_open_mcp_delta",
     "godot_open_mcp_apply_fix",
+    "godot_open_mcp_baseline_create",
+    "godot_open_mcp_regression_check",
   ]) {
     assert.equal(groupFor(name), "core", `${name} must map to core`);
   }
@@ -313,12 +315,14 @@ test("toolsInGroup returns [] for unknown ids", () => {
 
 test("toolsInGroup core roster matches the assign table", () => {
   const roster = toolsInGroup("core");
-  // The five core tools — ping + the gate surface folded in.
+  // Ping + the gate surface folded in + the P15.1 CI regression baseline/check.
   assert.deepEqual(roster, [
     "godot_open_mcp_apply_fix",
+    "godot_open_mcp_baseline_create",
     "godot_open_mcp_checkpoint_create",
     "godot_open_mcp_delta",
     "godot_open_mcp_ping",
+    "godot_open_mcp_regression_check",
     "godot_open_mcp_validate_edit",
   ]);
 });

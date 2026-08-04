@@ -39,6 +39,7 @@ The table below is the published view of `ALL_TOOLS`. The `scripts/check-tool-do
 | `godot_open_mcp_animation_library_add` | animation | live | animation | editor state | enforce | Add an empty `AnimationLibrary` registered by name on an `AnimationPlayer`. |
 | `godot_open_mcp_animation_player_create` | animation | live | animation | editor state | enforce | Create an `AnimationPlayer` node in the edited scene (returns NodeData). |
 | `godot_open_mcp_apply_fix` | core | live | core | disk | warn/off capable | Apply (or preview) a structured fix for a verify issue; non-dry-run applies roll back on new errors under `enforce`. |
+| `godot_open_mcp_baseline_create` | core | offline | core | disk | n/a | Run a full offline scan and save a schema-v1 baseline JSON for CI regression tracking. |
 | `godot_open_mcp_bridge_status` | core | local | always visible | no | n/a | Operator-oriented health snapshot composing the instance-lock classifier with one `/ping` probe. |
 | `godot_open_mcp_capabilities` | core | local | always visible | no | n/a | Discover the full capability surface (tools + verify rules + fixes + groups + routing) in one call. |
 | `godot_open_mcp_checkpoint_create` | core | live | core | no | n/a | Capture a project-health baseline over res:// paths for later `delta`. |
@@ -82,6 +83,7 @@ The table below is the published view of `ALL_TOOLS`. The `scripts/check-tool-do
 | `godot_open_mcp_ping` | core | live | core | no | n/a | Bridge health check (`GET /ping` round-trip). |
 | `godot_open_mcp_pull_events` | core | local | always visible | no | n/a | Drain incremental bridge events (console logs + editor-state transitions) since the last pull. |
 | `godot_open_mcp_read_compile_errors` | core | offline | always visible | no | n/a | Offline diagnostic: read a bounded Godot log tail and extract structured C#/GDScript/load errors. |
+| `godot_open_mcp_regression_check` | core | offline | core | no | n/a | Compare the current offline scan against a baseline; returns exitCode 0/1/2/3 for CI. |
 | `godot_open_mcp_reflection_method_call` | reflection | live | typed-editor | disk | enforce | Invoke a C# method via reflection (static or instance) and return a JSON-serializable result. |
 | `godot_open_mcp_reflection_method_find` | reflection | live | typed-editor | no | n/a | Discover C# types/methods/properties across loaded Godot/.NET assemblies. |
 | `godot_open_mcp_resource_create` | resource | live | typed-editor | disk | enforce | Instantiate a Resource subclass via ClassDB and persist via ResourceSaver (no overwrite). |
@@ -690,6 +692,98 @@ Forward + reverse dependency lookup for Godot assets. Forward edges come from th
 - `cycles` — dependency cycle path lists through the queried asset (forward-graph DFS).
 
 **Errors:** `missing_parameter` (neither selector), `invalid_request` (both selectors).
+
+### `godot_open_mcp_baseline_create`
+
+- Route: `offline` (always-offline — never probes the bridge, never spawns Godot)
+- Visibility group: `core`
+- Read-only/mutating: writes a baseline JSON file to disk (not project source)
+- Live editor requirement: none — scans `.tscn`/`.tres` text on disk
+
+Run a full offline scan and save a baseline JSON file (schema v1) for CI regression tracking. The baseline records the severity summary, the per-rule issue keys, and the `ciExcludedRules` the offline scanner cannot detect. Commit the resulting file (convention: `CI/godot-open-mcp-baseline.json`) and compare future scans against it with `regression_check` in CI. This is the project-level "did this PR introduce new errors?" gate — distinct from the per-mutation `checkpoint_create` / `delta` gate, which covers a single edit.
+
+**Input:**
+
+- `baseline_path` (optional, default `CI/godot-open-mcp-baseline.json`) — path for the baseline file, relative to the project root or absolute. Parent directories are created when missing.
+- `platform_profile` (optional, default `desktop`) — `mobile` | `console` | `desktop`. Recorded in the baseline metadata (informational; does not change which rules run).
+
+**Result:**
+
+```json
+{
+  "baselinePath": "/abs/CI/godot-open-mcp-baseline.json",
+  "schemaVersion": 1,
+  "platformProfile": "desktop",
+  "summary": { "error": 2, "warn": 1, "info": 0 },
+  "rules": [
+    { "ruleId": "broken_references", "error": 1, "warn": 0, "issueKeyCount": 1 },
+    { "ruleId": "missing_scripts", "error": 1, "warn": 0, "issueKeyCount": 1 }
+  ],
+  "ciExcludedRules": ["import_health", "project_health", "scene_structure_health", "materials_shader_health", "script_audit", "animation_analysis"],
+  "scannedFileCount": 12,
+  "durationMs": 8
+}
+```
+
+- `ciExcludedRules` — rule ids the offline scanner does NOT cover. The baseline cannot detect these (they live in the C# verify package and run via the live `validate_edit` surface). A clean baseline means "no broken references or missing scripts offline", not "the project is fully healthy".
+
+**Errors:** `baseline_write_failed` (the baseline file could not be written — e.g. permission denied).
+
+### `godot_open_mcp_regression_check`
+
+- Route: `offline` (always-offline — never probes the bridge, never spawns Godot)
+- Visibility group: `core`
+- Read-only/mutating: read-only (writes nothing; compares scans)
+- Live editor requirement: none — scans `.tscn`/`.tres` text on disk
+
+Compare the current offline scan against a baseline file by error-count delta and return a compact regression summary suitable for CI logs. Returns an `exitCode` field mirroring the CI exit-code contract so a wrapper CLI can pass it through directly.
+
+**Exit-code contract** (`exitCode` in the result body):
+
+| Code | Meaning |
+|---|---|
+| 0 | No regression — the error-count increase is within every threshold. |
+| 1 | Regression — global error delta > `regression_threshold`, or any per-category threshold breached. |
+| 2 | Baseline missing — `baseline_path` does not exist. |
+| 3 | Baseline invalid — unreadable, unparseable, or schema-version mismatch. |
+
+**Input:**
+
+- `baseline_path` (required) — path to a baseline JSON created by `baseline_create` (relative to the project root or absolute).
+- `regression_threshold` (optional, default 0) — max allowed increase in total Error count before the check fails (applied globally). A delta equal to the threshold is tolerated (strict `>`).
+- `per_category_thresholds` (optional) — `{ ruleId: maxIncrease }`. Each key overrides `regression_threshold` for that rule; rules absent from the map fall back to `regression_threshold`. The overall verdict is the OR of the global gate and every per-rule gate. Example: `{"broken_references": 2}`.
+- `platform_profile` (optional, default `desktop`) — `mobile` | `console` | `desktop`. Informational metadata for the current scan.
+
+**Result:**
+
+```json
+{
+  "baselinePath": "/abs/CI/godot-open-mcp-baseline.json",
+  "schemaVersion": 1,
+  "platformProfile": "desktop",
+  "exitCode": 1,
+  "regressed": true,
+  "summary": "Godot Open MCP regression: REGRESSION (global error delta +3 > 0)\n  errors: baseline=2 current=5 delta=+3 (threshold=0)\n  warnings: baseline=1 current=1\n  broken_references: FAIL baseline=2 current=5 delta=+3 (threshold=0)",
+  "regression": {
+    "baselineSummary": { "error": 2, "warn": 1, "info": 0 },
+    "currentSummary": { "error": 5, "warn": 1, "info": 0 },
+    "errorDelta": 3,
+    "errorThreshold": 0,
+    "regressed": true,
+    "perRule": [
+      { "ruleId": "broken_references", "baselineError": 2, "currentError": 5, "errorDelta": 3, "errorThreshold": 0, "regressed": true }
+    ]
+  },
+  "scannedFileCount": 12,
+  "durationMs": 9
+}
+```
+
+- `summary` — multi-line, CI-log-friendly string (greppable: the verdict line carries `REGRESSION` or `OK`; per-rule lines carry `FAIL` or `ok`).
+- `regression.perRule` — `null` when no `per_category_thresholds` were supplied (global-only compare).
+- `isError` (the MCP-level flag) is `true` when `exitCode` is 1 (regression), `false` otherwise. Exit codes 2/3 are surfaced as `isError: true` with an `error` block.
+
+**Errors:** `missing_parameter` (empty `baseline_path`), `baseline_missing` (exit 2), `baseline_invalid` (exit 3).
 
 ### `godot_open_mcp_validate_edit`
 

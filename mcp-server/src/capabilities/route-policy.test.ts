@@ -30,6 +30,8 @@ import {
   READ_COMPILE_ERRORS_TOOL,
   FIND_REFERENCES_TOOL,
   DEPENDENCIES_TOOL,
+  BASELINE_CREATE_TOOL,
+  REGRESSION_CHECK_TOOL,
   type RoutePolicy,
 } from "./route-policy.js";
 import { ALL_TOOLS } from "../tools/index.js";
@@ -51,6 +53,8 @@ const ROUTER_NAMED_HANDLERS: ReadonlySet<string> = new Set([
   READ_COMPILE_ERRORS_TOOL,
   FIND_REFERENCES_TOOL,
   DEPENDENCIES_TOOL,
+  BASELINE_CREATE_TOOL,
+  REGRESSION_CHECK_TOOL,
 ]);
 
 const REGISTERED = new Set(ALL_TOOLS.map((t) => t.name));
@@ -213,4 +217,6 @@ test("the router named-handler constants are the expected tool names", () => {
   assert.equal(SCENE_GET_DATA_TOOL, "godot_open_mcp_scene_get_data");
   assert.equal(FILESYSTEM_LIST_TOOL, "godot_open_mcp_filesystem_list");
   assert.equal(READ_COMPILE_ERRORS_TOOL, "godot_open_mcp_read_compile_errors");
+  assert.equal(BASELINE_CREATE_TOOL, "godot_open_mcp_baseline_create");
+  assert.equal(REGRESSION_CHECK_TOOL, "godot_open_mcp_regression_check");
 });

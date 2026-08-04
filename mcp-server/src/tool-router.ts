@@ -50,6 +50,8 @@ import {
   READ_COMPILE_ERRORS_TOOL,
   FIND_REFERENCES_TOOL,
   DEPENDENCIES_TOOL,
+  BASELINE_CREATE_TOOL,
+  REGRESSION_CHECK_TOOL,
 } from "./capabilities/route-policy.js";
 import {
   TOOL_GROUPS,
@@ -62,8 +64,19 @@ import { listProjectDirectoryOffline } from "./offline/project-index.js";
 import { findReferencesOffline } from "./offline/references.js";
 import { dependenciesOffline } from "./offline/dependencies.js";
 import { identifyGodotProject } from "./offline/project-config.js";
+import { scanProjectOffline } from "./baseline/scan.js";
+import {
+  buildBaseline,
+  loadBaseline,
+  saveBaseline,
+  normalizeProfile,
+  BASELINE_SCHEMA_VERSION,
+  type PlatformProfile,
+} from "./baseline/baseline-schema.js";
+import { compareBaselines, formatRegressionSummary } from "./baseline/regression-compare.js";
 import { readProfileAndDetail } from "./output-profile.js";
 import { readFile } from "node:fs/promises";
+import { isAbsolute, join } from "node:path";
 import {
   parseProjectLogSettings,
   godotUserDataRoot,
@@ -307,6 +320,12 @@ export class ToolRouter implements Router {
     }
     if (toolName === DEPENDENCIES_TOOL) {
       return this.routeDependencies(args);
+    }
+    if (toolName === BASELINE_CREATE_TOOL) {
+      return this.routeBaselineCreate(args);
+    }
+    if (toolName === REGRESSION_CHECK_TOOL) {
+      return this.routeRegressionCheck(args);
     }
     if (toolName === MANAGE_TOOLS_TOOL) {
       return this.routeManageTools(args);
@@ -893,6 +912,184 @@ export class ToolRouter implements Router {
     return sourceResult(result, "offline", routeMeta);
   }
 
+  // ── P15.1 — always-offline `baseline_create` + `regression_check` ───────
+
+  /**
+   * `godot_open_mcp_baseline_create` — always-offline. Runs the offline
+   * whole-project scan and writes a schema-v1 baseline JSON. NEVER probes the
+   * bridge.
+   *
+   * The default path is `CI/godot-open-mcp-baseline.json` (relative to the
+   * project root); parent directories are created when missing. The result
+   * body carries the absolute resolved path, the severity summary, the per-rule
+   * issue counts, the `ciExcludedRules` the offline scanner cannot detect, and
+   * the scan duration. The baseline is meant to be committed and compared
+   * against by `regression_check` in CI.
+   */
+  private async routeBaselineCreate(
+    args: Record<string, unknown>,
+  ): Promise<CallToolResult> {
+    const routeMeta: RouteMeta = { route: "offline" };
+
+    const profile = normalizeProfile(args.platform_profile);
+    const relPath =
+      typeof args.baseline_path === "string" && args.baseline_path !== ""
+        ? args.baseline_path
+        : "CI/godot-open-mcp-baseline.json";
+    const baselinePath = this.resolveProjectPath(relPath);
+
+    const scan = await scanProjectOffline({ projectRoot: this.projectPath });
+    const baseline = buildBaseline(
+      scan.issues,
+      scan.categoriesRun,
+      scan.ciExcludedRules,
+      profile,
+    );
+
+    try {
+      await saveBaseline(baseline, baselinePath);
+    } catch (e) {
+      return sourceResult(
+        {
+          error: {
+            code: "baseline_write_failed",
+            message: `failed to write baseline to '${baselinePath}': ${(e as Error)?.message ?? "unknown error"}`,
+            path: baselinePath,
+          },
+        },
+        "offline",
+        routeMeta,
+        true,
+      );
+    }
+
+    const body = {
+      baselinePath,
+      schemaVersion: BASELINE_SCHEMA_VERSION,
+      platformProfile: profile,
+      summary: baseline.summary,
+      rules: baseline.rules.map((r) => ({
+        ruleId: r.ruleId,
+        error: r.error,
+        warn: r.warn,
+        issueKeyCount: r.issueKeys.length,
+      })),
+      ciExcludedRules: baseline.ciExcludedRules,
+      scannedFileCount: scan.scannedFiles.length,
+      durationMs: scan.durationMs,
+    };
+    return sourceResult(body, "offline", routeMeta);
+  }
+
+  /**
+   * `godot_open_mcp_regression_check` — always-offline. Compares the current
+   * offline scan against a baseline file by error-count delta. NEVER probes the
+   * bridge.
+   *
+   * Exit-code contract (surfaced as `exitCode` in the result body):
+   *   0 — no regression
+   *   1 — regression (global threshold breach OR any per-category breach)
+   *   2 — baseline missing
+   *   3 — baseline invalid (unreadable / unparseable / schema-version mismatch)
+   *
+   * The result also carries a compact multi-line `summary` string suitable for
+   * CI logs and the structured `regression` detail (baseline/current summaries,
+   * global delta + threshold, and a per-rule breakdown when per-category
+   * thresholds were supplied).
+   */
+  private async routeRegressionCheck(
+    args: Record<string, unknown>,
+  ): Promise<CallToolResult> {
+    const routeMeta: RouteMeta = { route: "offline" };
+
+    const relPath = typeof args.baseline_path === "string" ? args.baseline_path : "";
+    if (relPath === "") {
+      return sourceResult(
+        {
+          error: {
+            code: "missing_parameter",
+            message: "regression_check requires 'baseline_path'.",
+          },
+          exitCode: 3,
+        },
+        "offline",
+        routeMeta,
+        true,
+      );
+    }
+    const baselinePath = this.resolveProjectPath(relPath);
+
+    const loaded = await loadBaseline(baselinePath);
+    if (!loaded.ok) {
+      // exit 2 = missing, exit 3 = invalid.
+      const exitCode = loaded.reason === "missing" ? 2 : 3;
+      const body: Record<string, unknown> = {
+        error: {
+          code: loaded.reason === "missing" ? "baseline_missing" : "baseline_invalid",
+          message: loaded.reason === "missing"
+            ? `baseline file not found at '${loaded.path}'.`
+            : loaded.message,
+          path: loaded.path,
+        },
+        exitCode,
+      };
+      return sourceResult(body, "offline", routeMeta, true);
+    }
+    const baseline = loaded.baseline;
+
+    const profile = normalizeProfile(args.platform_profile);
+    const globalThreshold =
+      typeof args.regression_threshold === "number" &&
+      Number.isFinite(args.regression_threshold) &&
+      args.regression_threshold >= 0
+        ? Math.trunc(args.regression_threshold)
+        : 0;
+
+    const perCategory = parsePerCategoryThresholds(args.per_category_thresholds);
+
+    const scan = await scanProjectOffline({ projectRoot: this.projectPath });
+    const current = buildBaseline(
+      scan.issues,
+      scan.categoriesRun,
+      scan.ciExcludedRules,
+      profile,
+    );
+
+    const regression = compareBaselines(
+      current,
+      baseline,
+      globalThreshold,
+      perCategory,
+    );
+    const summary = formatRegressionSummary(regression);
+
+    const body = {
+      baselinePath,
+      schemaVersion: BASELINE_SCHEMA_VERSION,
+      platformProfile: profile,
+      exitCode: regression.regressed ? 1 : 0,
+      regressed: regression.regressed,
+      summary,
+      regression,
+      scannedFileCount: scan.scannedFiles.length,
+      durationMs: scan.durationMs,
+    };
+    return sourceResult(body, "offline", routeMeta, regression.regressed);
+  }
+
+  /**
+   * Resolve a baseline/output path argument to an absolute native path. Bare
+   * relative paths are anchored at the project root (the directory containing
+   * `project.godot`), matching Unity's `ResolveProjectPath` convention. Already
+   * absolute paths pass through unchanged.
+   */
+  private resolveProjectPath(relOrAbsolute: string): string {
+    if (relOrAbsolute === "") return this.projectPath;
+    return isAbsolute(relOrAbsolute)
+      ? relOrAbsolute
+      : join(this.projectPath, relOrAbsolute);
+  }
+
   // ── P8.3 — local `manage_tools` (per-session visibility mutator) ────────
 
   /**
@@ -1276,3 +1473,27 @@ function clampInt(
 async function readFileBounded(path: string): Promise<string> {
   return readFile(path, "utf-8");
 }
+
+/**
+ * Parse the `per_category_thresholds` regression_check argument into a
+ * `Map<ruleId, threshold>`. Returns `null` when the input is absent/empty (so
+ * the compare falls back to the global-only path). Non-negative integer values
+ * only; invalid entries are dropped silently (defense in depth — the JSON
+ * Schema already constrains the shape).
+ */
+function parsePerCategoryThresholds(
+  raw: unknown,
+): Map<string, number> | null {
+  if (raw === null || typeof raw !== "object") return null;
+  const entries = Object.entries(raw as Record<string, unknown>);
+  if (entries.length === 0) return null;
+  const map = new Map<string, number>();
+  for (const [ruleId, value] of entries) {
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+      continue;
+    }
+    map.set(ruleId, Math.trunc(value));
+  }
+  return map.size > 0 ? map : null;
+}
+
