@@ -31,6 +31,7 @@ import { ToolRouter } from "./tool-router.js";
 import type { LiveClient } from "./live-client.js";
 import type { BridgeEventStream, PullResult } from "./event-stream.js";
 import { ToolSessionState } from "./tool-session-state.js";
+import { setFdProbeForTest, setFdCeilingProbeForTest } from "./process-diagnostics.js";
 
 // ---------------------------------------------------------------------------
 // fakes
@@ -1564,4 +1565,143 @@ test("route: manage_tools with no notifier wired is a no-op for notification", a
   assert.equal(result.isError, false);
   assert.equal(body.changed, true);
   assert.ok(session.isGroupActive("typed-editor"));
+});
+
+// ---------------------------------------------------------------------------
+// P15.4 — resource_pressure (local route, proactive fd/handle leak warning).
+//
+// The fd-count + ceiling probes are injectable seams in process-diagnostics.ts.
+// These tests swap in fakes so no real `lsof` / `/proc` / `launchctl` runs; the
+// router handler's composition (PID resolution → probe → sample record → trend
+// → response) is what is under test. A tmp instance-lock dir is used so the
+// no-PID branch resolves a real (missing) lock without touching the operator's
+// home directory.
+// ---------------------------------------------------------------------------
+
+test("route: resource_pressure with no PID (missing instance lock) returns godot_process_not_found", async () => {
+  // Point the project at a path whose instance lock does not exist so PID
+  // resolution fails. The handler must surface a structured local error, never
+  // throw, and never touch the live bridge.
+  const router = makeRouter(
+    makeFakeLive(),
+    makeFakeEventStream(),
+    "/nonexistent-project-for-resource-pressure-test",
+  );
+  const result = await router.route("godot_open_mcp_resource_pressure", {});
+  assert.equal(result.isError, true);
+  assert.equal(errCode(result), "godot_process_not_found");
+  assert.equal(routeOf(result), "local");
+  const body = parseBody(result);
+  assert.equal(body._source, "local");
+});
+
+test("route: resource_pressure with explicit pid samples fd count + ceiling and records a sample", async () => {
+  // Swap the OS probes for fakes so the result is deterministic. A single
+  // sample → trend.state === "no_history".
+  const restoreFd = setFdProbeForTest({
+    count: () => ({ count: 42, method: "proc", approximate: false }),
+  });
+  const restoreCeiling = setFdCeilingProbeForTest({
+    ceiling: () => ({ ceiling: 1024, method: "proc_limits", approximate: false }),
+  });
+  const session = new ToolSessionState();
+  const router = makeRouter(makeFakeLive(), makeFakeEventStream(), "/proj", session);
+  try {
+    const result = await router.route("godot_open_mcp_resource_pressure", { pid: 4242 });
+    const body = parseBody(result);
+    assert.equal(result.isError, false);
+    assert.equal(routeOf(result), "local");
+    assert.equal(body.pid, 4242);
+    assert.equal(body.fdCount, 42);
+    assert.equal(body.fdMethod, "proc");
+    assert.equal(body.approximate, false);
+    assert.equal(body.ceiling, 1024);
+    assert.equal(body.ceilingMethod, "proc_limits");
+    assert.equal(body.headroom, 982);
+    assert.equal(body.state, "ok");
+    assert.equal((body.trend as { state: string }).state, "no_history");
+    assert.equal(body.sampleCount, 1);
+    assert.ok(Array.isArray(body.samples));
+    assert.equal((body.samples as unknown[]).length, 1);
+    assert.equal(
+      (body.launchContextCaveat as string).length > 0,
+      true,
+    );
+    // No warning on a single ok sample.
+    assert.equal(body.warning, undefined);
+    // The sample was recorded in the session ring.
+    assert.equal(session.fdSamplesSnapshot().length, 1);
+    assert.deepEqual(session.fdSamplesSnapshot()[0], {
+      ts: ((body.samples as Array<{ ts: number }>)[0]).ts,
+      pid: 4242,
+      count: 42,
+    });
+  } finally {
+    restoreFd();
+    restoreCeiling();
+  }
+});
+
+test("route: resource_pressure surfaces a warning + agentNextSteps on a leaking trend", async () => {
+  // Prime the session ring with two prior monotonic samples so the third call
+  // (this one) completes a ≥10%-of-ceiling monotonic climb → leaking.
+  const session = new ToolSessionState();
+  const pid = 4242;
+  const baseTs = 1_000_000;
+  session.recordFdSample({ ts: baseTs, pid, count: 600 });
+  session.recordFdSample({ ts: baseTs + 1000, pid, count: 750 });
+  // This call's probe returns 900 — completes the 600 → 750 → 900 climb
+  // (+300 on a 1024 ceiling ≈ 29% → leaking).
+  const restoreFd = setFdProbeForTest({
+    count: () => ({ count: 900, method: "proc", approximate: false }),
+  });
+  const restoreCeiling = setFdCeilingProbeForTest({
+    ceiling: () => ({ ceiling: 1024, method: "proc_limits", approximate: false }),
+  });
+  const router = makeRouter(makeFakeLive(), makeFakeEventStream(), "/proj", session);
+  try {
+    const result = await router.route("godot_open_mcp_resource_pressure", { pid });
+    const body = parseBody(result);
+    assert.equal(result.isError, false);
+    assert.equal((body.trend as { state: string }).state, "leaking");
+    assert.equal((body.trend as { delta: number }).delta, 300);
+    assert.equal((body.warning as { level: string }).level, "leaking");
+    assert.ok(Array.isArray(body.agentNextSteps));
+    assert.ok((body.agentNextSteps as string[]).length > 0);
+  } finally {
+    restoreFd();
+    restoreCeiling();
+  }
+});
+
+test("route: resource_pressure null ceiling (Windows) → state unknown, trend still computed", async () => {
+  // Windows: fd count is an approximate handle count, ceiling is null. The
+  // state degrades to unknown; the trend is the only actionable signal.
+  const restoreFd = setFdProbeForTest({
+    count: () => ({ count: 500, method: "handle_count", approximate: true }),
+  });
+  const restoreCeiling = setFdCeilingProbeForTest({
+    ceiling: () => ({
+      ceiling: null,
+      method: "none",
+      reason: "Windows has no Unix fd ceiling.",
+    }),
+  });
+  const session = new ToolSessionState();
+  const router = makeRouter(makeFakeLive(), makeFakeEventStream(), "/proj", session);
+  try {
+    const result = await router.route("godot_open_mcp_resource_pressure", { pid: 1 });
+    const body = parseBody(result);
+    assert.equal(result.isError, false);
+    assert.equal(body.state, "unknown");
+    assert.equal(body.reliable, false);
+    assert.equal(body.ceiling, null);
+    assert.equal(body.ceilingMethod, "none");
+    assert.equal(body.ceilingReason, "Windows has no Unix fd ceiling.");
+    assert.equal(body.fdMethod, "handle_count");
+    assert.equal(body.approximate, true);
+  } finally {
+    restoreFd();
+    restoreCeiling();
+  }
 });

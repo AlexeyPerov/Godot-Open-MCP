@@ -53,8 +53,10 @@ carry their pack tools. `godot_open_mcp_manage_tools` actions: `list_groups`, `a
 server restarts.
 
 The meta-tools (`godot_open_mcp_capabilities`, `godot_open_mcp_manage_tools`, `godot_open_mcp_ping`,
-`godot_open_mcp_bridge_status`, `godot_open_mcp_pull_events`, `godot_open_mcp_read_compile_errors`)
-are always visible — they survive any group teardown.
+`godot_open_mcp_bridge_status`, `godot_open_mcp_pull_events`, `godot_open_mcp_read_compile_errors`,
+`godot_open_mcp_restart_editor`, `godot_open_mcp_resource_pressure`) are always visible — they
+survive any group teardown. `restart_editor` terminates a wedged editor (requires `confirm: true`);
+`resource_pressure` samples fd/handle pressure + trend to warn of a leak before a wedge.
 
 ## Bridge triage
 

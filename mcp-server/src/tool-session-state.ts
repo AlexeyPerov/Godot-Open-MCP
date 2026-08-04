@@ -38,6 +38,10 @@ import {
   GROUP_IDS,
   groupFor,
 } from "./capabilities/tool-groups.js";
+import {
+  FD_SAMPLE_RING_CAPACITY,
+  type FdSample,
+} from "./process-diagnostics.js";
 
 /**
  * Why a group is active in the current session.
@@ -79,6 +83,10 @@ const ALWAYS_VISIBLE_TOOLS: ReadonlySet<string> = new Set([
   // survive any group teardown so an operator can always recover, even when no
   // group (including core) is active.
   "godot_open_mcp_restart_editor",
+  // P15.4 — resource_pressure is the proactive diagnostic counterpart to
+  // restart_editor. Always-visible so an operator can sample pressure and
+  // catch a leak before the editor wedges.
+  "godot_open_mcp_resource_pressure",
 ]);
 
 /**
@@ -105,6 +113,14 @@ export class ToolSessionState {
    * Absent from the map ⇒ the group is not active.
    */
   private source = new Map<string, ActivationSource>();
+
+  /**
+   * Session-scoped fd-sample ring for `godot_open_mcp_resource_pressure`
+   * (P15.4). Capacity-bounded (LRU on insertion); a `null` count is recorded
+   * too so the trend detector sees probe-failure gaps and does not falsely
+   * interpolate across them. No disk cache — a server restart clears history.
+   */
+  private fdSamples: FdSample[] = [];
 
   constructor() {
     for (const id of DEFAULT_ENABLED_GROUPS) this.source.set(id, "default");
@@ -164,7 +180,36 @@ export class ToolSessionState {
     this.active = new Set(DEFAULT_ENABLED_GROUPS);
     this.source = new Map();
     for (const id of DEFAULT_ENABLED_GROUPS) this.source.set(id, "default");
+    // P15.4 — clear the fd-sample ring too. The trend signal is session-scoped;
+    // a reset means "start over" and stale samples from a prior workflow would
+    // mislead the trend detector.
+    this.fdSamples = [];
     return true;
+  }
+
+  // -------------------------------------------------------------------------
+  // P15.4 — session-scoped fd samples for resource_pressure.
+  // -------------------------------------------------------------------------
+
+  /**
+   * Record one fd sample at the tail of the ring. Capacity-bounded (LRU on
+   * insertion). A `null` count is recorded too — the trend detector needs to
+   * see probe-failure gaps so it does not falsely interpolate across them.
+   */
+  recordFdSample(sample: FdSample): void {
+    this.fdSamples.push(sample);
+    const excess = this.fdSamples.length - FD_SAMPLE_RING_CAPACITY;
+    if (excess > 0) this.fdSamples.splice(0, excess);
+  }
+
+  /** Snapshot of the recorded fd samples (oldest-first). */
+  fdSamplesSnapshot(): readonly FdSample[] {
+    return this.fdSamples.slice();
+  }
+
+  /** Drop all recorded fd samples without touching the tool-group state. */
+  clearFdSamples(): void {
+    this.fdSamples = [];
   }
 }
 

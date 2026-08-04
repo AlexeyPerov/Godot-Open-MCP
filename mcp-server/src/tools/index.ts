@@ -91,6 +91,7 @@ import { manageTools } from "./manage-tools.js";
 import { baselineCreate } from "./baseline-create.js";
 import { regressionCheck } from "./regression-check.js";
 import { restartEditor } from "./restart-editor.js";
+import { resourcePressure } from "./resource-pressure.js";
 
 /** Ordered list of every tool exposed over stdio MCP. */
 export const ALL_TOOLS: Tool[] = [
@@ -315,4 +316,14 @@ export const ALL_TOOLS: Tool[] = [
   // depend on it for its primary path (it consults the bridge only opportunistically for the
   // active-scene-dirty signal before the kill).
   restartEditor,
+  // P15.4 — resource_pressure: proactive resource-exhaustion prediction. Samples the live Godot
+  // process's fd/handle count server-side (macOS `lsof`; Linux `/proc/<pid>/fd`; Windows
+  // `Get-Process.HandleCount` — approximate) and reports headroom + trend. Companion to
+  // restart_editor (reactive) + read_compile_errors (diagnosis): catches a slow fd/handle leak
+  // across recompiles/reloads BEFORE the editor wedges. Ceiling is probed per-OS (Linux
+  // `/proc/<pid>/limits`; macOS `launchctl limit maxfiles`; Windows none) — the actionable signal
+  // is the trend (rising/leaking), not the absolute count. Session-scoped sample ring, no disk
+  // cache. Always-visible meta-tool (no group); local route — the bridge is the thing that dies
+  // on resource exhaustion, so the tool may not depend on it.
+  resourcePressure,
 ];

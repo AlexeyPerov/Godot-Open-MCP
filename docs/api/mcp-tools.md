@@ -93,6 +93,7 @@ The table below is the published view of `ALL_TOOLS`. The `scripts/check-tool-do
 | `godot_open_mcp_resource_get_data` | resource | live | typed-editor | no | n/a | Load a resource and return a bounded, cycle-safe property tree. |
 | `godot_open_mcp_resource_modify` | resource | live | typed-editor | disk | enforce | Apply validated property-path patches to a resource and persist via ResourceSaver. |
 | `godot_open_mcp_resource_move` | resource | live | typed-editor | disk | enforce | Move a `.tres`/`.res` file + `.import` sidecar via `DirAccess.RenameAbsolute` (no reference rewriting). |
+| `godot_open_mcp_resource_pressure` | core | local | always visible | no | n/a | Sample the live Godot process's fd/handle usage + trend (proactive leak warning before a wedge). |
 | `godot_open_mcp_scene_create` | scene | live | typed-editor | disk | warn/off capable | Create a new `.tscn` asset at a res:// path and optionally open it as the active scene. |
 | `godot_open_mcp_scene_get_data` | scene | live-first | typed-editor | no | n/a | Read the edited scene's hierarchy as a NodeData tree; offline falls back to `.tscn` disk parse. |
 | `godot_open_mcp_scene_list_opened` | scene | live | typed-editor | no | n/a | List every scene currently open in the editor as a shallow snapshot. |
@@ -129,7 +130,7 @@ Every registered tool follows exactly one route policy. The policy is descriptiv
 | Policy | Meaning |
 |---|---|
 | **live** | The CallTool handler POSTs to the bridge; the bridge handler runs on the editor main thread. Requires the bridge; no disk substitute. The default for any tool not in an override set. |
-| **local** | The CallTool handler resolves the response in the MCP process — no `POST /tools/{name}` bridge hop. `bridge_status` and `pull_events` may touch the live transport (one bounded `/ping` probe; one SSE-driven queue drain) but the call is synthesized locally; the bridge has no dedicated handler for them. `restart_editor` acts on the OS process directly (`process.kill` / `taskkill`) — the bridge is the thing that dies on a hang, so it may not depend on it for its primary path (it consults the bridge only opportunistically for the `/ping` reachability signal and the dirty-scene warning). |
+| **local** | The CallTool handler resolves the response in the MCP process — no `POST /tools/{name}` bridge hop. `bridge_status` and `pull_events` may touch the live transport (one bounded `/ping` probe; one SSE-driven queue drain) but the call is synthesized locally; the bridge has no dedicated handler for them. `restart_editor` acts on the OS process directly (`process.kill` / `taskkill`) — the bridge is the thing that dies on a hang, so it may not depend on it for its primary path (it consults the bridge only opportunistically for the `/ping` reachability signal and the dirty-scene warning). `resource_pressure` samples the live Godot PID's fd/handle count server-side (`lsof` / `/proc` / `Get-Process.HandleCount`) — the bridge is the thing that dies on resource exhaustion, so the probe must not depend on it. |
 | **offline** | The CallTool handler NEVER probes the bridge and NEVER POSTs to it — it reads disk/config straight. Used for diagnostics that must work in the exact state a dead bridge describes (the addon is not running its listener). |
 | **live-first** | The CallTool handler probes the bridge once; if reachable it forwards to the live handler (reflecting unsaved editor state / authoritative import metadata), otherwise it reads from disk with no editor required. A live semantic error (e.g. `scene_not_edited`, `directory_not_found`) is authoritative and does NOT trigger the fallback — only an unreachable bridge does. |
 
@@ -144,7 +145,7 @@ Every registered tool follows exactly one route policy. The policy is descriptiv
 
 ### Tool groups and session visibility
 
-The MCP server filters `ListTools` through a per-session `ToolSessionState` so the prompt surface stays small. Every registered tool maps to exactly one group via `groupFor(toolName)`; meta-tools (`capabilities`, `bridge_status`, `pull_events`, `read_compile_errors`, `manage_tools`, `restart_editor`) map to `null` and are always visible.
+The MCP server filters `ListTools` through a per-session `ToolSessionState` so the prompt surface stays small. Every registered tool maps to exactly one group via `groupFor(toolName)`; meta-tools (`capabilities`, `bridge_status`, `pull_events`, `read_compile_errors`, `manage_tools`, `restart_editor`, `resource_pressure`) map to `null` and are always visible.
 
 | Group id | Default-on | Covers |
 |---|---|---|
@@ -221,6 +222,7 @@ When the bridge is unreachable:
 - `find_references` is always-offline and never depends on the bridge — use it to discover reverse dependencies before a move/delete.
 - `dependencies` is always-offline — use it for forward deps, reverse deps, broken edges, cycles, and optional transitive impact before destructive ops.
 - `restart_editor` is the acting recovery tool when the editor is truly wedged (crash marker in the log, or frozen: live PID + unreachable `/ping` + stale log). It terminates the hung Godot process after explicit `confirm: true`; relaunch is manual (via the Hub/CLI). It refuses when the hang signature is absent — never restart on a fixable compile failure.
+- `resource_pressure` is the proactive prediction tool: it samples the live Godot PID's fd/handle count server-side and reports headroom + trend, catching a slow leak across recompiles/reloads BEFORE the editor wedges. The probe does not require the bridge (the bridge is the thing that dies on exhaustion).
 - Every other live tool surfaces a structured transport error.
 
 ### No batch route
@@ -231,7 +233,7 @@ Godot has no headless editor batch equivalent. There is no `batch` policy, no `b
 
 | Family | Tools | Mutating | Notes |
 |---|---|---|---|
-| core | `ping`, `validate_edit`, `checkpoint_create`, `delta`, `apply_fix`, `capabilities`, `bridge_status`, `pull_events`, `read_compile_errors`, `manage_tools`, `baseline_create`, `regression_check`, `restart_editor` | `apply_fix` + `restart_editor` (OS process kill) | Always visible in `ListTools`. `manage_tools` is the per-session visibility mutator. `baseline_create`/`regression_check` are the CI regression gate; `restart_editor` is the wedged-editor recovery (kill-only — relaunch is manual). |
+| core | `ping`, `validate_edit`, `checkpoint_create`, `delta`, `apply_fix`, `capabilities`, `bridge_status`, `pull_events`, `read_compile_errors`, `manage_tools`, `baseline_create`, `regression_check`, `restart_editor`, `resource_pressure` | `apply_fix` + `restart_editor` (OS process kill) | Always visible in `ListTools`. `manage_tools` is the per-session visibility mutator. `baseline_create`/`regression_check` are the CI regression gate; `restart_editor` is the wedged-editor recovery (kill-only — relaunch is manual); `resource_pressure` is the proactive fd/handle leak warning (counterpart to `restart_editor`). |
 | node | `node_find`, `node_create`, `node_modify`, `node_set_parent`, `node_duplicate`, `node_delete` | create/modify/set-parent/duplicate/delete | Scene-tree operations. |
 | scene | `scene_open`, `scene_save`, `scene_list_opened`, `scene_get_data`, `scene_create` | open/save/create | Scene lifecycle + read. |
 | resource | `resource_find`, `resource_get_data`, `resource_create`, `resource_modify`, `resource_move`, `resource_delete` | create/modify/move/delete | `.tres`/`.res` discovery + bounded property inspection (read-only) + gated create/modify + file lifecycle move/delete. |
@@ -861,6 +863,66 @@ Relaunch is NOT automatic — the interactive Godot editor's launch recipe (the 
 **Kill-failed result** (`isError: true`) — the automated kill did not terminate the editor. `reason` is `not_found` | `timeout` | `signal_error` | `spawn_failed` | `invalid_pid`; the operator must force-quit manually (Activity Monitor / Task Manager / `kill -9 <pid>`).
 
 **Errors:** `restart_signature_absent` (no hang signature — the note explains what was checked), `godot_process_not_found` (no live PID matches the project's instance lock).
+
+### `godot_open_mcp_resource_pressure`
+
+- Route: `local` (samples the OS process server-side — no `POST /tools/resource_pressure` on the bridge; the bridge is the thing that dies on resource exhaustion, so the probe must not depend on it)
+- Visibility group: always visible (meta-tool — the proactive diagnostic counterpart to `restart_editor`, kept reachable so an operator can catch a leak before a wedge)
+- Read-only/mutating: read-only (records samples in a session-scoped in-memory ring; no disk cache, no project-file writes)
+- Live editor requirement: none — resolves the PID from the instance lock (same source as `bridge_status`) or accepts an explicit `pid`; the probe runs against the OS directly
+
+Sample the live Godot process's file-descriptor / handle usage and report headroom + trend — a proactive warning BEFORE the editor wedges from resource exhaustion (the reactive recovery is `restart_editor`; the diagnosis channel is `read_compile_errors`). Use after heavy automation (many recompiles / editor reloads / long play sessions) to catch a slow fd/handle leak across samples.
+
+The ceiling is PROBED per-OS (not a fixed constant): Linux `/proc/<pid>/limits` `Max open files` soft limit; macOS `launchctl limit maxfiles` system-wide soft limit (a GUI-launched Godot inherits it, not the MCP server's shell `ulimit`); Windows has no Unix fd ceiling (`null`). Because the ceiling is OS/runtime-dependent and only a best-effort reference, the actionable signal is the **trend** (rising/leaking) across successive samples, not the absolute count. A monotonic climb across recompiles/reloads is the leak signature.
+
+**Input:**
+
+- `pid` (optional) — explicit Godot PID to probe. When omitted, resolves the live PID from the project's instance lock. Pass an explicit PID only when you have one from a prior call and want to skip the lock read.
+
+**Probes (cross-platform):**
+
+| Platform | fd count | ceiling |
+|---|---|---|
+| macOS | `lsof -p <pid>` (line count − header) | `launchctl limit maxfiles` soft value (system-wide, flagged `approximate`) |
+| Linux | `readdirSync(/proc/<pid>/fd).length` | `/proc/<pid>/limits` `Max open files` soft value (per-process, authoritative) |
+| Windows | `Get-Process -Id <pid>.HandleCount` (approximate) | `null` (no Unix fd ceiling; rely on the trend) |
+
+A failed fd probe still records a sample (`count: null`) so the trend detector sees the gap and does not interpolate across it.
+
+**Result (single sample, no leak):**
+
+```json
+{
+  "pid": 4242,
+  "fdCount": 42,
+  "fdMethod": "proc",
+  "approximate": false,
+  "ceiling": 1024,
+  "ceilingMethod": "proc_limits",
+  "headroom": 982,
+  "pressureRatio": 0.041,
+  "state": "ok",
+  "reliable": true,
+  "trend": { "state": "no_history", "delta": null, "sampleCount": 1 },
+  "samples": [{ "ts": 1700000000000, "pid": 4242, "count": 42 }],
+  "sampleCount": 1,
+  "launchContextCaveat": "Headroom is measured against the per-OS fd ceiling ...",
+  "_source": "local",
+  "_route": { "route": "local" }
+}
+```
+
+- `fdCount` — `null` when the probe failed. `fdMethod` — `lsof` | `proc` | `handle_count`.
+- `approximate` — `true` on Windows (HandleCount is broader than Unix fds); the state then only ever reaches `critical`, never `warn`.
+- `ceiling` — the probed per-OS soft limit, or `null` (Windows / probe failure). `ceilingMethod` — `proc_limits` | `launchctl` | `none`. `ceilingReason` is present when the ceiling is `null`.
+- `state` — `ok` | `warn` (≥80% of ceiling) | `critical` (≥90%) | `unknown` (count or ceiling could not be read). Windows degrades to `unknown` (no ceiling).
+- `trend` — `{ state, delta, sampleCount }`. `state` is `no_history` (fewer than two usable same-PID samples) | `stable` | `rising` (overall growth, not monotonic, or below the leak threshold) | `leaking` (monotonic climb ≥10% of the ceiling across ≥3 samples, or ≥50 fds when the ceiling is unknown).
+- `samples[]` — the session-scoped in-memory ring (capacity 20, oldest-first). No disk cache — a server restart clears history.
+- `warning` + `agentNextSteps` — present only when there is something to surface (`state` warn/critical OR `trend.state` leaking). The agent should surface the risk to the operator and recommend saving scene work + restarting via the Hub/CLI before the next reload trips the ceiling.
+
+**Windows / unknown-ceiling result** — `ceiling: null`, `ceilingMethod: "none"`, `state: "unknown"`. The trend is the only actionable signal there.
+
+**Errors:** `godot_process_not_found` (no live PID in the instance lock and no explicit `pid`).
 
 ### `godot_open_mcp_validate_edit`
 

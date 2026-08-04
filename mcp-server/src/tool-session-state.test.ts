@@ -27,6 +27,7 @@ import {
   ALWAYS_VISIBLE_TOOL_NAMES,
 } from "./tool-session-state.js";
 import { DEFAULT_ENABLED_GROUPS, GROUP_IDS } from "./capabilities/tool-groups.js";
+import type { FdSample } from "./process-diagnostics.js";
 
 // ---------------------------------------------------------------------------
 // Fresh-state invariants
@@ -167,6 +168,7 @@ const EXPECTED_ALWAYS_VISIBLE = [
   "godot_open_mcp_pull_events",
   "godot_open_mcp_read_compile_errors",
   "godot_open_mcp_restart_editor",
+  "godot_open_mcp_resource_pressure",
 ];
 
 test("ALWAYS_VISIBLE_TOOL_NAMES matches EXPECTED_ALWAYS_VISIBLE", () => {
@@ -344,6 +346,80 @@ test("filterVisibleTools honors a custom resolver instead of the catalog", () =>
 test("filterVisibleTools returns an empty array for an empty input", () => {
   const state = new ToolSessionState();
   assert.deepEqual(filterVisibleTools([], state), []);
+});
+
+// ---------------------------------------------------------------------------
+// P15.4 — fd-sample ring (resource_pressure session store)
+// ---------------------------------------------------------------------------
+
+test("fresh state has an empty fd-sample ring", () => {
+  const state = new ToolSessionState();
+  assert.deepEqual(state.fdSamplesSnapshot(), []);
+});
+
+test("recordFdSample appends to the ring (oldest-first)", () => {
+  const state = new ToolSessionState();
+  state.recordFdSample({ ts: 1000, pid: 1, count: 10 });
+  state.recordFdSample({ ts: 2000, pid: 1, count: 20 });
+  assert.deepEqual(state.fdSamplesSnapshot(), [
+    { ts: 1000, pid: 1, count: 10 },
+    { ts: 2000, pid: 1, count: 20 },
+  ]);
+});
+
+test("recordFdSample records null counts (probe-failure gaps)", () => {
+  const state = new ToolSessionState();
+  state.recordFdSample({ ts: 1000, pid: 1, count: 10 });
+  state.recordFdSample({ ts: 2000, pid: 1, count: null });
+  state.recordFdSample({ ts: 3000, pid: 1, count: 30 });
+  assert.deepEqual(state.fdSamplesSnapshot(), [
+    { ts: 1000, pid: 1, count: 10 },
+    { ts: 2000, pid: 1, count: null },
+    { ts: 3000, pid: 1, count: 30 },
+  ]);
+});
+
+test("recordFdSample is capacity-bounded (FD_SAMPLE_RING_CAPACITY = 20)", () => {
+  const state = new ToolSessionState();
+  for (let i = 0; i < 25; i++) {
+    state.recordFdSample({ ts: i, pid: 1, count: i });
+  }
+  const snap = state.fdSamplesSnapshot();
+  assert.equal(snap.length, 20);
+  // LRU on insertion: the oldest 5 (ts 0-4) were dropped; ts 5 remains first.
+  assert.equal(snap[0].ts, 5);
+  assert.equal(snap[snap.length - 1].ts, 24);
+});
+
+test("fdSamplesSnapshot returns a shallow copy (appending does not affect the ring)", () => {
+  // `.slice()` is a shallow copy — appending to the snapshot does NOT affect the
+  // ring's length (the snapshot is a new array). Mutating a sample object's
+  // fields WOULD leak (shared reference) — that is why recordFdSample pushes
+  // freshly-built objects and callers treat the snapshot as read-only.
+  const state = new ToolSessionState();
+  state.recordFdSample({ ts: 1000, pid: 1, count: 10 });
+  const snap = state.fdSamplesSnapshot() as FdSample[];
+  snap.push({ ts: 9999, pid: 1, count: 999 });
+  assert.deepEqual(state.fdSamplesSnapshot(), [
+    { ts: 1000, pid: 1, count: 10 },
+  ]);
+});
+
+test("clearFdSamples empties the ring without touching tool-group state", () => {
+  const state = new ToolSessionState();
+  state.activate("typed-editor");
+  state.recordFdSample({ ts: 1000, pid: 1, count: 10 });
+  state.clearFdSamples();
+  assert.deepEqual(state.fdSamplesSnapshot(), []);
+  assert.deepEqual(state.activeGroups(), ["core", "typed-editor"]);
+});
+
+test("reset clears the fd-sample ring too (trend signal is session-scoped)", () => {
+  const state = new ToolSessionState();
+  state.recordFdSample({ ts: 1000, pid: 1, count: 10 });
+  assert.equal(state.fdSamplesSnapshot().length, 1);
+  state.reset();
+  assert.deepEqual(state.fdSamplesSnapshot(), []);
 });
 
 // ---------------------------------------------------------------------------

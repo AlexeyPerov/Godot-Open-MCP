@@ -53,6 +53,7 @@ import {
   BASELINE_CREATE_TOOL,
   REGRESSION_CHECK_TOOL,
   RESTART_EDITOR_TOOL,
+  RESOURCE_PRESSURE_TOOL,
 } from "./capabilities/route-policy.js";
 import {
   TOOL_GROUPS,
@@ -106,6 +107,15 @@ import {
   type KillResult,
   type HangSignatureResult,
 } from "./editor-process-control.js";
+import {
+  countFileDescriptors,
+  probeFdCeiling,
+  computeFdHeadroom,
+  analyzeFdTrend,
+  LAUNCH_CONTEXT_CAVEAT,
+  type FdCountResult,
+  type FdCeilingResult,
+} from "./process-diagnostics.js";
 
 /**
  * Tool name for the live `scene_list_opened` handler, used by
@@ -351,6 +361,9 @@ export class ToolRouter implements Router {
     }
     if (toolName === RESTART_EDITOR_TOOL) {
       return this.routeRestartEditor(args);
+    }
+    if (toolName === RESOURCE_PRESSURE_TOOL) {
+      return this.routeResourcePressure(args);
     }
     if (toolName === MANAGE_TOOLS_TOOL) {
       return this.routeManageTools(args);
@@ -1460,6 +1473,208 @@ export class ToolRouter implements Router {
     );
   }
 
+  // ── P15.4 — local `resource_pressure` (proactive fd/handle leak warning) ─
+
+  /**
+   * `godot_open_mcp_resource_pressure` — sample the live Godot process's
+   * fd/handle count and report headroom + trend. Proactive counterpart to
+   * `restart_editor` (reactive kill) and `read_compile_errors` (diagnosis):
+   * catches a slow fd/handle leak across recompiles/reloads BEFORE the editor
+   * wedges. The bridge is the thing that dies on resource exhaustion, so the
+   * probe runs server-side against the OS and does NOT require the bridge.
+   *
+   * Local route (no `POST /tools/resource_pressure` on the bridge). Resolves
+   * the live Godot PID from the instance lock (same source as bridge_status),
+   * or accepts an explicit `pid`. Probes the fd count per-OS (macOS `lsof`;
+   * Linux `/proc/<pid>/fd`; Windows `Get-Process.HandleCount` — approximate)
+   * AND probes the per-OS ceiling (Linux `/proc/<pid>/limits`; macOS
+   * `launchctl limit maxfiles`; Windows none → null). The actionable signal is
+   * the TREND (rising/leaking), not the absolute count — the ceiling is a
+   * best-effort reference. Samples live in the session-scoped ring in
+   * `ToolSessionState` (no disk cache); a failed probe still records a sample
+   * (count: null) so the trend detector sees the gap.
+   *
+   * Adapted from Unity Open MCP's `routeResourcePressure` (copy for the
+   * pid-resolution + sample-record + response-shape composition); intentional
+   * deltas:
+   *   - PID resolution from the instance lock (instance-discovery.ts), not an
+   *     OS process scan (`findUnityForProject`). Godot writes its PID to the
+   *     lock on startup.
+   *   - The ceiling is PROBED per-OS, not Unity's fixed Mono 1024. The headroom
+   *     math takes the probed ceiling as a parameter; when it is null (Windows)
+   *     the state is `unknown` and the trend carries the signal.
+   *   - The leak threshold falls back to an absolute constant when the ceiling
+   *     is unknown, so a leak is still detectable on Windows.
+   */
+  private async routeResourcePressure(
+    args: Record<string, unknown>,
+  ): Promise<CallToolResult> {
+    const routeMeta: RouteMeta = { route: "local" };
+
+    // 1. Resolve the PID. An explicit pid arg wins; otherwise read the instance
+    //    lock (same source as bridge_status — the bridge writes its PID there
+    //    on startup, and the MCP server already trusts this file for port
+    //    resolution). The probe must NOT depend on the bridge.
+    let pid: number | null = null;
+    if (
+      typeof args.pid === "number" &&
+      Number.isInteger(args.pid) &&
+      args.pid > 0
+    ) {
+      pid = args.pid;
+    } else {
+      const lock = readInstanceLock(this.projectPath);
+      if (lock && typeof lock.pid === "number" && lock.pid > 0) {
+        pid = lock.pid;
+      }
+    }
+    if (pid === null) {
+      return sourceResult(
+        {
+          error: {
+            code: "godot_process_not_found",
+            message:
+              "No live Godot PID was found in this project's instance lock, " +
+              "and no explicit pid was supplied. resource_pressure samples " +
+              "the OS process directly (it does not depend on the bridge) — " +
+              "open Godot for this project first, or pass an explicit pid.",
+            projectPath: this.projectPath,
+          },
+        },
+        "local",
+        routeMeta,
+        true,
+      );
+    }
+
+    // 2. Probe fd count + per-OS ceiling. Both never throw. A failed fd probe
+    //    still records a sample (count: null) so the trend detector sees the
+    //    gap and does not interpolate across it.
+    const probe: FdCountResult = countFileDescriptors(pid);
+    const ceilingProbe: FdCeilingResult = probeFdCeiling(pid);
+    const count = probe.count;
+    const ceiling =
+      ceilingProbe.ceiling !== null && Number.isFinite(ceilingProbe.ceiling)
+        ? ceilingProbe.ceiling
+        : null;
+    const approximate = "approximate" in probe ? probe.approximate : false;
+    const headroom = computeFdHeadroom(count, ceiling, approximate);
+
+    // 3. Record the sample + compute the trend over the session ring.
+    const ts = Date.now();
+    this.sessionState.recordFdSample({ ts, pid, count });
+    const samples = this.sessionState.fdSamplesSnapshot();
+    const trend = analyzeFdTrend(samples, ceiling);
+
+    // 4. Build the response. The launchContextCaveat is always present so an
+    //    agent (and the operator) understand the per-OS ceiling nuance. The
+    //    warning block is non-null only when there is something to surface
+    //    (warn/critical state OR a leaking trend); ok+stable stays silent.
+    const fdMethod = probe.method;
+    const ceilingMethod = ceilingProbe.method;
+    const probeReason = "reason" in probe ? probe.reason : null;
+    const probeMessage = "message" in probe ? probe.message : null;
+    const ceilingReason =
+      "reason" in ceilingProbe ? ceilingProbe.reason : null;
+
+    const warningState =
+      headroom.state === "warn" ||
+      headroom.state === "critical" ||
+      trend.state === "leaking"
+        ? this.buildResourcePressureWarning(headroom, trend)
+        : null;
+
+    return sourceResult(
+      {
+        pid,
+        fdCount: count,
+        fdMethod,
+        approximate,
+        ceiling,
+        ceilingMethod,
+        ...(ceilingReason !== null ? { ceilingReason } : {}),
+        headroom: headroom.headroom,
+        pressureRatio: headroom.pressureRatio,
+        state: headroom.state,
+        reliable: headroom.reliable,
+        trend,
+        samples: samples.map((s) => ({
+          ts: s.ts,
+          pid: s.pid,
+          count: s.count,
+        })),
+        sampleCount: samples.length,
+        launchContextCaveat: LAUNCH_CONTEXT_CAVEAT,
+        ...(probeReason !== null ? { probeReason } : {}),
+        ...(probeMessage !== null ? { probeMessage } : {}),
+        ...(warningState !== null
+          ? {
+              warning: warningState.warning,
+              agentNextSteps: warningState.agentNextSteps,
+            }
+          : {}),
+      },
+      "local",
+      routeMeta,
+    );
+  }
+
+  /**
+   * Compose the warning block + agent next-steps for a warn/critical/leaking
+   * resource_pressure result. Pulled out of {@link routeResourcePressure} so the
+   * three severity branches read cleanly.
+   */
+  private buildResourcePressureWarning(
+    headroom: ReturnType<typeof computeFdHeadroom>,
+    trend: ReturnType<typeof analyzeFdTrend>,
+  ): {
+    warning: { level: string; message: string };
+    agentNextSteps: string[];
+  } {
+    const ceilingDesc =
+      headroom.ceiling !== null
+        ? `the ${headroom.ceiling}-descriptor ceiling`
+        : "the probed fd ceiling";
+    if (headroom.state === "critical") {
+      return {
+        warning: {
+          level: "critical",
+          message:
+            `Godot fd usage is at ${Math.round(headroom.pressureRatio * 100)}% of ` +
+            `${ceilingDesc} — the editor is close to exhausting its fd budget. ` +
+            `Save scene work and restart Godot via the Hub/CLI now, before the ` +
+            `bridge (the thing that dies on exhaustion) hangs.`,
+        },
+        agentNextSteps: RESOURCE_PRESSURE_AGENT_NEXT_STEPS,
+      };
+    }
+    if (trend.state === "leaking") {
+      return {
+        warning: {
+          level: "leaking",
+          message:
+            `Godot fd usage is climbing monotonically across samples (leak in ` +
+            `progress): trend delta ${trend.delta} over ${trend.sampleCount} ` +
+            `sample(s). Save scene work and plan a restart before the count ` +
+            `crosses ${ceilingDesc}.`,
+        },
+        agentNextSteps: RESOURCE_PRESSURE_AGENT_NEXT_STEPS,
+      };
+    }
+    // warn (headroom.state === "warn")
+    return {
+      warning: {
+        level: "warn",
+        message:
+          `Godot fd usage is at ${Math.round(headroom.pressureRatio * 100)}% of ` +
+          `${ceilingDesc}. Monitor the trend; if it keeps climbing across ` +
+          `recompiles/reloads, save scene work and restart Godot via the ` +
+          `Hub/CLI before the editor hangs.`,
+      },
+      agentNextSteps: RESOURCE_PRESSURE_AGENT_NEXT_STEPS,
+    };
+  }
+
   // ── P8.3 — local `manage_tools` (per-session visibility mutator) ────────
 
   /**
@@ -1698,6 +1913,24 @@ function manageToolsMessage(
         "will refresh automatically."
     : `Group '${group}' was already inactive.`;
 }
+
+/**
+ * Shared agent next-steps surfaced on a warn/critical/leaking
+ * `resource_pressure` result. The editor is approaching resource exhaustion
+ * and the bridge cannot recover on its own — the operator must save + restart
+ * before the wedge. After relaunch, a fresh Godot process starts back near a
+ * low fd count.
+ */
+const RESOURCE_PRESSURE_AGENT_NEXT_STEPS: string[] = [
+  "Surface this to the operator — the Godot editor is approaching " +
+    "resource exhaustion and the bridge (the thing that dies on exhaustion) " +
+    "cannot recover on its own.",
+  "If scene work is unsaved, recommend saving now while the bridge is " +
+    "still healthy.",
+  "When the operator is ready, restart Godot via the Hub/CLI. After " +
+    "relaunch, call resource_pressure again to sample the fresh process's " +
+    "fd baseline (a fresh process starts back near zero).",
+];
 
 // ---------------------------------------------------------------------------
 // P7.4 — `read_compile_errors` composition helpers.

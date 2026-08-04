@@ -53,6 +53,10 @@ export const MANAGE_TOOLS_TOOL = "godot_open_mcp_manage_tools";
 // P15.3 — terminate a wedged Godot editor. Local: acts on the OS process; the
 // bridge is the thing that dies on a hang, so the tool may not depend on it.
 export const RESTART_EDITOR_TOOL = "godot_open_mcp_restart_editor";
+// P15.4 — sample live Godot fd/handle pressure + trend. Local: the probe runs
+// server-side against the OS; the bridge is the thing that dies on resource
+// exhaustion, so the tool may not depend on it.
+export const RESOURCE_PRESSURE_TOOL = "godot_open_mcp_resource_pressure";
 
 const LOCAL_TOOLS: ReadonlySet<string> = new Set([
   CAPABILITIES_TOOL,
@@ -60,6 +64,7 @@ const LOCAL_TOOLS: ReadonlySet<string> = new Set([
   PULL_EVENTS_TOOL,
   MANAGE_TOOLS_TOOL,
   RESTART_EDITOR_TOOL,
+  RESOURCE_PRESSURE_TOOL,
 ]);
 
 /**
