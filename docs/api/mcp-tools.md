@@ -61,6 +61,7 @@ The table below is the published view of `ALL_TOOLS`. The `scripts/check-tool-do
 | `godot_open_mcp_filesystem_reimport` | filesystem | live | typed-editor | disk | enforce | Reimport exact files or trigger a full scan; blocks until the import pipeline settles. |
 | `godot_open_mcp_dependencies` | asset-intelligence | offline | asset-intelligence | no | n/a | Offline forward + reverse dependencies, broken edges, cycles, optional transitive impact. |
 | `godot_open_mcp_find_references` | asset-intelligence | offline | asset-intelligence | no | n/a | Offline reverse dependency lookup — assets that reference a given `res://` path or `uid://`. |
+| `godot_open_mcp_generate_skill` | core | local | always visible | disk (when `write:true`) | n/a | Generate a project-specific `SKILL.md` (Godot version, enabled plugins, autoloads, available rules, key types); merges with the canonical playbook. |
 | `godot_open_mcp_manage_tools` | core | local | always visible | ephemeral | n/a | Per-session tool-group visibility mutator (activate/deactivate/reset/list_groups). |
 | `godot_open_mcp_navigation_agent_configure` | navigation | live | navigation | editor state | enforce | Patch clamped scalar properties on a `NavigationAgent2D`/`3D`. |
 | `godot_open_mcp_navigation_agent_create` | navigation | live | navigation | editor state | enforce | Create a `NavigationAgent2D`/`3D` node (pathfinding + avoidance) in the edited scene. |
@@ -130,7 +131,7 @@ Every registered tool follows exactly one route policy. The policy is descriptiv
 | Policy | Meaning |
 |---|---|
 | **live** | The CallTool handler POSTs to the bridge; the bridge handler runs on the editor main thread. Requires the bridge; no disk substitute. The default for any tool not in an override set. |
-| **local** | The CallTool handler resolves the response in the MCP process — no `POST /tools/{name}` bridge hop. `bridge_status` and `pull_events` may touch the live transport (one bounded `/ping` probe; one SSE-driven queue drain) but the call is synthesized locally; the bridge has no dedicated handler for them. `restart_editor` acts on the OS process directly (`process.kill` / `taskkill`) — the bridge is the thing that dies on a hang, so it may not depend on it for its primary path (it consults the bridge only opportunistically for the `/ping` reachability signal and the dirty-scene warning). `resource_pressure` samples the live Godot PID's fd/handle count server-side (`lsof` / `/proc` / `Get-Process.HandleCount`) — the bridge is the thing that dies on resource exhaustion, so the probe must not depend on it. |
+| **local** | The CallTool handler resolves the response in the MCP process — no `POST /tools/{name}` bridge hop. `bridge_status` and `pull_events` may touch the live transport (one bounded `/ping` probe; one SSE-driven queue drain) but the call is synthesized locally; the bridge has no dedicated handler for them. `restart_editor` acts on the OS process directly (`process.kill` / `taskkill`) — the bridge is the thing that dies on a hang, so it may not depend on it for its primary path (it consults the bridge only opportunistically for the `/ping` reachability signal and the dirty-scene warning). `resource_pressure` samples the live Godot PID's fd/handle count server-side (`lsof` / `/proc` / `Get-Process.HandleCount`) — the bridge is the thing that dies on resource exhaustion, so the probe must not depend on it. `generate_skill` reads `project.godot` + the capability catalog + a project type scan in-process and writes the client skill dirs from `skills/client-paths.json` — no bridge round-trip. |
 | **offline** | The CallTool handler NEVER probes the bridge and NEVER POSTs to it — it reads disk/config straight. Used for diagnostics that must work in the exact state a dead bridge describes (the addon is not running its listener). |
 | **live-first** | The CallTool handler probes the bridge once; if reachable it forwards to the live handler (reflecting unsaved editor state / authoritative import metadata), otherwise it reads from disk with no editor required. A live semantic error (e.g. `scene_not_edited`, `directory_not_found`) is authoritative and does NOT trigger the fallback — only an unreachable bridge does. |
 
@@ -145,7 +146,7 @@ Every registered tool follows exactly one route policy. The policy is descriptiv
 
 ### Tool groups and session visibility
 
-The MCP server filters `ListTools` through a per-session `ToolSessionState` so the prompt surface stays small. Every registered tool maps to exactly one group via `groupFor(toolName)`; meta-tools (`capabilities`, `bridge_status`, `pull_events`, `read_compile_errors`, `manage_tools`, `restart_editor`, `resource_pressure`) map to `null` and are always visible.
+The MCP server filters `ListTools` through a per-session `ToolSessionState` so the prompt surface stays small. Every registered tool maps to exactly one group via `groupFor(toolName)`; meta-tools (`capabilities`, `bridge_status`, `pull_events`, `read_compile_errors`, `manage_tools`, `restart_editor`, `resource_pressure`, `generate_skill`) map to `null` and are always visible.
 
 | Group id | Default-on | Covers |
 |---|---|---|
@@ -233,7 +234,7 @@ Godot has no headless editor batch equivalent. There is no `batch` policy, no `b
 
 | Family | Tools | Mutating | Notes |
 |---|---|---|---|
-| core | `ping`, `validate_edit`, `checkpoint_create`, `delta`, `apply_fix`, `capabilities`, `bridge_status`, `pull_events`, `read_compile_errors`, `manage_tools`, `baseline_create`, `regression_check`, `restart_editor`, `resource_pressure` | `apply_fix` + `restart_editor` (OS process kill) | Always visible in `ListTools`. `manage_tools` is the per-session visibility mutator. `baseline_create`/`regression_check` are the CI regression gate; `restart_editor` is the wedged-editor recovery (kill-only — relaunch is manual); `resource_pressure` is the proactive fd/handle leak warning (counterpart to `restart_editor`). |
+| core | `ping`, `validate_edit`, `checkpoint_create`, `delta`, `apply_fix`, `capabilities`, `bridge_status`, `pull_events`, `read_compile_errors`, `manage_tools`, `baseline_create`, `regression_check`, `restart_editor`, `resource_pressure`, `generate_skill` | `apply_fix` + `restart_editor` (OS process kill) + `generate_skill` (writes client skill dirs when `write:true`) | Always visible in `ListTools`. `manage_tools` is the per-session visibility mutator. `baseline_create`/`regression_check` are the CI regression gate; `restart_editor` is the wedged-editor recovery (kill-only — relaunch is manual); `resource_pressure` is the proactive fd/handle leak warning (counterpart to `restart_editor`); `generate_skill` emits a project-specific `SKILL.md` merged with the canonical playbook. |
 | node | `node_find`, `node_create`, `node_modify`, `node_set_parent`, `node_duplicate`, `node_delete` | create/modify/set-parent/duplicate/delete | Scene-tree operations. |
 | scene | `scene_open`, `scene_save`, `scene_list_opened`, `scene_get_data`, `scene_create` | open/save/create | Scene lifecycle + read. |
 | resource | `resource_find`, `resource_get_data`, `resource_create`, `resource_modify`, `resource_move`, `resource_delete` | create/modify/move/delete | `.tres`/`.res` discovery + bounded property inspection (read-only) + gated create/modify + file lifecycle move/delete. |
@@ -923,6 +924,56 @@ A failed fd probe still records a sample (`count: null`) so the trend detector s
 **Windows / unknown-ceiling result** — `ceiling: null`, `ceilingMethod: "none"`, `state: "unknown"`. The trend is the only actionable signal there.
 
 **Errors:** `godot_process_not_found` (no live PID in the instance lock and no explicit `pid`).
+
+### `godot_open_mcp_generate_skill`
+
+- Route: `local` (reads `project.godot` + the capability catalog + a project type scan in-process — no `POST /tools/generate_skill` on the bridge)
+- Visibility group: always visible (meta-tool — an operator should regenerate the skill after plugin/script changes regardless of which groups are active)
+- Read-only/mutating: read-only when `write:false` (default — preview); writes the client skill dirs when `write:true`
+- Live editor requirement: none — works offline; the project state is read from `project.godot`, the catalog from the MCP server's own registries, and the type scan from the project tree
+
+Generate a project-specific agent skill file (`SKILL.md`) that reflects the ACTUAL project state: Godot version, enabled editor plugins (including the bridge/verify addons), autoloads, available tools + verify rules + fixes, and the key Godot types discovered in the project (`class_name` declarations + `@tool` scripts in `.gd` files; C# `Node`/`Resource` subclasses in `.cs` files). The generated content is a **project-inventory section MERGED with the canonical playbook** (`skills/godot-open-mcp/SKILL.md`) — the playbook is emitted verbatim followed by a `---` separator and a `# Project inventory — <name>` section. The canonical playbook stays hand-authored and is never overwritten. Regenerate after plugin or script changes to keep the skill current.
+
+`write:false` (default) returns the content as a string for preview (no files written). `write:true` persists to one or more client skill directories via `skills/client-paths.json`; unknown client keys are skipped, never aborting the whole write.
+
+**Input:**
+
+- `write` (optional, default `false`) — when `true`, write the generated skill to the client skill directories. When `false`, return the skill content as a string.
+- `clients` (optional, only used when `write:true`, default `["claude"]`) — which client skill directories to write to. Allowed values come from `skills/client-paths.json` (`cursor`, `claude`, `vscode`, `vs`, `opencode`, `gemini`, `cline`, `kilocode`, `agents`). Each entry writes to the project-relative path declared for that client.
+- `include_workflow` (optional, default `true`) — when `true`, compose the canonical playbook with the project inventory. When `false`, or when the template cannot be located (standalone `mcp-server/` install), emit only the standalone project inventory.
+
+**Preview result** (`write:false`):
+
+```json
+{
+  "action": "generate_skill",
+  "write": false,
+  "mergedWithTemplate": true,
+  "projectName": "Demo Game",
+  "godotVersion": "4.3",
+  "bridgeInstalled": true,
+  "verifyInstalled": false,
+  "pluginCount": 2,
+  "typeCount": 12,
+  "preview": "# Godot Open MCP — agent skill\n...\n## Project environment\n- **Godot version:** 4.3\n...",
+  "nextSteps": [
+    "Preview only — no files written. Pass write:true to persist ...",
+    "Regenerate after plugin or script changes to keep the skill current."
+  ],
+  "_source": "local",
+  "_route": { "route": "local" }
+}
+```
+
+**Write result** (`write:true`) — same fields plus a `written[]` array and `knownClients`:
+
+- `written[]` — `{ client, relativePath, existed }` per successfully written client dir. `existed` is `true` when the call overwrote a prior file (the canonical playbook install or a prior generate).
+- `knownClients` — the full client-key roster from `skills/client-paths.json`, so a caller can expand the `clients` list on the next call.
+- `preview` — a bounded preview of the full content (the full content is on disk). Truncated at ~6000 chars with a `… (N more chars; full content written to disk)` tail marker.
+
+**Merge model.** The canonical playbook (`skills/godot-open-mcp/SKILL.md`) is the source of truth for operational guidance and is emitted verbatim. The generator appends a project-inventory section carrying only what the template cannot know (Godot version, plugin install state, autoloads, discovered types, the live capability surface). A missing template degrades gracefully to a standalone inventory with its own short workflow summary.
+
+**Errors:** `generate_skill_failed` (unexpected disk read failure — the orchestrator is designed not to throw; a missing `project.godot` degrades to a `godotVersion: "unknown"` standalone inventory).
 
 ### `godot_open_mcp_validate_edit`
 

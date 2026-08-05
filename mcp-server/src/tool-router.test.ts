@@ -1705,3 +1705,111 @@ test("route: resource_pressure null ceiling (Windows) → state unknown, trend s
     restoreCeiling();
   }
 });
+
+// ---------------------------------------------------------------------------
+// P15.5 — generate_skill (local route, project-specific SKILL.md generator).
+//
+// Pins the router contract: route tag `local`, write:false → preview + no
+// written[], write:true → written[] to the manifest-declared client dir,
+// unknown client key skipped (never abort). The pure builder + project-state
+// reader are pinned in skill/generate-skill.test.ts.
+// ---------------------------------------------------------------------------
+
+// fs/os/path helpers for the generate_skill tmp-project fixtures. `mkdtemp`
+// and `writeFile` are already imported above (P7.2 block); add the two extras
+// this block needs without re-declaring the shared names.
+import { rm as rmFs, readFile as readFileFs } from "node:fs/promises";
+
+test("route: generate_skill write:false returns a local preview with no written targets", async () => {
+  // Point the project at a tmp dir with a minimal project.godot so the reader
+  // produces a non-degraded state; no files are written (write:false).
+  const root = await mkdtemp(join(tmpdir(), "gom-genskill-route-"));
+  await writeFile(
+    join(root, "project.godot"),
+    '[application]\n\nconfig/name="Router Test"\nconfig/features=PackedStringArray("4.3", "Forward Plus")\n',
+    "utf-8",
+  );
+  try {
+    const router = makeRouter(makeFakeLive(), makeFakeEventStream(), root);
+    const result = await router.route("godot_open_mcp_generate_skill", {});
+    assert.equal(result.isError, false);
+    assert.equal(routeOf(result), "local");
+    const body = parseBody(result);
+    assert.equal(body._source, "local");
+    assert.equal(body.write, false);
+    assert.equal(body.projectName, "Router Test");
+    assert.equal(body.godotVersion, "4.3");
+    assert.equal(body.mergedWithTemplate !== undefined, true);
+    assert.ok(typeof body.preview === "string" && (body.preview as string).length > 0);
+    // No write → no written[] / knownClients block.
+    assert.equal(body.written, undefined);
+    assert.equal(body.knownClients, undefined);
+    assert.ok(Array.isArray(body.nextSteps));
+  } finally {
+    await rmFs(root, { recursive: true, force: true });
+  }
+});
+
+test("route: generate_skill write:true persists to the default claude client dir", async () => {
+  const root = await mkdtemp(join(tmpdir(), "gom-genskill-write-"));
+  await writeFile(
+    join(root, "project.godot"),
+    '[application]\n\nconfig/name="Write Test"\nconfig/features=PackedStringArray("4.3")\n',
+    "utf-8",
+  );
+  try {
+    const router = makeRouter(makeFakeLive(), makeFakeEventStream(), root);
+    const result = await router.route("godot_open_mcp_generate_skill", {
+      write: true,
+    });
+    assert.equal(result.isError, false);
+    assert.equal(routeOf(result), "local");
+    const body = parseBody(result);
+    assert.equal(body.write, true);
+    const written = body.written as Array<{ client: string; relativePath: string; existed: boolean }>;
+    assert.equal(written.length, 1);
+    assert.equal(written[0].client, "claude");
+    assert.match(written[0].relativePath, /^\.claude\//);
+    // The file actually exists on disk and matches the preview's source.
+    const onDisk = await readFileFs(join(root, written[0].relativePath), "utf-8");
+    assert.ok(onDisk.length > 0);
+    // knownClients is surfaced on write:true so a caller can expand the list.
+    assert.ok(Array.isArray(body.knownClients) && (body.knownClients as string[]).includes("claude"));
+  } finally {
+    await rmFs(root, { recursive: true, force: true });
+  }
+});
+
+test("route: generate_skill write:true respects an explicit clients list and skips unknown keys", async () => {
+  const root = await mkdtemp(join(tmpdir(), "gom-genskill-clients-"));
+  await writeFile(join(root, "project.godot"), '[application]\n\nconfig/name="Clients"\n', "utf-8");
+  try {
+    const router = makeRouter(makeFakeLive(), makeFakeEventStream(), root);
+    const result = await router.route("godot_open_mcp_generate_skill", {
+      write: true,
+      clients: ["cursor", "claude", "not-a-real-client"],
+    });
+    assert.equal(result.isError, false);
+    const body = parseBody(result);
+    const written = body.written as Array<{ client: string }>;
+    const clients = written.map((w) => w.client).sort();
+    // Unknown key skipped; cursor + claude written.
+    assert.deepEqual(clients, ["claude", "cursor"]);
+  } finally {
+    await rmFs(root, { recursive: true, force: true });
+  }
+});
+
+test("route: generate_skill never invokes the live bridge (local-only)", async () => {
+  const root = await mkdtemp(join(tmpdir(), "gom-genskill-nolive-"));
+  await writeFile(join(root, "project.godot"), '[application]\n', "utf-8");
+  try {
+    const live = makeFakeLive();
+    const router = makeRouter(live, makeFakeEventStream(), root);
+    await router.route("godot_open_mcp_generate_skill", {});
+    // Local route must not POST to the bridge.
+    assert.equal(live.calls.length, 0);
+  } finally {
+    await rmFs(root, { recursive: true, force: true });
+  }
+});

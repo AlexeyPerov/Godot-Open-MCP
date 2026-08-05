@@ -87,6 +87,10 @@ const ALWAYS_VISIBLE_TOOLS: ReadonlySet<string> = new Set([
   // restart_editor. Always-visible so an operator can sample pressure and
   // catch a leak before the editor wedges.
   "godot_open_mcp_resource_pressure",
+  // P15.5 — generate_skill emits a project-specific SKILL.md. Always-visible
+  // so an operator can regenerate the skill after plugin/script changes
+  // regardless of which groups are active.
+  "godot_open_mcp_generate_skill",
 ]);
 
 /**

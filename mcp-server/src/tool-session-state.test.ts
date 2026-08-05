@@ -169,6 +169,7 @@ const EXPECTED_ALWAYS_VISIBLE = [
   "godot_open_mcp_read_compile_errors",
   "godot_open_mcp_restart_editor",
   "godot_open_mcp_resource_pressure",
+  "godot_open_mcp_generate_skill",
 ];
 
 test("ALWAYS_VISIBLE_TOOL_NAMES matches EXPECTED_ALWAYS_VISIBLE", () => {

@@ -54,6 +54,7 @@ import {
   REGRESSION_CHECK_TOOL,
   RESTART_EDITOR_TOOL,
   RESOURCE_PRESSURE_TOOL,
+  GENERATE_SKILL_TOOL,
 } from "./capabilities/route-policy.js";
 import {
   TOOL_GROUPS,
@@ -116,6 +117,12 @@ import {
   type FdCountResult,
   type FdCeilingResult,
 } from "./process-diagnostics.js";
+import {
+  generateSkill as generateSkillImpl,
+  truncateForPreview,
+  knownClientKeys,
+  type GenerateSkillOptions,
+} from "./skill/generate-skill.js";
 
 /**
  * Tool name for the live `scene_list_opened` handler, used by
@@ -364,6 +371,9 @@ export class ToolRouter implements Router {
     }
     if (toolName === RESOURCE_PRESSURE_TOOL) {
       return this.routeResourcePressure(args);
+    }
+    if (toolName === GENERATE_SKILL_TOOL) {
+      return this.routeGenerateSkill(args);
     }
     if (toolName === MANAGE_TOOLS_TOOL) {
       return this.routeManageTools(args);
@@ -1673,6 +1683,127 @@ export class ToolRouter implements Router {
       },
       agentNextSteps: RESOURCE_PRESSURE_AGENT_NEXT_STEPS,
     };
+  }
+
+  // ── P15.5 — local `generate_skill` (project-specific SKILL.md generator) ─
+
+  /**
+   * `godot_open_mcp_generate_skill` — emit a project-specific skill file that
+   * reflects the actual project state (Godot version, enabled plugins,
+   * autoloads, available tools + verify rules + fixes, key `class_name` /
+   * Node-Resource subclasses) and MERGE it with the canonical playbook. The
+   * canonical playbook (`skills/godot-open-mcp/SKILL.md`) stays hand-authored
+   * and is never overwritten — the generator appends a `# Project inventory`
+   * section after a `---` separator.
+   *
+   * Local route (no `POST /tools/generate_skill` on the bridge). Reads
+   * `project.godot` + the capability catalog (`buildCapabilities` over the same
+   * `ALL_TOOLS` + rule/fix catalogs `routeCapabilities` uses) + a project type
+   * scan entirely in the MCP process. `write:false` (default) returns the
+   * content as a string (preview, truncated to keep the JSON envelope bounded);
+   * `write:true` persists to one or more client skill dirs via
+   * `skills/client-paths.json` (unknown client keys are skipped, never abort).
+   *
+   * Adapted from Unity Open MCP's `routeGenerateSkill` (adapt for the
+   * write/clients/include_workflow args + the merge-with-template composer;
+   * the project-state read + type scan are Godot-native — see
+   * `skill/generate-skill.ts`). Never throws — a missing project.godot / a
+   * missing template both degrade gracefully (standalone inventory).
+   */
+  private async routeGenerateSkill(
+    args: Record<string, unknown>,
+  ): Promise<CallToolResult> {
+    const routeMeta: RouteMeta = { route: "local" };
+
+    const options: GenerateSkillOptions = {};
+    if (args.write === true) options.write = true;
+    if (
+      Array.isArray(args.clients) &&
+      args.clients.every((c) => typeof c === "string")
+    ) {
+      options.clients = args.clients as string[];
+    }
+    if (typeof args.include_workflow === "boolean") {
+      options.includeWorkflow = args.include_workflow;
+    }
+
+    // Build the capability surface over the same catalogs `routeCapabilities`
+    // uses so the generated skill's "Available tools / Verify rules / Fixes"
+    // blocks match what the agent discovers via godot_open_mcp_capabilities.
+    const caps = buildCapabilities(
+      { tools: ALL_TOOLS, rules: RULE_CATALOG, fixes: FIX_CATALOG },
+      {},
+    );
+
+    let result;
+    try {
+      result = await generateSkillImpl(this.projectPath, caps, options);
+    } catch (e) {
+      // The orchestrator is designed not to throw (a missing project.godot
+      // degrades to a standalone inventory), but defend a programmatic caller
+      // from an unexpected disk error so the tool never crashes the server.
+      return sourceResult(
+        {
+          error: {
+            code: "generate_skill_failed",
+            message:
+              `generate_skill failed unexpectedly: ${(e as Error)?.message ?? "unknown error"}. ` +
+              "The project may be unreadable; check project.godot and retry.",
+            projectPath: this.projectPath,
+          },
+        },
+        "local",
+        routeMeta,
+        true,
+      );
+    }
+
+    const knownClients = knownClientKeys();
+    return sourceResult(
+      {
+        action: "generate_skill",
+        write: options.write === true,
+        mergedWithTemplate: result.mergedWithTemplate,
+        projectName: result.project.projectName,
+        godotVersion: result.project.godotVersion,
+        bridgeInstalled: result.project.bridgeInstalled,
+        verifyInstalled: result.project.verifyInstalled,
+        pluginCount: result.project.plugins.length,
+        typeCount: result.project.types.length,
+        ...(options.write === true
+          ? {
+              written: result.written.map((w) => ({
+                client: w.client,
+                relativePath: w.relativePath,
+                existed: w.existed,
+              })),
+              knownClients,
+            }
+          : {}),
+        // Bounded preview — the full skill is on disk when write:true, or is
+        // the returned string when write:false. Truncating keeps the JSON
+        // envelope from blowing the response size for large inventories.
+        preview: truncateForPreview(result.skill),
+        nextSteps:
+          options.write === true
+            ? [
+                "Skill written. Agents driving this project should reload the " +
+                  "skill (restart the MCP client or re-read the skill file) so " +
+                  "the new inventory takes effect.",
+                "Regenerate after plugin or script changes via " +
+                  "godot_open_mcp_generate_skill with write:true.",
+              ]
+            : [
+                "Preview only — no files written. Pass write:true to persist " +
+                  "to the client skill dirs (defaults to [\"claude\"]; use " +
+                  "clients: [...] for more).",
+                "Regenerate after plugin or script changes to keep the skill " +
+                  "current.",
+              ],
+      },
+      "local",
+      routeMeta,
+    );
   }
 
   // ── P8.3 — local `manage_tools` (per-session visibility mutator) ────────

@@ -66,6 +66,26 @@ read. The full MCP-client → skill-target mapping is in
 Until a setup command ships, copy the playbook manually: place
 `skills/godot-open-mcp/SKILL.md` at the destination path for your client.
 
+### Project-specific regeneration (`godot_open_mcp_generate_skill`)
+
+The hand-authored playbook carries operational guidance that does not vary per
+project. A project-specific generator is available as the
+`godot_open_mcp_generate_skill` MCP tool: it reads the actual project state
+(Godot version, enabled editor plugins, autoloads, available verify rules,
+key `class_name` / `@tool` / Node-Resource subclasses) and emits a
+**project-inventory section MERGED with the canonical playbook** — the playbook
+is emitted verbatim followed by a `# Project inventory — <name>` section. The
+canonical playbook is never overwritten.
+
+- `write:false` (default) returns the content as a string for preview.
+- `write:true` persists to one or more client skill directories via
+  [`skills/client-paths.json`](../skills/client-paths.json) (the same manifest
+  the manual install table above derives from). Unknown client keys are
+  skipped, never aborting the write.
+
+Regenerate after plugin or script changes so the inventory stays current. The
+tool is local-routed (no bridge round-trip) and always visible.
+
 ## Verification
 
 Every change to the skill or to `client-paths.json` runs through `scripts/check-skill.mjs`, which:

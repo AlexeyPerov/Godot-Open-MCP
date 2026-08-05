@@ -34,6 +34,7 @@ import {
   REGRESSION_CHECK_TOOL,
   RESTART_EDITOR_TOOL,
   RESOURCE_PRESSURE_TOOL,
+  GENERATE_SKILL_TOOL,
   type RoutePolicy,
 } from "./route-policy.js";
 import { ALL_TOOLS } from "../tools/index.js";
@@ -59,6 +60,7 @@ const ROUTER_NAMED_HANDLERS: ReadonlySet<string> = new Set([
   REGRESSION_CHECK_TOOL,
   RESTART_EDITOR_TOOL,
   RESOURCE_PRESSURE_TOOL,
+  GENERATE_SKILL_TOOL,
 ]);
 
 const REGISTERED = new Set(ALL_TOOLS.map((t) => t.name));
@@ -233,4 +235,5 @@ test("the router named-handler constants are the expected tool names", () => {
   assert.equal(REGRESSION_CHECK_TOOL, "godot_open_mcp_regression_check");
   assert.equal(RESTART_EDITOR_TOOL, "godot_open_mcp_restart_editor");
   assert.equal(RESOURCE_PRESSURE_TOOL, "godot_open_mcp_resource_pressure");
+  assert.equal(GENERATE_SKILL_TOOL, "godot_open_mcp_generate_skill");
 });

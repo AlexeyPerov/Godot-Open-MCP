@@ -57,6 +57,10 @@ export const RESTART_EDITOR_TOOL = "godot_open_mcp_restart_editor";
 // server-side against the OS; the bridge is the thing that dies on resource
 // exhaustion, so the tool may not depend on it.
 export const RESOURCE_PRESSURE_TOOL = "godot_open_mcp_resource_pressure";
+// P15.5 — generate a project-specific SKILL.md. Local: reads project.godot +
+// the capability catalog + a project type scan entirely in the MCP process;
+// no bridge round-trip.
+export const GENERATE_SKILL_TOOL = "godot_open_mcp_generate_skill";
 
 const LOCAL_TOOLS: ReadonlySet<string> = new Set([
   CAPABILITIES_TOOL,
@@ -65,6 +69,7 @@ const LOCAL_TOOLS: ReadonlySet<string> = new Set([
   MANAGE_TOOLS_TOOL,
   RESTART_EDITOR_TOOL,
   RESOURCE_PRESSURE_TOOL,
+  GENERATE_SKILL_TOOL,
 ]);
 
 /**

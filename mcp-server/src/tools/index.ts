@@ -92,6 +92,7 @@ import { baselineCreate } from "./baseline-create.js";
 import { regressionCheck } from "./regression-check.js";
 import { restartEditor } from "./restart-editor.js";
 import { resourcePressure } from "./resource-pressure.js";
+import { generateSkill } from "./generate-skill.js";
 
 /** Ordered list of every tool exposed over stdio MCP. */
 export const ALL_TOOLS: Tool[] = [
@@ -326,4 +327,13 @@ export const ALL_TOOLS: Tool[] = [
   // cache. Always-visible meta-tool (no group); local route — the bridge is the thing that dies
   // on resource exhaustion, so the tool may not depend on it.
   resourcePressure,
+  // P15.5 — generate_skill: emit a project-specific SKILL.md that reflects the actual project
+  // state (Godot version, enabled plugins, autoloads, available verify rules, key class_name /
+  // Node-Resource subclasses) and MERGE it with the canonical playbook. write:false (default)
+  // returns the content as a string (preview); write:true persists to one or more client skill
+  // dirs via skills/client-paths.json. The canonical playbook stays hand-authored and is never
+  // overwritten — the generator appends a `# Project inventory` section. Always-visible meta-tool
+  // (no group); local route — no bridge round-trip (reads project.godot + the catalog + the
+  // project type scan entirely in the MCP process).
+  generateSkill,
 ];
