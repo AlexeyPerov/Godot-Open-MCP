@@ -276,6 +276,18 @@
          SetOperation / Get — EditorInterface / Csg*3D-coupled) is #if TOOLS and verified via
          the headless Godot smoke / live call path, not here. -->
     <Compile Include="..\Editor\Tools\Extensions\Csg\CsgBodies.cs" Link="Source\Csg\CsgBodies.cs" />
+    <!-- P16.1 — project-settings pack. The pure-managed body parsers
+         (SettingsGetProjectBody / SettingsSetProjectBody / SettingsFieldPatch, the
+         SettingsSection enum, the SettingsSectionParser, and the
+         SettingsSectionCatalog allowlist) are linked for unit testing. They reuse
+         the P12.1 JsonScalar extractor (linked above). The allowlist
+         (SettingsSectionCatalog — IsWritable / WritableSections / SectionPrefix) is
+         the highest-value unit-test surface in this pack — it pins the writable
+         sections and the section→prefix map without requiring the editor. The
+         editor-only handler (SettingsTools.GetProject / SetProject —
+         ProjectSettings / Godot.Json-coupled) is #if TOOLS and verified via the
+         headless Godot smoke / live call path, not here. -->
+    <Compile Include="..\Editor\Tools\Extensions\Settings\SettingsBodies.cs" Link="Source\Settings\SettingsBodies.cs" />
     <!-- P3.5 — gate on mutators. The gate types (GateMode/GateOutcome/DeltaData/GateDispatchResult/
          GatePolicy/GateDefaultPolicy) and the VerifyGateAdapter are pure-managed for the parts the unit
          tests exercise (decision matrix, next-step hints, delta math, gate-mode parsing). GatePolicy

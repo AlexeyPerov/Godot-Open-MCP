@@ -127,6 +127,14 @@ export const TOOL_GROUPS: ToolGroup[] = [
       "any CSG shape's scalar config.",
     defaultEnabled: false,
   },
+  {
+    id: "settings",
+    description:
+      "Project settings tools (Godot 4.3+): read one project.godot section (rendering / physics / " +
+      "input / layer_names / autoload / application / display) or a per-section summary, and write " +
+      "key/value pairs within one section via Godot's ProjectSettings API (no raw text edits).",
+    defaultEnabled: false,
+  },
 ];
 
 /**
@@ -330,6 +338,18 @@ assign(
     "csg_combiner_create",
     "csg_set_operation",
     "csg_get",
+  ].map((suffix) => `godot_open_mcp_${suffix}`),
+);
+
+// --- settings (P16.1 — Godot 4.3+ project-settings pack) --------------------
+// Two tools: get_project (read-only — one section or a per-section summary) /
+// set_project (mutating — key/value pairs within one section via ProjectSettings
+// API). Hidden until activated via manage_tools.
+assign(
+  "settings",
+  [
+    "settings_get_project",
+    "settings_set_project",
   ].map((suffix) => `godot_open_mcp_${suffix}`),
 );
 

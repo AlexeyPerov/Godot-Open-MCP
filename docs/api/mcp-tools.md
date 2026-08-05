@@ -103,6 +103,8 @@ The table below is the published view of `ALL_TOOLS`. The `scripts/check-tool-do
 | `godot_open_mcp_screenshot_camera` | screenshot | live | typed-editor | no | n/a | Off-screen render from a `Camera2D`/`Camera3D` in the edited scene (image content block). |
 | `godot_open_mcp_screenshot_isolated` | screenshot | live | typed-editor | no | n/a | Render a `Node3D` alone in an isolated world from one of six directions (image content block). |
 | `godot_open_mcp_screenshot_viewport` | screenshot | live | typed-editor | no | n/a | Capture the active editor 2D/3D viewport (image content block). |
+| `godot_open_mcp_settings_get_project` | settings | live | settings | no | n/a | Read one `project.godot` section (rendering / physics / input / layer_names / autoload / application / display) or a per-section summary. |
+| `godot_open_mcp_settings_set_project` | settings | live | settings | disk | enforce | Write key/value pairs within one `project.godot` section via Godot's `ProjectSettings` API (no raw text edits). |
 | `godot_open_mcp_tilemap_clear` | tilemap | live | tilemap | editor state | enforce | Clear every cell on a `TileMapLayer` while keeping its TileSet. |
 | `godot_open_mcp_tilemap_create` | tilemap | live | tilemap | editor state | enforce | Create a Godot 4.3+ `TileMapLayer` node in the edited scene (returns NodeData). |
 | `godot_open_mcp_tilemap_erase_cell` | tilemap | live | tilemap | editor state | enforce | Erase one cell from a `TileMapLayer`. |
@@ -2777,6 +2779,58 @@ Read the scalar configuration of any CSG shape. Returns the resolved `type` (God
 **Result:** `{ nodePath, type, operation, kind, ...kind-specific scalars }`.
 
 **Errors:** `missing_parameter`, `no_edited_scene`, `node_not_found`, `wrong_node_type`.
+
+## Settings tools
+
+Settings tools read and write `project.godot` sections via Godot's `ProjectSettings` API. They replace ad-hoc `project.godot` hand-edits through `filesystem_*` / `resource_*` tools (which are unsafe — no validation, can corrupt the project — and unverified — no gate). The read path enumerates a section's keys via `ProjectSettings.GetPropertyList()` and serializes each value with Godot's own `Json.Stringify` so every Variant type (Color, Vector2/3, Dictionary, Array) round-trips; the write path routes every key/value through `ProjectSettings.SetSetting` + `Save` (never raw text edits).
+
+This is a **`settings` group** family — hidden from `ListTools` until an agent activates it via `godot_open_mcp_manage_tools({ action: "activate", group: "settings" })`. As with every group, hiding is a prompt-size control, not an authorization boundary — a hidden tool name still routes when called directly.
+
+**Scope.** The seven writable sections are `rendering`, `physics`, `input`, `layer_names`, `autoload`, `application`, `display` — Godot's `project.godot` first path segments. `settings_get_project` additionally accepts `section:"all"` for a per-section key-count summary (a read-only switch, not a writable domain — `settings_set_project` rejects it). Unity-specific sections (PlayerSettings quality tiers, scripting backend enum) are intentionally NOT ported.
+
+**Section allowlist.** Only known sections are writable; an unknown section (typo) surfaces `invalid_parameter`. A relative key (no `/`) is prefixed with the section's leading segment (e.g. key `run/main_scene` under section `application` → `application/run/main_scene`); an absolute key must stay inside the section (a cross-section key is skipped with a warning so the section arg and the key agree).
+
+**Shared contracts.** `paths_hint` is `res://project.godot` (the single mutated file) — the one settings-family mutator whose scope is not a `.tscn`. `settings_set_project` is gated (`enforce` by default) and requires a non-empty `paths_hint` even when `gate` is `off`. `settings_get_project` is read-only and gate-free.
+
+### `godot_open_mcp_settings_get_project`
+
+- Route: `live`
+- Visibility group: `settings`
+- Read-only/mutating: read-only
+- Live editor requirement: requires the bridge
+
+Read one `project.godot` section and return its keys + current values. Values are serialized to JSON by Godot's own `Json.Stringify` so every Variant type an agent might read (Color, Vector2/3, Dictionary, Array, Packed*) round-trips. Pass `section:"all"` for a per-section key-count summary (no per-key values) so you can pick which section to read in full without dumping the whole file.
+
+**Input:**
+
+- `section` (required) — `"rendering"` | `"physics"` | `"input"` | `"layer_names"` | `"autoload"` | `"application"` | `"display"` | `"all"`.
+
+**Result (single section):** `{ section, keyCount, values: { "<full property path>": <serialized value>, ... } }`.
+**Result (`all`):** `{ section: "all", sections: [{ section, keyCount }, ...] }`.
+
+**Errors:** `invalid_parameter` (unknown/absent section), `execution_error`.
+
+### `godot_open_mcp_settings_set_project`
+
+- Route: `live`
+- Visibility group: `settings`
+- Read-only/mutating: mutating (gate `enforce`, `paths_hint` required)
+- Live editor requirement: requires the bridge
+
+Write key/value pairs within one `project.godot` section via Godot's `ProjectSettings.SetSetting` + `Save` API (no raw text edits — the API validates the file's formatting/escaping). Pass a section plus a `fields[]` array of `{key, value}` patches; the handler applies each patch, persists once with `ProjectSettings.Save`, and returns the applied keys plus any per-key warnings (a bad key does NOT abort the batch — good entries still land). A null value clears the setting.
+
+**Input:**
+
+- `section` (required) — one writable section: `"rendering"` | `"physics"` | `"input"` | `"layer_names"` | `"autoload"` | `"application"` | `"display"`. (`"all"` is rejected — it is a read-only summary switch.)
+- `fields` (required, non-empty) — array of `{ key, value? }` patches.
+  - `key` (required) — the `ProjectSettings` property path. A relative key (no `/`) is prefixed with the section's leading segment; an absolute key must stay inside the section. Examples: `run/main_scene` under `application` → `application/run/main_scene`; `3d/physics/default_gravity` under `physics`.
+  - `value` (optional) — any JSON type (string / number / boolean / null / object / array). Godot re-parses the token into a Variant and stores it via `SetSetting`, so a Color is an `{r,g,b[,a]}` object, a Vector3 is an `{x,y,z}` object, etc. Omit or pass `null` to clear the setting.
+- `paths_hint` (required) — `["res://project.godot"]`.
+- `gate` (optional, default `enforce`) — `"enforce"` | `"warn"` | `"off"`.
+
+**Result:** `{ section, action: "set_project", applied: ["<full property path>", ...], warnings?: [...] }`.
+
+**Errors:** `paths_hint_required`, `missing_parameter` (absent/empty `fields`), `invalid_parameter` (unknown section, or `"all"`), `no_applicable_keys` (every patch was skipped), `execution_error` (including `ProjectSettings.Save` failure — in-memory updates land but the file is not persisted).
 
 ## Offline fidelity limitations
 

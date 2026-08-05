@@ -192,6 +192,14 @@ namespace GodotOpenMcp.Bridge.Editor
                 // read-only defaults and get are gate-free. Idempotent re-register refreshes
                 // the handler references after a domain reload.
                 CsgTools.RegisterCsgTools();
+                // P16.1 — project-settings pack: two typed tools for project.godot sections
+                // (get_project read-only / set_project mutating), group settings. The first
+                // Phase 16 typed-editor-breadth family. set_project registers
+                // defaultGate:"enforce" and validates paths_hint itself (scoped to
+                // res://project.godot); get_project is gate-free. Writes route through Godot's
+                // ProjectSettings.SetSetting + Save (never raw text edits). Idempotent
+                // re-register refreshes the handler references after a domain reload.
+                SettingsTools.RegisterSettingsTools();
 
                 // Start the HTTP listener serving /ping and POST /tools/{name}. Stays down
                 // (and connected:false) if the bind fails — the editor remains usable, the

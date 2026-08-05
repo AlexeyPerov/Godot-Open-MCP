@@ -82,6 +82,8 @@ import { csgCylinderCreate } from "./csg-cylinder-create.js";
 import { csgCombinerCreate } from "./csg-combiner-create.js";
 import { csgSetOperation } from "./csg-set-operation.js";
 import { csgGet } from "./csg-get.js";
+import { settingsGetProject } from "./settings-get-project.js";
+import { settingsSetProject } from "./settings-set-project.js";
 import { bridgeStatus } from "./bridge-status.js";
 import { pullEvents } from "./pull-events.js";
 import { readCompileErrors } from "./read-compile-errors.js";
@@ -261,6 +263,15 @@ export const ALL_TOOLS: Tool[] = [
   csgCombinerCreate,
   csgSetOperation,
   csgGet,
+  // P16.1 — project-settings pack: two typed tools for project.godot sections (group `settings`,
+  // hidden until activated via manage_tools). get_project reads one section (rendering / physics /
+  // input / layer_names / autoload / application / display) or a per-section summary ("all");
+  // read-only, gate-free. set_project writes key/value pairs within one section via Godot's
+  // ProjectSettings.SetSetting + Save API (never raw text edits), gated, paths_hint res://project.godot.
+  // The section allowlist rejects unknown sections and "all" (write); per-key failures accumulate as
+  // warnings so a batch's good entries still land. First Phase 16 typed-editor-breadth family.
+  settingsGetProject,
+  settingsSetProject,
   // P5.3 — bridge_status: operator-oriented health snapshot. Composes the instance-lock classifier
   // (instance-discovery.ts#classifyInstance) with one /ping probe and returns a coarse status token
   // (running | compiling | stopped | unreachable | dead_bridge) + classification + recoveryHint.
