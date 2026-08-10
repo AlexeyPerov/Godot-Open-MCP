@@ -59,6 +59,10 @@ The table below is the published view of `ALL_TOOLS`. The `scripts/check-tool-do
 | `godot_open_mcp_editor_selection_set` | editor | live | typed-editor | editor state | enforce | Replace or clear the node selection (all-or-nothing resolution). |
 | `godot_open_mcp_filesystem_list` | filesystem | live-first | typed-editor | no | n/a | List immediate children of a `res://` directory; live reads authoritative importer metadata. |
 | `godot_open_mcp_filesystem_reimport` | filesystem | live | typed-editor | disk | enforce | Reimport exact files or trigger a full scan; blocks until the import pipeline settles. |
+| `godot_open_mcp_material_create` | materials | live | materials | disk | enforce | Instantiate a `StandardMaterial3D` / `ORMMaterial3D` / `ShaderMaterial` and save as `.tres` (overwrite opt-in). |
+| `godot_open_mcp_material_get_properties` | materials | live | materials | no | n/a | List a material's properties + current values (serialized by Godot's own `Json.Stringify`). |
+| `godot_open_mcp_material_set_property` | materials | live | materials | disk | enforce | Set a single property on a saved material and persist via `ResourceSaver` (any Variant type). |
+| `godot_open_mcp_material_set_shader` | materials | live | materials | disk | enforce | Assign a `.gdshader` to a `ShaderMaterial` and persist; uniforms become settable properties. |
 | `godot_open_mcp_dependencies` | asset-intelligence | offline | asset-intelligence | no | n/a | Offline forward + reverse dependencies, broken edges, cycles, optional transitive impact. |
 | `godot_open_mcp_find_references` | asset-intelligence | offline | asset-intelligence | no | n/a | Offline reverse dependency lookup — assets that reference a given `res://` path or `uid://`. |
 | `godot_open_mcp_generate_skill` | core | local | always visible | disk (when `write:true`) | n/a | Generate a project-specific `SKILL.md` (Godot version, enabled plugins, autoloads, available rules, key types); merges with the canonical playbook. |
@@ -105,6 +109,7 @@ The table below is the published view of `ALL_TOOLS`. The `scripts/check-tool-do
 | `godot_open_mcp_screenshot_viewport` | screenshot | live | typed-editor | no | n/a | Capture the active editor 2D/3D viewport (image content block). |
 | `godot_open_mcp_settings_get_project` | settings | live | settings | no | n/a | Read one `project.godot` section (rendering / physics / input / layer_names / autoload / application / display) or a per-section summary. |
 | `godot_open_mcp_settings_set_project` | settings | live | settings | disk | enforce | Write key/value pairs within one `project.godot` section via Godot's `ProjectSettings` API (no raw text edits). |
+| `godot_open_mcp_shader_get_data` | materials | live | materials | no | n/a | Read a `.gdshader`'s uniforms (names + Variant types) via a temporary `ShaderMaterial`. |
 | `godot_open_mcp_tilemap_clear` | tilemap | live | tilemap | editor state | enforce | Clear every cell on a `TileMapLayer` while keeping its TileSet. |
 | `godot_open_mcp_tilemap_create` | tilemap | live | tilemap | editor state | enforce | Create a Godot 4.3+ `TileMapLayer` node in the edited scene (returns NodeData). |
 | `godot_open_mcp_tilemap_erase_cell` | tilemap | live | tilemap | editor state | enforce | Erase one cell from a `TileMapLayer`. |
@@ -160,6 +165,8 @@ The MCP server filters `ListTools` through a per-session `ToolSessionState` so t
 | `particles` | no | Godot 4.3+ `GpuParticles2D`/`3D` tools (2D + 3D): starter defaults, create an emitter (+ optional initial scalars + process material), configure allow-listed + clamped scalars, start/stop emission (with optional restart), inspect any emitter. |
 | `animation` | no | Godot 4.3+ `AnimationPlayer` tools: starter defaults, create a player node, add an empty `AnimationLibrary`, create an `Animation` clip (auto-creating the library when missing), add a value / position_3d / rotation_3d / scale_3d track, insert a keyframe, inspect any player's libraries / animations / tracks. |
 | `csg` | no | Godot 4.3+ CSG primitive tools (3D only): starter defaults, create `CsgBox3D` / `CsgSphere3D` / `CsgCylinder3D` / `CsgCombiner3D` nodes (with optional kind-specific scalars + boolean operation), set the boolean operation (union / intersection / subtraction) on any CSG shape, inspect any CSG shape's scalar config. |
+| `settings` | no | Godot 4.3+ project-settings tools: read one `project.godot` section (or a per-section summary) and write key/value pairs within one section via Godot's `ProjectSettings` API (no raw text edits). |
+| `materials` | no | Godot 4.3+ materials + shaders tools: create a `StandardMaterial3D` / `ORMMaterial3D` / `ShaderMaterial` `.tres`, list a material's properties + values, set one property, assign a `.gdshader` to a `ShaderMaterial`, and read a `.gdshader`'s uniforms + types. |
 
 The catalog source of truth is `mcp-server/src/capabilities/tool-groups.ts`. Activate or deactivate groups with `godot_open_mcp_manage_tools`; on a successful change the server emits the MCP `notifications/tools/list_changed` notification so clients that support `listChanged` refresh `ListTools` automatically. Hiding a tool is a prompt-size control, not an authorization boundary — a hidden tool name still routes when called directly.
 
@@ -2831,6 +2838,113 @@ Write key/value pairs within one `project.godot` section via Godot's `ProjectSet
 **Result:** `{ section, action: "set_project", applied: ["<full property path>", ...], warnings?: [...] }`.
 
 **Errors:** `paths_hint_required`, `missing_parameter` (absent/empty `fields`), `invalid_parameter` (unknown section, or `"all"`), `no_applicable_keys` (every patch was skipped), `execution_error` (including `ProjectSettings.Save` failure — in-memory updates land but the file is not persisted).
+
+## Materials tools
+
+Materials tools create, inspect, and mutate Godot materials and read shader uniforms. They replace hand-constructing `.tres` files via `resource_*` (error-prone and unverified) with typed create/get/set operations that validate property names, persist through `ResourceSaver`, and surface Godot's own serialization so every Variant type (Color, Vector, texture refs) round-trips. The read path walks `material.GetPropertyList()` and serializes each value via Godot's own `Json.Stringify`; the write path re-parses a raw JSON value token into a Variant via `Json.ParseString` and writes it through `material.Set`.
+
+This is a **`materials` group** family — hidden from `ListTools` until an agent activates it via `godot_open_mcp_manage_tools({ action: "activate", group: "materials" })`. As with every group, hiding is a prompt-size control, not an authorization boundary — a hidden tool name still routes when called directly.
+
+**Scope.** The three first-class Godot material families are creatable: `standard` (`StandardMaterial3D` — the PBR default with `albedo_color` / `metallic` / `roughness` / emission), `orm` (`ORMMaterial3D`), and `shader` (`ShaderMaterial` — takes a `shader_path` res:// `.gdshader`). Materials are addressed by `res://` path or `uid://` identifier; there is no instance-id targeting (a saved `.tres` carries only its path). Unity render-queue / SRP-batcher keyword APIs are intentionally NOT ported.
+
+**Shared contracts.** `paths_hint` for the three mutators is the material `.tres` path (the single mutated file). All three mutators are gated (`enforce` by default) and require a non-empty `paths_hint` even when `gate` is `off`. The two read-only tools (`material_get_properties`, `shader_get_data`) are gate-free.
+
+### `godot_open_mcp_material_create`
+
+- Route: `live`
+- Visibility group: `materials`
+- Read-only/mutating: mutating (gate `enforce`, `paths_hint` required)
+- Live editor requirement: requires the bridge
+
+Instantiate a `StandardMaterial3D` / `ORMMaterial3D` / `ShaderMaterial` via `ClassDB` and persist it at a new `res://` destination through `ResourceSaver`. The destination must not already exist unless `overwrite` is `true` (a taken path surfaces `material_exists` — re-saving re-GUIDs the resource and breaks references, so use `material_set_property` when you only need to change properties). For the `shader` kind, `shader_path` (a res:// `.gdshader`) is assigned at create time so the shader's uniforms become immediately settable.
+
+**Input:**
+
+- `resource_path` (required) — new `res://` destination ending in `.tres` or `.res`. Must not already exist unless `overwrite` is `true`.
+- `kind` (required) — `"standard"` | `"orm"` | `"shader"`.
+- `shader_path` (required for `shader` kind) — a `res://` `.gdshader` to assign to the new `ShaderMaterial`. Ignored for the `standard` / `orm` kinds.
+- `overwrite` (optional, default `false`) — when `true`, replace a material that already exists at `resource_path`.
+- `paths_hint` (required) — `["<the destination .tres path>"]`.
+- `gate` (optional, default `enforce`) — `"enforce"` | `"warn"` | `"off"`.
+
+**Result:** `{ resourcePath, kind, type, shader, saved: true }`. `shader` is the assigned shader's `resourcePath` for the `shader` kind, else `null`.
+
+**Errors:** `paths_hint_required`, `missing_parameter` (absent `resource_path`, or `shader_path` for the `shader` kind), `invalid_parameter` (unknown `kind`), `invalid_path`, `material_exists` (destination taken, no `overwrite`), `shader_not_found` (`shader` kind + bad/absent `shader_path`), `resource_type_invalid`, `resource_save_failed`, `filesystem_unavailable`.
+
+### `godot_open_mcp_material_get_properties`
+
+- Route: `live`
+- Visibility group: `materials`
+- Read-only/mutating: read-only
+- Live editor requirement: requires the bridge
+
+Read a saved material's properties. Loads the `.tres`, walks `GetPropertyList`, and serializes each property's current value to JSON via Godot's own `Json.Stringify` so every Variant type (Color, Vector2/3/4, texture refs) round-trips. Inspector-only entries (category/group annotations) are filtered by their usage flags, so only real settable properties appear. For a `ShaderMaterial`, the shader's uniforms appear as settable properties once a shader is assigned (`material_set_shader`).
+
+**Input:**
+
+- `resource_path` (required) — a `res://` path or `uid://` identifier pointing at a saved `.tres`/`.res` material.
+
+**Result:** `{ resourcePath, type, properties: [{ name, type, value }, ...], count }`. A texture slot's `value` is a compact `{ type, resourcePath }` leaf (the `res://` path an agent needs to set that slot).
+
+**Errors:** `missing_parameter`, `invalid_path`, `resource_not_found`, `resource_load_failed`, `wrong_resource_type` (not a Material), `execution_error`.
+
+### `godot_open_mcp_material_set_property`
+
+- Route: `live`
+- Visibility group: `materials`
+- Read-only/mutating: mutating (gate `enforce`, `paths_hint` required)
+- Live editor requirement: requires the bridge
+
+Set a single property on a saved material and persist it through `ResourceSaver`. The handler validates the property exists on the material (a typo surfaces `property_not_found`), re-parses the raw `value` token into a Godot Variant via `Json.ParseString`, writes it via `material.Set(property, value)`, and saves. Any property type round-trips: a Color is an `{r,g,b[,a]}` object, a Vector3 an `{x,y,z}` object, a scalar a number, an enum an int, a texture a `{"resource_path":"res://..."}` object. Pass `null` to clear the property. For a `ShaderMaterial`, the shader's uniforms become settable after `material_set_shader` assigns a `.gdshader`.
+
+**Input:**
+
+- `resource_path` (required) — a `res://` path or `uid://` identifier pointing at a saved `.tres`/`.res` material.
+- `property` (required) — the Godot property name (e.g. `albedo_color`, `metallic`, `roughness`, `emission_enabled`, or a shader uniform name).
+- `value` (required) — any JSON type re-parsed into the property's Variant type. `null` clears.
+- `paths_hint` (required) — `["<the material .tres path>"]`.
+- `gate` (optional, default `enforce`) — `"enforce"` | `"warn"` | `"off"`.
+
+**Result:** `{ resourcePath, property, value, saved: true }`.
+
+**Errors:** `paths_hint_required`, `missing_parameter` (absent `resource_path` or `property`), `invalid_path`, `resource_not_found`, `resource_load_failed`, `wrong_resource_type`, `property_not_found`, `resource_save_failed`, `execution_error`.
+
+### `godot_open_mcp_material_set_shader`
+
+- Route: `live`
+- Visibility group: `materials`
+- Read-only/mutating: mutating (gate `enforce`, `paths_hint` required)
+- Live editor requirement: requires the bridge
+
+Assign a `.gdshader` to a `ShaderMaterial` and persist it. Loads the material `.tres`, type-checks it is a `ShaderMaterial`, loads the shader at `shader_path`, assigns it via `material.Shader = shader`, and saves. After the assignment the shader's uniforms become settable properties — use `shader_get_data` to enumerate them, then `material_set_property` to set each uniform. A non-`ShaderMaterial` surfaces `wrong_resource_type`.
+
+**Input:**
+
+- `resource_path` (required) — a `res://` path or `uid://` identifier pointing at a saved `.tres`/`.res `ShaderMaterial` (use `material_create` with `kind:"shader"` first if it does not exist).
+- `shader_path` (required) — the `res://` `.gdshader` to assign.
+- `paths_hint` (required) — `["<the material .tres path>"]`.
+- `gate` (optional, default `enforce`) — `"enforce"` | `"warn"` | `"off"`.
+
+**Result:** `{ resourcePath, shader, saved: true }`.
+
+**Errors:** `paths_hint_required`, `missing_parameter` (absent `resource_path` or `shader_path`), `invalid_path`, `resource_not_found`, `resource_load_failed`, `wrong_resource_type` (not a `ShaderMaterial`), `shader_not_found`, `resource_save_failed`, `execution_error`.
+
+### `godot_open_mcp_shader_get_data`
+
+- Route: `live`
+- Visibility group: `materials`
+- Read-only/mutating: read-only
+- Live editor requirement: requires the bridge
+
+Read a `.gdshader`'s uniforms. Loads the shader, creates a temporary `ShaderMaterial`, assigns the shader (so the uniform set materializes as properties on the material), enumerates them via `GetPropertyList`, and frees the temporary material. The uniform names match what `material_set_property` accepts on a `ShaderMaterial` that has this shader assigned. A shader with compile errors surfaces `shader_parse_error` (never throws).
+
+**Input:**
+
+- `shader_path` (required) — a `res://` `.gdshader` path.
+
+**Result:** `{ shaderPath, uniforms: [{ name, type }, ...], count }`.
+
+**Errors:** `missing_parameter`, `invalid_path`, `resource_not_found`, `resource_load_failed`, `shader_parse_error` (shader has compile errors), `execution_error`.
 
 ## Offline fidelity limitations
 

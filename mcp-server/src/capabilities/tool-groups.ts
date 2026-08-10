@@ -135,6 +135,14 @@ export const TOOL_GROUPS: ToolGroup[] = [
       "key/value pairs within one section via Godot's ProjectSettings API (no raw text edits).",
     defaultEnabled: false,
   },
+  {
+    id: "materials",
+    description:
+      "Materials + shaders tools (Godot 4.3+): create a StandardMaterial3D / ORMMaterial3D / " +
+      "ShaderMaterial .tres, list a material's properties + values, set one property, assign a " +
+      ".gdshader to a ShaderMaterial, and read a .gdshader's uniforms + types.",
+    defaultEnabled: false,
+  },
 ];
 
 /**
@@ -350,6 +358,23 @@ assign(
   [
     "settings_get_project",
     "settings_set_project",
+  ].map((suffix) => `godot_open_mcp_${suffix}`),
+);
+
+// --- materials (P16.2 — Godot 4.3+ materials/shaders pack) -------------------
+// Five tools: material_create (mutating — StandardMaterial3D / ORMMaterial3D /
+// ShaderMaterial .tres) / material_get_properties (read-only) / material_set_property
+// (mutating — set one property + save) / material_set_shader (mutating — assign a
+// .gdshader to a ShaderMaterial + save) / shader_get_data (read-only — a .gdshader's
+// uniforms + types). Hidden until activated via manage_tools.
+assign(
+  "materials",
+  [
+    "material_create",
+    "material_get_properties",
+    "material_set_property",
+    "material_set_shader",
+    "shader_get_data",
   ].map((suffix) => `godot_open_mcp_${suffix}`),
 );
 

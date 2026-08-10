@@ -200,6 +200,16 @@ namespace GodotOpenMcp.Bridge.Editor
                 // ProjectSettings.SetSetting + Save (never raw text edits). Idempotent
                 // re-register refreshes the handler references after a domain reload.
                 SettingsTools.RegisterSettingsTools();
+                // P16.2 — materials/shaders pack: five typed tools for material + shader
+                // inspection/mutation (material_create / material_get_properties /
+                // material_set_property / material_set_shader / shader_get_data),
+                // group materials. The second Phase 16 typed-editor-breadth family.
+                // The three mutators register defaultGate:"enforce" and validate
+                // paths_hint themselves (scoped to the .tres path, or the .tres +
+                // .gdshader for set_shader); the read-only get_properties + get_data
+                // are gate-free. Idempotent re-register refreshes the handler
+                // references after a domain reload.
+                MaterialsTools.RegisterMaterialsTools();
 
                 // Start the HTTP listener serving /ping and POST /tools/{name}. Stays down
                 // (and connected:false) if the bind fails — the editor remains usable, the

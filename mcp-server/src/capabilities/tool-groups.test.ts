@@ -55,6 +55,7 @@ test("TOOL_GROUPS id order is pinned (stable across catalog edits)", () => {
       "animation",
       "csg",
       "settings",
+      "materials",
     ],
   );
 });
@@ -223,6 +224,21 @@ test("the settings group is present, opt-in, and carries the P16.1 two-tool rost
   assert.deepEqual(toolsInGroup("settings"), [
     "godot_open_mcp_settings_get_project",
     "godot_open_mcp_settings_set_project",
+  ]);
+});
+
+test("the materials group is present, opt-in, and carries the P16.2 five-tool roster", () => {
+  // P16.2 lands the second Phase 16 typed-editor-breadth family. The roster is the
+  // five material/shader tools (3 mutating + 2 read-only).
+  const materials = getGroup("materials");
+  assert.ok(materials, "materials group must exist");
+  assert.equal(materials!.defaultEnabled, false, "materials must be opt-in");
+  assert.deepEqual(toolsInGroup("materials"), [
+    "godot_open_mcp_material_create",
+    "godot_open_mcp_material_get_properties",
+    "godot_open_mcp_material_set_property",
+    "godot_open_mcp_material_set_shader",
+    "godot_open_mcp_shader_get_data",
   ]);
 });
 
@@ -430,8 +446,8 @@ test("every registered tool is meta, core, typed-editor, asset-intelligence, or 
   // Regression guard: the only groups that carry tools are `core`,
   // `typed-editor`, `asset-intelligence` (offline asset-graph tools), the
   // Phase 12 domain packs (tilemap / navigation / particles / animation / csg),
-  // and the Phase 16 settings pack.
-  const shippedDomainGroups = new Set(["tilemap", "navigation", "particles", "animation", "csg", "settings"]);
+  // and the Phase 16 settings + materials packs.
+  const shippedDomainGroups = new Set(["tilemap", "navigation", "particles", "animation", "csg", "settings", "materials"]);
   for (const tool of ALL_TOOLS) {
     const g = groupFor(tool.name);
     if (g === null) continue; // meta-tool

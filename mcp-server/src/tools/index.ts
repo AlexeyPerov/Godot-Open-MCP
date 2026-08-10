@@ -84,6 +84,11 @@ import { csgSetOperation } from "./csg-set-operation.js";
 import { csgGet } from "./csg-get.js";
 import { settingsGetProject } from "./settings-get-project.js";
 import { settingsSetProject } from "./settings-set-project.js";
+import { materialCreate } from "./material-create.js";
+import { materialGetProperties } from "./material-get-properties.js";
+import { materialSetProperty } from "./material-set-property.js";
+import { materialSetShader } from "./material-set-shader.js";
+import { shaderGetData } from "./shader-get-data.js";
 import { bridgeStatus } from "./bridge-status.js";
 import { pullEvents } from "./pull-events.js";
 import { readCompileErrors } from "./read-compile-errors.js";
@@ -272,6 +277,20 @@ export const ALL_TOOLS: Tool[] = [
   // warnings so a batch's good entries still land. First Phase 16 typed-editor-breadth family.
   settingsGetProject,
   settingsSetProject,
+  // P16.2 — materials/shaders pack: five typed tools for material + shader inspection/mutation
+  // (group `materials`, hidden until activated via manage_tools). material_create instantiates a
+  // StandardMaterial3D / ORMMaterial3D / ShaderMaterial and saves it as a .tres; get_properties
+  // lists a material's properties + values (read-only); set_property sets one property and saves;
+  // set_shader assigns a .gdshader to a ShaderMaterial and saves (uniforms become settable
+  // properties); shader_get_data enumerates a .gdshader's uniforms + types (read-only). The three
+  // mutators default to gate "enforce" and require paths_hint scoped to the .tres path (or the
+  // .tres + .gdshader for set_shader). The two read-only tools are gate-free. Second Phase 16
+  // typed-editor-breadth family.
+  materialCreate,
+  materialGetProperties,
+  materialSetProperty,
+  materialSetShader,
+  shaderGetData,
   // P5.3 — bridge_status: operator-oriented health snapshot. Composes the instance-lock classifier
   // (instance-discovery.ts#classifyInstance) with one /ping probe and returns a coarse status token
   // (running | compiling | stopped | unreachable | dead_bridge) + classification + recoveryHint.
