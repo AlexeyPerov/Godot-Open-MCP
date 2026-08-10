@@ -143,6 +143,15 @@ export const TOOL_GROUPS: ToolGroup[] = [
       ".gdshader to a ShaderMaterial, and read a .gdshader's uniforms + types.",
     defaultEnabled: false,
   },
+  {
+    id: "lighting",
+    description:
+      "Lighting tools (Godot 4.3+, 2D + 3D): create a DirectionalLight3D / OmniLight3D / SpotLight3D " +
+      "/ DirectionalLight2D / PointLight2D node (+ optional starter scalars), patch one or many " +
+      "allow-listed + clamped light scalars (color / energy / range / spot_angle / attenuation / " +
+      "shadow_enabled), and create or replace the WorldEnvironment node's Environment resource.",
+    defaultEnabled: false,
+  },
 ];
 
 /**
@@ -375,6 +384,23 @@ assign(
     "material_set_property",
     "material_set_shader",
     "shader_get_data",
+  ].map((suffix) => `godot_open_mcp_${suffix}`),
+);
+
+// --- lighting (P16.3 — Godot 4.3+ lighting pack) ----------------------------
+// Four tools: light_create (mutating — DirectionalLight3D / OmniLight3D /
+// SpotLight3D / DirectionalLight2D / PointLight2D node + starter scalars) /
+// light_set (mutating — patch one allow-listed light scalar) / light_modify
+// (mutating — bulk patch multiple light scalars) / environment_set (mutating —
+// create or replace the WorldEnvironment node's Environment resource). Hidden
+// until activated via manage_tools.
+assign(
+  "lighting",
+  [
+    "light_create",
+    "light_set",
+    "light_modify",
+    "environment_set",
   ].map((suffix) => `godot_open_mcp_${suffix}`),
 );
 

@@ -210,6 +210,17 @@ namespace GodotOpenMcp.Bridge.Editor
                 // are gate-free. Idempotent re-register refreshes the handler
                 // references after a domain reload.
                 MaterialsTools.RegisterMaterialsTools();
+                // P16.3 — lighting pack: four typed tools for lights + scene environment
+                // (light_create / light_set / light_modify / environment_set), group lighting.
+                // The third Phase 16 typed-editor-breadth family. All four mutators register
+                // defaultGate:"enforce" and validate paths_hint themselves (scoped to the
+                // edited scene .tscn path). light_create makes a DirectionalLight3D /
+                // OmniLight3D / SpotLight3D / DirectionalLight2D / PointLight2D node with
+                // starter scalars applied through the same allow-listed + clamped path
+                // light_set / light_modify use; environment_set creates or replaces the
+                // WorldEnvironment node's Environment resource. Idempotent re-register
+                // refreshes the handler references after a domain reload.
+                LightingTools.RegisterLightingTools();
 
                 // Start the HTTP listener serving /ping and POST /tools/{name}. Stays down
                 // (and connected:false) if the bind fails — the editor remains usable, the

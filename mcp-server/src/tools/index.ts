@@ -89,6 +89,10 @@ import { materialGetProperties } from "./material-get-properties.js";
 import { materialSetProperty } from "./material-set-property.js";
 import { materialSetShader } from "./material-set-shader.js";
 import { shaderGetData } from "./shader-get-data.js";
+import { lightCreate } from "./light-create.js";
+import { lightSet } from "./light-set.js";
+import { lightModify } from "./light-modify.js";
+import { environmentSet } from "./environment-set.js";
 import { bridgeStatus } from "./bridge-status.js";
 import { pullEvents } from "./pull-events.js";
 import { readCompileErrors } from "./read-compile-errors.js";
@@ -291,6 +295,19 @@ export const ALL_TOOLS: Tool[] = [
   materialSetProperty,
   materialSetShader,
   shaderGetData,
+  // P16.3 — lighting pack: four typed tools for lights + scene environment
+  // (group `lighting`, hidden until activated via manage_tools). light_create
+  // makes a DirectionalLight3D / OmniLight3D / SpotLight3D / DirectionalLight2D
+  // / PointLight2D node with optional starter scalars applied through the same
+  // allow-listed + clamped path light_set / light_modify use; light_set patches
+  // one light scalar; light_modify bulk-patches multiple; environment_set
+  // creates or replaces the WorldEnvironment node's Environment resource. All
+  // four mutators default to gate "enforce" and require paths_hint scoped to the
+  // edited scene path. Third Phase 16 typed-editor-breadth family.
+  lightCreate,
+  lightSet,
+  lightModify,
+  environmentSet,
   // P5.3 — bridge_status: operator-oriented health snapshot. Composes the instance-lock classifier
   // (instance-discovery.ts#classifyInstance) with one /ping probe and returns a coarse status token
   // (running | compiling | stopped | unreachable | dead_bridge) + classification + recoveryHint.

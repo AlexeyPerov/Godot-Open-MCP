@@ -303,6 +303,22 @@
          Material/Shader/ShaderMaterial-coupled) is #if TOOLS and verified via
          the headless Godot smoke / live call path, not here. -->
     <Compile Include="..\Editor\Tools\Extensions\Materials\MaterialsBodies.cs" Link="Source\Materials\MaterialsBodies.cs" />
+    <!-- P16.3 — lighting pack. The pure-managed body parsers (LightCreateBody /
+         LightSetBody / LightModifyBody / EnvironmentSetBody, the LightKind enum,
+         LightKindParser, and LightPropertyClamp) are linked for unit testing.
+         They reuse the P12.1 JsonScalar extractor (linked above). The light-kind
+         vocabulary (LightKindParser — parse / ToSchemaString / ToClassName /
+         Is3D) and the centralized clamp table (LightPropertyClamp —
+         ClampEnergy / ClampRange / ClampSpotAngle) are the highest-value
+         unit-test surfaces in this pack — they pin the five creatable light
+         families + the scalar bounds without requiring the editor. The verbatim
+         value-token extractor (LightSetBody.ExtractVerbatimValue) + the
+         fields-map object slicer (LightModifyBody's ExtractObjectSlice) are
+         also pinned here. The editor-only handler (LightingTools.LightCreate /
+         LightSet / LightModify / EnvironmentSet — EditorInterface/Light3D/
+         Light2D/WorldEnvironment/Environment-coupled) is #if TOOLS and verified
+         via the headless Godot smoke / live call path, not here. -->
+    <Compile Include="..\Editor\Tools\Extensions\Lighting\LightingBodies.cs" Link="Source\Lighting\LightingBodies.cs" />
     <!-- P3.5 — gate on mutators. The gate types (GateMode/GateOutcome/DeltaData/GateDispatchResult/
          GatePolicy/GateDefaultPolicy) and the VerifyGateAdapter are pure-managed for the parts the unit
          tests exercise (decision matrix, next-step hints, delta math, gate-mode parsing). GatePolicy

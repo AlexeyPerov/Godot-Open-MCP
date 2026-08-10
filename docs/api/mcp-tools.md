@@ -57,6 +57,7 @@ The table below is the published view of `ALL_TOOLS`. The `scripts/check-tool-do
 | `godot_open_mcp_editor_application_set_state` | editor | live | typed-editor | editor state | enforce | Start (main/current/custom scene) or stop the play process with a bounded observation window. |
 | `godot_open_mcp_editor_selection_get` | editor | live | typed-editor | no | n/a | Read the editor's node selection as shallow NodeData + the active node. |
 | `godot_open_mcp_editor_selection_set` | editor | live | typed-editor | editor state | enforce | Replace or clear the node selection (all-or-nothing resolution). |
+| `godot_open_mcp_environment_set` | lighting | live | lighting | editor state | enforce | Create or replace the `WorldEnvironment` node's `Environment` resource (sky / fog / tonemap / ambient) from a res:// `.tres`. |
 | `godot_open_mcp_filesystem_list` | filesystem | live-first | typed-editor | no | n/a | List immediate children of a `res://` directory; live reads authoritative importer metadata. |
 | `godot_open_mcp_filesystem_reimport` | filesystem | live | typed-editor | disk | enforce | Reimport exact files or trigger a full scan; blocks until the import pipeline settles. |
 | `godot_open_mcp_material_create` | materials | live | materials | disk | enforce | Instantiate a `StandardMaterial3D` / `ORMMaterial3D` / `ShaderMaterial` and save as `.tres` (overwrite opt-in). |
@@ -67,6 +68,9 @@ The table below is the published view of `ALL_TOOLS`. The `scripts/check-tool-do
 | `godot_open_mcp_find_references` | asset-intelligence | offline | asset-intelligence | no | n/a | Offline reverse dependency lookup — assets that reference a given `res://` path or `uid://`. |
 | `godot_open_mcp_generate_skill` | core | local | always visible | disk (when `write:true`) | n/a | Generate a project-specific `SKILL.md` (Godot version, enabled plugins, autoloads, available rules, key types); merges with the canonical playbook. |
 | `godot_open_mcp_manage_tools` | core | local | always visible | ephemeral | n/a | Per-session tool-group visibility mutator (activate/deactivate/reset/list_groups). |
+| `godot_open_mcp_light_create` | lighting | live | lighting | editor state | enforce | Create a `DirectionalLight3D` / `OmniLight3D` / `SpotLight3D` / `DirectionalLight2D` / `PointLight2D` node (+ optional starter scalars). |
+| `godot_open_mcp_light_modify` | lighting | live | lighting | editor state | enforce | Bulk-patch multiple allow-listed + clamped light scalars on a light node. |
+| `godot_open_mcp_light_set` | lighting | live | lighting | editor state | enforce | Patch ONE allow-listed + clamped light scalar (color / energy / range / spot_angle / attenuation / shadow_enabled) on a light node. |
 | `godot_open_mcp_navigation_agent_configure` | navigation | live | navigation | editor state | enforce | Patch clamped scalar properties on a `NavigationAgent2D`/`3D`. |
 | `godot_open_mcp_navigation_agent_create` | navigation | live | navigation | editor state | enforce | Create a `NavigationAgent2D`/`3D` node (pathfinding + avoidance) in the edited scene. |
 | `godot_open_mcp_navigation_defaults` | navigation | live | navigation | no | n/a | Recommended starter scalars for a 2D/3D agent (pure helper, no scene). |
@@ -167,6 +171,7 @@ The MCP server filters `ListTools` through a per-session `ToolSessionState` so t
 | `csg` | no | Godot 4.3+ CSG primitive tools (3D only): starter defaults, create `CsgBox3D` / `CsgSphere3D` / `CsgCylinder3D` / `CsgCombiner3D` nodes (with optional kind-specific scalars + boolean operation), set the boolean operation (union / intersection / subtraction) on any CSG shape, inspect any CSG shape's scalar config. |
 | `settings` | no | Godot 4.3+ project-settings tools: read one `project.godot` section (or a per-section summary) and write key/value pairs within one section via Godot's `ProjectSettings` API (no raw text edits). |
 | `materials` | no | Godot 4.3+ materials + shaders tools: create a `StandardMaterial3D` / `ORMMaterial3D` / `ShaderMaterial` `.tres`, list a material's properties + values, set one property, assign a `.gdshader` to a `ShaderMaterial`, and read a `.gdshader`'s uniforms + types. |
+| `lighting` | no | Godot 4.3+ lighting tools (2D + 3D): create a `DirectionalLight3D` / `OmniLight3D` / `SpotLight3D` / `DirectionalLight2D` / `PointLight2D` node (+ optional starter scalars), patch one or many allow-listed + clamped light scalars (color / energy / range / spot_angle / attenuation / shadow_enabled), and create or replace the `WorldEnvironment` node's `Environment` resource. |
 
 The catalog source of truth is `mcp-server/src/capabilities/tool-groups.ts`. Activate or deactivate groups with `godot_open_mcp_manage_tools`; on a successful change the server emits the MCP `notifications/tools/list_changed` notification so clients that support `listChanged` refresh `ListTools` automatically. Hiding a tool is a prompt-size control, not an authorization boundary — a hidden tool name still routes when called directly.
 
@@ -2945,6 +2950,102 @@ Read a `.gdshader`'s uniforms. Loads the shader, creates a temporary `ShaderMate
 **Result:** `{ shaderPath, uniforms: [{ name, type }, ...], count }`.
 
 **Errors:** `missing_parameter`, `invalid_path`, `resource_not_found`, `resource_load_failed`, `shader_parse_error` (shader has compile errors), `execution_error`.
+
+## Lighting tools
+
+Lighting tools create, configure, and wire up Godot lights and the scene environment. They replace hand-rolling `DirectionalLight3D` / `OmniLight3D` / `SpotLight3D` / `DirectionalLight2D` / `PointLight2D` via `node_create` + `node_modify` (which misses light-specific validation and defaults) with typed create/set operations that clamp light scalars to Godot's documented bounds. The environment tool creates or replaces the `WorldEnvironment` node's `Environment` resource (sky / fog / tonemap / ambient) — Godot's scene-environment model, with no Unity equivalent.
+
+This is a **`lighting` group** family — hidden from `ListTools` until an agent activates it via `godot_open_mcp_manage_tools({ action: "activate", group: "lighting" })`. As with every group, hiding is a prompt-size control, not an authorization boundary — a hidden tool name still routes when called directly.
+
+**Scope.** Five light node families are creatable: `directional3d` (`DirectionalLight3D` — sun/moon, parallel rays, no range/attenuation), `omni3d` (`OmniLight3D` — point light with range + attenuation), `spot3d` (`SpotLight3D` — cone with range + spot_angle + attenuation), `directional2d` (`DirectionalLight2D`), `point2d` (`PointLight2D`). Unity baked-lighting / lightmap / `ReflectionProbe` APIs are intentionally NOT ported (Godot lighting model differs; reflection probes are deferred to a later pack).
+
+**Shared contracts.** All four tools are mutating and gated (`enforce` by default); `paths_hint` is the edited scene path (the `.tscn`) and is required even when `gate` is `off`. The light scalar allow-list is fixed: `color` (every light), `energy` (every light, clamped ≥ 0), `range` (Omni/Spot3D only, clamped strictly positive), `spot_angle` (SpotLight3D only, clamped to [0.01, 180] degrees), `attenuation` (Omni/Spot3D only, clamped ≥ 0), `shadow_enabled` (every light). `light_create`, `light_set`, and `light_modify` share one allow-listed + clamped application path; a field that does not apply to the node's type surfaces `unsupported_field`.
+
+### `godot_open_mcp_light_create`
+
+- Route: `live`
+- Visibility group: `lighting`
+- Read-only/mutating: mutating (gated, default `enforce`)
+
+Create a light node in the currently edited scene by `kind` and return its NodeData. Resolves the parent (edited scene root by default), instantiates the concrete light class (`new DirectionalLight3D()` / etc.), parents it, assigns the owner (so it persists on save), applies the position, then applies the optional starter scalars through the same allow-listed + clamped path `light_set` uses, and marks the scene unsaved. The result carries the NodeData plus an `applied` array (the starter scalars that landed) and a `warnings` array (any that could not be applied).
+
+**Input:**
+
+- `kind` (required) — one of `directional3d` / `omni3d` / `spot3d` / `directional2d` / `point2d`.
+- `name` (optional) — name for the new node (defaults to the type's auto-name).
+- `parent_node_path` (optional) — scene-tree path of the parent (defaults to the edited scene root).
+- `position` (optional) — `'x,y,z'` (3D) or `'x,y'` (2D).
+- `color` (optional) — `'r,g,b[,a]'` (0–1 floats).
+- `energy` (optional) — float, clamped ≥ 0.
+- `range` (optional) — float, clamped strictly positive (Omni/Spot3D only).
+- `spot_angle` (optional) — float degrees, clamped [0.01, 180] (SpotLight3D only).
+- `attenuation` (optional) — float, clamped ≥ 0 (Omni/Spot3D only).
+- `shadow_enabled` (optional) — bool.
+- `paths_hint` (required) — the edited scene path.
+- `gate` (optional) — `enforce` | `warn` | `off` (default `enforce`).
+
+**Result:** the new node's NodeData, plus `applied: [field, ...]` and `warnings: [...]`.
+
+**Errors:** `paths_hint_required`, `invalid_parameter` (unknown `kind`), `no_edited_scene`, `parent_not_found`, `create_failed`.
+
+### `godot_open_mcp_light_set`
+
+- Route: `live`
+- Visibility group: `lighting`
+- Read-only/mutating: mutating (gated, default `enforce`)
+
+Set ONE allow-listed light scalar on an existing light node (`Light3D` / `Light2D`) and mark the scene unsaved. Resolves the node, type-checks it, validates the field is one of the allow-list, clamps it via Godot's documented bounds, writes it, and reports the applied field. A field that does not apply to the node's type (e.g. `spot_angle` on an `OmniLight3D`) surfaces `unsupported_field`.
+
+**Input:**
+
+- `node_path` (required) — the light node to mutate (scene-tree path).
+- `field` (required) — one of `color` / `energy` / `range` / `spot_angle` / `attenuation` / `shadow_enabled`.
+- `value` (required) — the value: `color` → `{r,g,b[,a]}` object or `'r,g,b[,a]'` string; `energy` / `range` / `spot_angle` / `attenuation` → number; `shadow_enabled` → bool.
+- `paths_hint` (required) — the edited scene path.
+- `gate` (optional) — `enforce` | `warn` | `off` (default `enforce`).
+
+**Result:** `{ nodePath, field, applied: true, warnings?: [...] }`.
+
+**Errors:** `paths_hint_required`, `missing_parameter`, `no_edited_scene`, `node_not_found`, `wrong_node_type` (not a Light3D/Light2D), `unsupported_field`, `invalid_property_value`.
+
+### `godot_open_mcp_light_modify`
+
+- Route: `live`
+- Visibility group: `lighting`
+- Read-only/mutating: mutating (gated, default `enforce`)
+
+Bulk-patch multiple allow-listed light scalars on an existing light node in one call — an alias of `light_set` for the multi-field case. Walks the `fields` map applying each entry through the same allow-listed + clamped path `light_set` uses, accumulating per-field results (`applied` + `errors`) so a single bad entry does not abort the batch. Field keys use the same vocabulary + clamping as `light_set`; an unrecognized field or a field that does not apply to the node's type surfaces in `errors` rather than aborting the batch.
+
+**Input:**
+
+- `node_path` (required) — the light node to mutate (scene-tree path).
+- `fields` (required) — a `{field → value}` map. Keys from the allow-list (`color` / `energy` / `range` / `spot_angle` / `attenuation` / `shadow_enabled`); values use the same shape `light_set` accepts.
+- `paths_hint` (required) — the edited scene path.
+- `gate` (optional) — `enforce` | `warn` | `off` (default `enforce`).
+
+**Result:** `{ nodePath, applied: [field, ...], errors?: ["field: reason", ...] }`.
+
+**Errors:** `paths_hint_required`, `missing_parameter`, `no_edited_scene`, `node_not_found`, `wrong_node_type`. Per-field failures surface in the `errors` array (non-aborting).
+
+### `godot_open_mcp_environment_set`
+
+- Route: `live`
+- Visibility group: `lighting`
+- Read-only/mutating: mutating (gated, default `enforce`)
+
+Create or replace the `WorldEnvironment` node's `Environment` resource in the currently edited scene. Resolves the `WorldEnvironment` node one of three ways: (1) explicit `node_path` → that node (must be a `WorldEnvironment`); (2) no `node_path` → the first `WorldEnvironment` found in the edited scene; (3) no `node_path` + `create_if_missing:true` → a fresh `WorldEnvironment` under the scene root. Loads the `Environment` resource at `environment_path` (a res:// `.tres` built via `resource_create` or an existing one), assigns it to the node's `Environment` property, and marks the scene unsaved. The `Environment` resource carries the sky (ProceduralSkyMaterial / PanoramaSkyMaterial / custom), fog, tonemap, ambient light, glow, SSAO, and other post-processing settings — configure those via `resource_modify` / `material_set_property` on the Environment `.tres`; this tool only wires the resource into the scene.
+
+**Input:**
+
+- `environment_path` (required) — a res:// `Environment` `.tres` to assign.
+- `node_path` (optional) — an explicit `WorldEnvironment` node to target.
+- `create_if_missing` (optional) — when true and no `WorldEnvironment` exists (and no `node_path` was given), create one under the scene root (default `false`).
+- `paths_hint` (required) — the edited scene path.
+- `gate` (optional) — `enforce` | `warn` | `off` (default `enforce`).
+
+**Result:** `{ nodePath, environmentPath, created, assigned: true }`.
+
+**Errors:** `paths_hint_required`, `missing_parameter`, `invalid_path`, `no_edited_scene`, `node_not_found`, `environment_node_not_found` (no WorldEnvironment and `create_if_missing` not set), `wrong_node_type`, `wrong_resource_type`, `resource_not_found`, `resource_load_failed`, `execution_error`.
 
 ## Offline fidelity limitations
 
