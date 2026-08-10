@@ -57,6 +57,7 @@ test("TOOL_GROUPS id order is pinned (stable across catalog edits)", () => {
       "settings",
       "materials",
       "lighting",
+      "audio",
     ],
   );
 });
@@ -461,8 +462,8 @@ test("every registered tool is meta, core, typed-editor, asset-intelligence, or 
   // Regression guard: the only groups that carry tools are `core`,
   // `typed-editor`, `asset-intelligence` (offline asset-graph tools), the
   // Phase 12 domain packs (tilemap / navigation / particles / animation / csg),
-  // and the Phase 16 settings + materials + lighting packs.
-  const shippedDomainGroups = new Set(["tilemap", "navigation", "particles", "animation", "csg", "settings", "materials", "lighting"]);
+  // and the Phase 16 settings + materials + lighting + audio packs.
+  const shippedDomainGroups = new Set(["tilemap", "navigation", "particles", "animation", "csg", "settings", "materials", "lighting", "audio"]);
   for (const tool of ALL_TOOLS) {
     const g = groupFor(tool.name);
     if (g === null) continue; // meta-tool

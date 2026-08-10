@@ -39,6 +39,9 @@ The table below is the published view of `ALL_TOOLS`. The `scripts/check-tool-do
 | `godot_open_mcp_animation_library_add` | animation | live | animation | editor state | enforce | Add an empty `AnimationLibrary` registered by name on an `AnimationPlayer`. |
 | `godot_open_mcp_animation_player_create` | animation | live | animation | editor state | enforce | Create an `AnimationPlayer` node in the edited scene (returns NodeData). |
 | `godot_open_mcp_apply_fix` | core | live | core | disk | warn/off capable | Apply (or preview) a structured fix for a verify issue; non-dry-run applies roll back on new errors under `enforce`. |
+| `godot_open_mcp_audio_bus_set_volume` | audio | live | audio | editor state | enforce | Set an audio bus's volume via `AudioServer` (native dB or linear→dB). |
+| `godot_open_mcp_audio_stream_player_create` | audio | live | audio | editor state | enforce | Create an `AudioStreamPlayer` / `2D` / `3D` node (+ optional stream + bus + starter scalars). |
+| `godot_open_mcp_audio_stream_player_set_stream` | audio | live | audio | editor state | enforce | Assign an `AudioStream` resource to an existing audio player node. |
 | `godot_open_mcp_baseline_create` | core | offline | core | disk | n/a | Run a full offline scan and save a schema-v1 baseline JSON for CI regression tracking. |
 | `godot_open_mcp_bridge_status` | core | local | always visible | no | n/a | Operator-oriented health snapshot composing the instance-lock classifier with one `/ping` probe. |
 | `godot_open_mcp_capabilities` | core | local | always visible | no | n/a | Discover the full capability surface (tools + verify rules + fixes + groups + routing) in one call. |
@@ -3046,6 +3049,81 @@ Create or replace the `WorldEnvironment` node's `Environment` resource in the cu
 **Result:** `{ nodePath, environmentPath, created, assigned: true }`.
 
 **Errors:** `paths_hint_required`, `missing_parameter`, `invalid_path`, `no_edited_scene`, `node_not_found`, `environment_node_not_found` (no WorldEnvironment and `create_if_missing` not set), `wrong_node_type`, `wrong_resource_type`, `resource_not_found`, `resource_load_failed`, `execution_error`.
+
+## Audio tools
+
+Audio tools create and wire up Godot audio players and adjust the project audio bus layout. They replace hand-rolling `AudioStreamPlayer` / `AudioStreamPlayer2D` / `AudioStreamPlayer3D` via `node_create` + `node_modify` (which misses player-specific validation and defaults) with typed create/set operations that validate the stream resource and the bus name. The bus tool writes directly to Godot's `AudioServer` (native dB, with an optional linear→dB conversion).
+
+This is an **`audio` group** family — hidden from `ListTools` until an agent activates it via `godot_open_mcp_manage_tools({ action: "activate", group: "audio" })`. As with every group, hiding is a prompt-size control, not an authorization boundary — a hidden tool name still routes when called directly.
+
+**Scope.** Three audio player node families are creatable: `nonpositional` (`AudioStreamPlayer` — global, no positional attenuation, for UI sounds and music), `2d` (`AudioStreamPlayer2D` — positional in 2D, attenuates with distance from the `Camera2D`), `3d` (`AudioStreamPlayer3D` — positional in 3D, attenuation model + max distance + emission angle). Unity `AudioListener` is NOT ported (Godot has a single implicit listener — no listener node to create/inspect). Unity `spatial_blend` / `spatialize` / `min_distance` / `max_distance` / `doppler_level` / `spread` / `mixer_group_path` are intentionally NOT ported in the typed surface (`AudioStreamPlayer3D`'s attenuation surface is settable via `node_modify`; the per-player `Bus` is set at create via the `bus` arg).
+
+**Shared contracts.** All three tools are mutating and gated (`enforce` by default); `paths_hint` is required even when `gate` is `off`. For the two player tools `paths_hint` is the edited scene path (the `.tscn`); for the bus tool it is `res://project.godot` (the bus layout's home). The player scalar allow-list is fixed: `volume_db` (every player, passed through), `pitch_scale` (every player, clamped strictly positive), `autoplay` (every player, bool).
+
+### `godot_open_mcp_audio_stream_player_create`
+
+- Route: `live`
+- Visibility group: `audio`
+- Read-only/mutating: mutating (gated, default `enforce`)
+
+Create an audio player node in the currently edited scene by `dimension` and return its NodeData. Resolves the parent (edited scene root by default), instantiates the concrete player class (`new AudioStreamPlayer()` / `AudioStreamPlayer2D` / `AudioStreamPlayer3D`), parents it, assigns the owner (so it persists on save), applies the position (positional players only), optionally loads + assigns the stream, applies the bus (validated against the live `AudioServer` layout), then applies the optional starter scalars through the same allow-listed + clamped path, and marks the scene unsaved. The result carries the NodeData plus an `applied` array (the fields that landed) and a `warnings` array (any that could not be applied — e.g. a stream that failed to load or a bus that does not exist).
+
+**Input:**
+
+- `dimension` (required) — one of `nonpositional` / `2d` / `3d`.
+- `name` (optional) — name for the new node (defaults to the type's auto-name).
+- `parent_node_path` (optional) — scene-tree path of the parent (defaults to the edited scene root).
+- `position` (optional) — `'x,y,z'` (3D) or `'x,y'` (2D). Ignored for nonpositional players.
+- `stream_path` (optional) — a res:// AudioStream resource path (`.wav` / `.ogg` / `.mp3` / `.tres`) to load + assign at create. A missing file or non-AudioStream resource surfaces in `warnings` (the node is still created).
+- `bus` (optional) — output bus name (validated against the live `AudioServer` layout). A bus that does not exist surfaces in `warnings`; the player keeps the `Master` default.
+- `volume_db` (optional) — float, passed through (Godot accepts the full dB range). Defaults to 0 dB (unity).
+- `pitch_scale` (optional) — float, clamped strictly positive. Defaults to 1.0.
+- `autoplay` (optional) — bool (start playback when the scene is added to the tree). Defaults to false.
+- `paths_hint` (required) — the edited scene path.
+- `gate` (optional) — `enforce` | `warn` | `off` (default `enforce`).
+
+**Result:** the new node's NodeData, plus `applied: [field, ...]` and `warnings: [...]`.
+
+**Errors:** `paths_hint_required`, `invalid_parameter` (unknown `dimension`), `no_edited_scene`, `parent_not_found`, `create_failed`. Stream/bus failures surface in `warnings` (non-aborting).
+
+### `godot_open_mcp_audio_stream_player_set_stream`
+
+- Route: `live`
+- Visibility group: `audio`
+- Read-only/mutating: mutating (gated, default `enforce`)
+
+Assign an `AudioStream` resource to an existing audio player node (`AudioStreamPlayer` / `AudioStreamPlayer2D` / `AudioStreamPlayer3D`) and mark the scene unsaved. Resolves the node, type-checks it against the three audio player families, loads the `AudioStream` at `stream_path`, assigns it to the player's `Stream` property, and reports the assigned stream. A non-player node surfaces `wrong_node_type`; a non-AudioStream resource surfaces `wrong_resource_type`.
+
+**Input:**
+
+- `node_path` (required) — the player node to mutate (scene-tree path).
+- `stream_path` (required) — a res:// `AudioStream` resource path (`.wav` / `.ogg` / `.mp3` / `.tres`). Godot imports `.wav` / `.ogg` / `.mp3` as `AudioStreamWAV` / `AudioStreamOggVorbis` / `AudioStreamMP3` respectively.
+- `paths_hint` (required) — the edited scene path.
+- `gate` (optional) — `enforce` | `warn` | `off` (default `enforce`).
+
+**Result:** `{ nodePath, streamPath, stream, assigned: true }`.
+
+**Errors:** `paths_hint_required`, `missing_parameter`, `invalid_path`, `no_edited_scene`, `node_not_found`, `wrong_node_type` (not an audio player), `resource_not_found`, `resource_load_failed`, `wrong_resource_type`.
+
+### `godot_open_mcp_audio_bus_set_volume`
+
+- Route: `live`
+- Visibility group: `audio`
+- Read-only/mutating: mutating (gated, default `enforce`)
+
+Set an audio bus's volume via Godot's `AudioServer` and read it back. Resolves the bus by name via `AudioServer.GetBusIndex` (a typo surfaces `bus_not_found`), resolves which volume input to apply (`volume_db` wins over `volume_linear`; linear is converted via Godot's `linear_to_db`), writes it via `AudioServer.SetBusVolumeDb`, and reads it back so the caller can confirm. The bus layout is project-level state (Godot saves it into `project.godot` via the Audio panel); this tool writes to the running `AudioServer` — call Project → Save to persist the bus layout to disk afterwards.
+
+**Input:**
+
+- `bus` (required) — the audio bus name (validated against the live `AudioServer` layout). The default layout has `Master` only until more buses are added in the Audio panel.
+- `volume_db` (optional) — volume in decibels (Godot native, written directly). Wins over `volume_linear` when both are present. 0 dB is unity; -80 dB is effectively silent; positive values amplify.
+- `volume_linear` (optional) — linear volume (0–1, converted to dB via `linear_to_db`). Used only when `volume_db` is absent. 0 maps to -80 dB (silent floor); 1 maps to 0 dB (unity); >1 amplifies. A value ≤ 0 is clamped to the -80 dB silent floor.
+- `paths_hint` (required) — `res://project.godot` (the bus layout's home).
+- `gate` (optional) — `enforce` | `warn` | `off` (default `enforce`).
+
+**Result:** `{ bus, busIndex, volumeDb, appliedUnit, warnings?: [...] }`. `appliedUnit` is `"db"` or `"linear"` depending on which input was applied.
+
+**Errors:** `paths_hint_required`, `missing_parameter` (`bus`, or both `volume_db` and `volume_linear` absent), `bus_not_found`.
 
 ## Offline fidelity limitations
 

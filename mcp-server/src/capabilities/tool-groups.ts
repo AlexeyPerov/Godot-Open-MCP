@@ -152,6 +152,14 @@ export const TOOL_GROUPS: ToolGroup[] = [
       "shadow_enabled), and create or replace the WorldEnvironment node's Environment resource.",
     defaultEnabled: false,
   },
+  {
+    id: "audio",
+    description:
+      "Audio tools (Godot 4.3+): create an AudioStreamPlayer / AudioStreamPlayer2D / AudioStreamPlayer3D " +
+      "node (+ optional stream + bus + starter scalars), assign an AudioStream resource to an existing " +
+      "player, and set an audio bus's volume via AudioServer (native dB or linear→dB).",
+    defaultEnabled: false,
+  },
 ];
 
 /**
@@ -401,6 +409,21 @@ assign(
     "light_set",
     "light_modify",
     "environment_set",
+  ].map((suffix) => `godot_open_mcp_${suffix}`),
+);
+
+// --- audio (P16.4 — Godot 4.3+ audio pack) ----------------------------------
+// Three tools: audio_stream_player_create (mutating — AudioStreamPlayer /
+// AudioStreamPlayer2D / AudioStreamPlayer3D node + optional stream + bus +
+// starter scalars) / audio_stream_player_set_stream (mutating — assign an
+// AudioStream resource) / audio_bus_set_volume (mutating — set a bus volume via
+// AudioServer, native dB or linear→dB). Hidden until activated via manage_tools.
+assign(
+  "audio",
+  [
+    "audio_stream_player_create",
+    "audio_stream_player_set_stream",
+    "audio_bus_set_volume",
   ].map((suffix) => `godot_open_mcp_${suffix}`),
 );
 

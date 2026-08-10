@@ -319,6 +319,20 @@
          Light2D/WorldEnvironment/Environment-coupled) is #if TOOLS and verified
          via the headless Godot smoke / live call path, not here. -->
     <Compile Include="..\Editor\Tools\Extensions\Lighting\LightingBodies.cs" Link="Source\Lighting\LightingBodies.cs" />
+    <!-- P16.4 — audio pack. The pure-managed body parsers (AudioStreamPlayerCreateBody
+         / AudioStreamPlayerSetStreamBody / AudioBusSetVolumeBody, the AudioPlayerDimension
+         enum, AudioPlayerDimensionParser, and AudioPropertyClamp) are linked for unit
+         testing. They reuse the P12.1 JsonScalar extractor (linked above). The
+         player-dimension vocabulary (AudioPlayerDimensionParser — parse / ToSchemaString
+         / ToClassName / IsPositional) and the centralized clamp table
+         (AudioPropertyClamp — ClampPitchScale / ClampVolumeDb) are the highest-value
+         unit-test surfaces in this pack — they pin the three creatable player families
+         + the scalar bounds without requiring the editor. The editor-only handler
+         (AudioTools.AudioStreamPlayerCreate / AudioStreamPlayerSetStream /
+         AudioBusSetVolume — EditorInterface/AudioStreamPlayer*/AudioStream/AudioServer-
+         coupled) is #if TOOLS and verified via the headless Godot smoke / live call
+         path, not here. -->
+    <Compile Include="..\Editor\Tools\Extensions\Audio\AudioBodies.cs" Link="Source\Audio\AudioBodies.cs" />
     <!-- P3.5 — gate on mutators. The gate types (GateMode/GateOutcome/DeltaData/GateDispatchResult/
          GatePolicy/GateDefaultPolicy) and the VerifyGateAdapter are pure-managed for the parts the unit
          tests exercise (decision matrix, next-step hints, delta math, gate-mode parsing). GatePolicy

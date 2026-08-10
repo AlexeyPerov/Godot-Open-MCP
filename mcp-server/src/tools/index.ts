@@ -93,6 +93,9 @@ import { lightCreate } from "./light-create.js";
 import { lightSet } from "./light-set.js";
 import { lightModify } from "./light-modify.js";
 import { environmentSet } from "./environment-set.js";
+import { audioStreamPlayerCreate } from "./audio-stream-player-create.js";
+import { audioStreamPlayerSetStream } from "./audio-stream-player-set-stream.js";
+import { audioBusSetVolume } from "./audio-bus-set-volume.js";
 import { bridgeStatus } from "./bridge-status.js";
 import { pullEvents } from "./pull-events.js";
 import { readCompileErrors } from "./read-compile-errors.js";
@@ -308,6 +311,20 @@ export const ALL_TOOLS: Tool[] = [
   lightSet,
   lightModify,
   environmentSet,
+  // P16.4 — audio pack: three typed tools for audio players + the project bus
+  // layout (group `audio`, hidden until activated via manage_tools).
+  // audio_stream_player_create makes an AudioStreamPlayer (non-positional) /
+  // AudioStreamPlayer2D / AudioStreamPlayer3D node with optional stream + bus +
+  // starter scalars applied through the same allow-listed + clamped path;
+  // audio_stream_player_set_stream assigns an AudioStream resource to an
+  // existing player; audio_bus_set_volume writes a bus volume via AudioServer
+  // (native dB, with optional linear→dB conversion). All three mutators
+  // default to gate "enforce"; the player tools require paths_hint scoped to the
+  // edited scene path, the bus tool to res://project.godot. Fourth Phase 16
+  // typed-editor-breadth family.
+  audioStreamPlayerCreate,
+  audioStreamPlayerSetStream,
+  audioBusSetVolume,
   // P5.3 — bridge_status: operator-oriented health snapshot. Composes the instance-lock classifier
   // (instance-discovery.ts#classifyInstance) with one /ping probe and returns a coarse status token
   // (running | compiling | stopped | unreachable | dead_bridge) + classification + recoveryHint.

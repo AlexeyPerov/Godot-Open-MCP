@@ -221,6 +221,19 @@ namespace GodotOpenMcp.Bridge.Editor
                 // WorldEnvironment node's Environment resource. Idempotent re-register
                 // refreshes the handler references after a domain reload.
                 LightingTools.RegisterLightingTools();
+                // P16.4 — audio pack: three typed tools for audio players + the project
+                // bus layout (audio_stream_player_create / audio_stream_player_set_stream
+                // / audio_bus_set_volume), group audio. The fourth Phase 16 typed-editor-
+                // breadth family. All three mutators register defaultGate:"enforce" and
+                // validate paths_hint themselves (scoped to the edited scene .tscn path
+                // for the player tools, res://project.godot for the bus tool).
+                // audio_stream_player_create makes an AudioStreamPlayer /
+                // AudioStreamPlayer2D / AudioStreamPlayer3D node with optional stream +
+                // bus + starter scalars; audio_stream_player_set_stream assigns an
+                // AudioStream resource; audio_bus_set_volume writes a bus volume via
+                // AudioServer (native dB, with optional linear→dB conversion). Idempotent
+                // re-register refreshes the handler references after a domain reload.
+                AudioTools.RegisterAudioTools();
 
                 // Start the HTTP listener serving /ping and POST /tools/{name}. Stays down
                 // (and connected:false) if the bind fails — the editor remains usable, the
