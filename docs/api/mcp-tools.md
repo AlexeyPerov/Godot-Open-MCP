@@ -73,12 +73,15 @@ The table below is the published view of `ALL_TOOLS`. The `scripts/check-tool-do
 | `godot_open_mcp_material_set_shader` | materials | live | materials | disk | enforce | Assign a `.gdshader` to a `ShaderMaterial` and persist; uniforms become settable properties. |
 | `godot_open_mcp_dependencies` | asset-intelligence | offline | asset-intelligence | no | n/a | Offline forward + reverse dependencies, broken edges, cycles, optional transitive impact. |
 | `godot_open_mcp_find_references` | asset-intelligence | offline | asset-intelligence | no | n/a | Offline reverse dependency lookup — assets that reference a given `res://` path or `uid://`. |
+| `godot_open_mcp_gate_budget_estimate` | gate-intelligence | local | gate-intelligence | no | n/a | Forecast validation duration + issue budget + token band for a planned scope (heuristic; dry-run). |
 | `godot_open_mcp_generate_skill` | core | local | always visible | disk (when `write:true`) | n/a | Generate a project-specific `SKILL.md` (Godot version, enabled plugins, autoloads, available rules, key types); merges with the canonical playbook. |
 | `godot_open_mcp_manage_tools` | core | local | always visible | ephemeral | n/a | Per-session tool-group visibility mutator (activate/deactivate/reset/list_groups). |
+| `godot_open_mcp_impact_preview` | gate-intelligence | local | gate-intelligence | no | n/a | Project the gate's view of a planned scope (resolved rules + per-path classification + risk band); dry-run. |
 | `godot_open_mcp_light_create` | lighting | live | lighting | editor state | enforce | Create a `DirectionalLight3D` / `OmniLight3D` / `SpotLight3D` / `DirectionalLight2D` / `PointLight2D` node (+ optional starter scalars). |
 | `godot_open_mcp_light_modify` | lighting | live | lighting | editor state | enforce | Bulk-patch multiple allow-listed + clamped light scalars on a light node. |
 | `godot_open_mcp_light_set` | lighting | live | lighting | editor state | enforce | Patch ONE allow-listed + clamped light scalar (color / energy / range / spot_angle / attenuation / shadow_enabled) on a light node. |
 | `godot_open_mcp_list_assets` | asset-intelligence | offline | asset-intelligence | no | n/a | Compressed `res://` directory listing (folder → kind → count + samples); offline, no editor. |
+| `godot_open_mcp_mutation_explain` | gate-intelligence | local | gate-intelligence | no | n/a | Explain a finished gate run as a narrative + structured summary (caller-provided gate data); dry-run. |
 | `godot_open_mcp_navigation_agent_configure` | navigation | live | navigation | editor state | enforce | Patch clamped scalar properties on a `NavigationAgent2D`/`3D`. |
 | `godot_open_mcp_navigation_agent_create` | navigation | live | navigation | editor state | enforce | Create a `NavigationAgent2D`/`3D` node (pathfinding + avoidance) in the edited scene. |
 | `godot_open_mcp_navigation_defaults` | navigation | live | navigation | no | n/a | Recommended starter scalars for a 2D/3D agent (pure helper, no scene). |
@@ -185,6 +188,7 @@ The MCP server filters `ListTools` through a per-session `ToolSessionState` so t
 | `settings` | no | Godot 4.3+ project-settings tools: read one `project.godot` section (or a per-section summary) and write key/value pairs within one section via Godot's `ProjectSettings` API (no raw text edits). |
 | `materials` | no | Godot 4.3+ materials + shaders tools: create a `StandardMaterial3D` / `ORMMaterial3D` / `ShaderMaterial` `.tres`, list a material's properties + values, set one property, assign a `.gdshader` to a `ShaderMaterial`, and read a `.gdshader`'s uniforms + types. |
 | `lighting` | no | Godot 4.3+ lighting tools (2D + 3D): create a `DirectionalLight3D` / `OmniLight3D` / `SpotLight3D` / `DirectionalLight2D` / `PointLight2D` node (+ optional starter scalars), patch one or many allow-listed + clamped light scalars (color / energy / range / spot_angle / attenuation / shadow_enabled), and create or replace the `WorldEnvironment` node's `Environment` resource. |
+| `gate-intelligence` | no | Dry-run gate planning + explanation: project the gate's view of a planned scope (`impact_preview`), forecast validation duration + cost (`gate_budget_estimate`), and explain a finished gate run as a narrative (`mutation_explain`). All three are local + read-only — they never mutate and never POST to the bridge. |
 
 The catalog source of truth is `mcp-server/src/capabilities/tool-groups.ts`. Activate or deactivate groups with `godot_open_mcp_manage_tools`; on a successful change the server emits the MCP `notifications/tools/list_changed` notification so clients that support `listChanged` refresh `ListTools` automatically. Hiding a tool is a prompt-size control, not an authorization boundary — a hidden tool name still routes when called directly.
 
@@ -1165,6 +1169,97 @@ Generate a project-specific agent skill file (`SKILL.md`) that reflects the ACTU
 **Merge model.** The canonical playbook (`skills/godot-open-mcp/SKILL.md`) is the source of truth for operational guidance and is emitted verbatim. The generator appends a project-inventory section carrying only what the template cannot know (Godot version, plugin install state, autoloads, discovered types, the live capability surface). A missing template degrades gracefully to a standalone inventory with its own short workflow summary.
 
 **Errors:** `generate_skill_failed` (unexpected disk read failure — the orchestrator is designed not to throw; a missing `project.godot` degrades to a `godotVersion: "unknown"` standalone inventory).
+
+### `godot_open_mcp_impact_preview`
+
+- Route: `local`
+- Visibility group: `gate-intelligence` (activate via `manage_tools`)
+- Read-only/mutating: read-only (dry-run)
+- Live editor requirement: none — projects over the rule catalog + path shape; never probes the bridge
+
+Project the gate's view of a planned `paths_hint` scope WITHOUT mutating. Resolves the verify rule set that would run, classifies each path (folder / asset kind / which rules accept its extension), and reports a coarse risk band (`low` / `moderate` / `high`) with a confidence level. Does not run a rule scan — only projects scope. Use `validate_edit` to confirm actual issues.
+
+**Input:**
+
+- `paths_hint` (required, non-empty) — `res://` file paths or folder scopes to project.
+- `categories` / `include_rules` / `exclude_rules` (optional) — rule-id filters with the same precedence as `validate_edit` (`categories` → `include_rules` → `exclude_rules`).
+
+**Result:**
+
+```json
+{
+  "scope": { "pathsHintCount": 2, "assetKinds": { "scene": 1, "folder": 1 } },
+  "rulesProjected": ["broken_references", "missing_scripts", "..."],
+  "risk": { "band": "moderate", "score": 4, "confidence": "medium" },
+  "perPath": [
+    { "path": "res://Main.tscn", "isFolder": false, "assetKind": "scene", "rulesForExtension": ["broken_references", "..."] },
+    { "path": "res://Sprites/", "isFolder": true, "assetKind": "folder", "rulesForExtension": ["..."] }
+  ],
+  "heuristicNote": "Projection over the rule catalog + path shape — no rule scan ran. ..."
+}
+```
+
+**Errors:** `missing_parameter` (no `paths_hint`).
+
+### `godot_open_mcp_gate_budget_estimate`
+
+- Route: `local`
+- Visibility group: `gate-intelligence` (activate via `manage_tools`)
+- Read-only/mutating: read-only (dry-run)
+- Live editor requirement: none — heuristic from the cost-hints table; never probes the bridge
+
+Forecast validation duration + issue budget for a planned `paths_hint` scope before mutating. Returns `estimatedDurationMs` (a lower bound), `estimatedIssueBudget` (an upper bound), a coarse output-cost `tokenBand` (`small` / `medium` / `large`), and the resolved rule set. Pure heuristic (per-rule cost bands × estimated asset count; folders expand to a fixed estimate). Run `validate_edit` for actuals.
+
+**Input:**
+
+- `paths_hint` (required, non-empty) — file paths count as one asset each; folder paths expand to a fixed asset estimate (noted in the result).
+- `categories` / `include_rules` / `exclude_rules` (optional) — rule-id filters (same precedence as `validate_edit`).
+
+**Result:**
+
+```json
+{
+  "scope": { "pathsHintCount": 1, "estimatedAssetCount": 1, "folderCount": 0 },
+  "rulesProjected": ["broken_references", "..."],
+  "estimate": {
+    "basis": "heuristic", "confidence": "low",
+    "estimatedDurationMs": 21, "estimatedIssueBudget": 18,
+    "tokenBand": "medium", "estimatedTokens": 1080
+  },
+  "heuristicNote": "Heuristic estimate from the cost-hints table — no live scan was run. ..."
+}
+```
+
+**Errors:** `missing_parameter` (no `paths_hint`).
+
+### `godot_open_mcp_mutation_explain`
+
+- Route: `local`
+- Visibility group: `gate-intelligence` (activate via `manage_tools`)
+- Read-only/mutating: read-only (dry-run)
+- Live editor requirement: none — generates the narrative locally from caller-provided gate data
+
+Explain a finished mutation + gate delta as a human-readable narrative + structured summary. Copy the gate-run fields from the mutating tool's `result.gate` block (`outcome`, the `delta` counts, `agent_next_steps`, durations) into the request. Optionally pass `new_issue_keys` / `resolved_issue_keys` (canonical `ruleId|severity|assetPath|issueCode` strings, e.g. from `delta`) for a per-rule breakdown enriched with `rootCause`. Degrades gracefully on partial input.
+
+**Input:** all optional — `outcome` (passed/warned/failed/skipped/unavailable); `new_errors` / `new_warnings` / `resolved_errors` / `resolved_warnings`; `agent_next_steps`; `new_issue_keys` / `resolved_issue_keys`; `tool_name`; `total_ms` / `checkpoint_ms` / `validation_ms`; `categories_run`; `mutation_error`.
+
+**Result:**
+
+```json
+{
+  "narrative": "godot_open_mcp_node_modify failed the gate. 2 new error(s), 1 new warning(s), ...",
+  "summary": { "tool": "godot_open_mcp_node_modify", "outcome": "failed", "newErrors": 2, "newWarnings": 1, "resolvedErrors": 0, "resolvedWarnings": 0, "totalGateDurationMs": 120 },
+  "issuesByRule": { "broken_references": 2 },
+  "newIssues": [{ "ruleId": "broken_references", "severity": "ERROR", "assetPath": "res://Main.tscn", "issueCode": "broken_scene_reference", "rootCause": "missing_uid_reference" }],
+  "agentNextSteps": ["Fix the issue and retry; use godot_open_mcp_validate_edit to verify without mutation."],
+  "heuristicNote": "..."
+}
+```
+
+- `issuesByRule` / `newIssues` / `resolvedIssues` — present only when issue keys are supplied.
+- `summary.outcome` — `unknown` when no `outcome` was provided.
+
+**Errors:** none — the tool never fails on partial input.
 
 ### `godot_open_mcp_validate_edit`
 

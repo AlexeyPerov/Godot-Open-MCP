@@ -58,7 +58,18 @@ import {
   RESTART_EDITOR_TOOL,
   RESOURCE_PRESSURE_TOOL,
   GENERATE_SKILL_TOOL,
+  IMPACT_PREVIEW_TOOL,
+  GATE_BUDGET_ESTIMATE_TOOL,
+  MUTATION_EXPLAIN_TOOL,
 } from "./capabilities/route-policy.js";
+import {
+  previewImpact,
+  estimateBudget,
+  explainMutation,
+  resolveRules,
+  type RuleFilter,
+  type ExplainInput,
+} from "./capabilities/gate-intelligence.js";
 import {
   TOOL_GROUPS,
   GROUP_IDS,
@@ -390,6 +401,15 @@ export class ToolRouter implements Router {
     if (toolName === GENERATE_SKILL_TOOL) {
       return this.routeGenerateSkill(args);
     }
+    if (toolName === IMPACT_PREVIEW_TOOL) {
+      return this.routeImpactPreview(args);
+    }
+    if (toolName === GATE_BUDGET_ESTIMATE_TOOL) {
+      return this.routeGateBudgetEstimate(args);
+    }
+    if (toolName === MUTATION_EXPLAIN_TOOL) {
+      return this.routeMutationExplain(args);
+    }
     if (toolName === MANAGE_TOOLS_TOOL) {
       return this.routeManageTools(args);
     }
@@ -438,6 +458,127 @@ export class ToolRouter implements Router {
       { tools: ALL_TOOLS, rules: RULE_CATALOG, fixes: FIX_CATALOG },
       filter,
     );
+    return sourceResult(result, "local", { route: "local" });
+  }
+
+  // ── P17.3 gate intelligence (local, dry-run) ────────────────────────────
+  //
+  // Three read-only tools resolved entirely in the MCP process over the rule
+  // catalog + cost-hints + caller-provided gate data. They never mutate and
+  // never POST to the bridge (Godot has no server-side gate-run history or
+  // VerifyCacheService that a live mode would need). The pure logic lives in
+  // `capabilities/gate-intelligence.ts` so it is unit-testable without a router.
+
+  /**
+   * Read a `string[]` argument (case-insensitive key match tolerated for the
+   * snake_case form). Returns `undefined` when absent or not a string array.
+   */
+  private stringArrayArg(
+    args: Record<string, unknown>,
+    key: string,
+  ): string[] | undefined {
+    const v = args[key];
+    if (Array.isArray(v) && v.every((x) => typeof x === "string")) {
+      return v as string[];
+    }
+    return undefined;
+  }
+
+  /**
+   * `godot_open_mcp_impact_preview` — project the gate's view of a planned scope
+   * (resolved rules + per-path classification + risk band) without mutating.
+   */
+  private async routeImpactPreview(
+    args: Record<string, unknown>,
+  ): Promise<CallToolResult> {
+    const pathsHint = this.stringArrayArg(args, "paths_hint");
+    if (!pathsHint || pathsHint.length === 0) {
+      return sourceResult(
+        { error: { code: "missing_parameter", message: "impact_preview requires a non-empty 'paths_hint' array." } },
+        "local",
+        { route: "local" },
+        true,
+      );
+    }
+    const filter: RuleFilter = {};
+    const categories = this.stringArrayArg(args, "categories");
+    const includeRules = this.stringArrayArg(args, "include_rules");
+    const excludeRules = this.stringArrayArg(args, "exclude_rules");
+    if (categories) filter.categories = categories;
+    if (includeRules) filter.includeRules = includeRules;
+    if (excludeRules) filter.excludeRules = excludeRules;
+    const result = previewImpact(pathsHint, filter);
+    return sourceResult(result, "local", { route: "local" });
+  }
+
+  /**
+   * `godot_open_mcp_gate_budget_estimate` — forecast validation duration +
+   * issue budget + token band for a planned scope (heuristic; no live scan).
+   */
+  private async routeGateBudgetEstimate(
+    args: Record<string, unknown>,
+  ): Promise<CallToolResult> {
+    const pathsHint = this.stringArrayArg(args, "paths_hint");
+    if (!pathsHint || pathsHint.length === 0) {
+      return sourceResult(
+        { error: { code: "missing_parameter", message: "gate_budget_estimate requires a non-empty 'paths_hint' array." } },
+        "local",
+        { route: "local" },
+        true,
+      );
+    }
+    const filter: RuleFilter = {};
+    const categories = this.stringArrayArg(args, "categories");
+    const includeRules = this.stringArrayArg(args, "include_rules");
+    const excludeRules = this.stringArrayArg(args, "exclude_rules");
+    if (categories) filter.categories = categories;
+    if (includeRules) filter.includeRules = includeRules;
+    if (excludeRules) filter.excludeRules = excludeRules;
+    const result = estimateBudget(pathsHint, resolveRules(filter));
+    return sourceResult(result, "local", { route: "local" });
+  }
+
+  /**
+   * `godot_open_mcp_mutation_explain` — narrative over a finished gate run from
+   * caller-provided data. Never fails on partial input.
+   */
+  private async routeMutationExplain(
+    args: Record<string, unknown>,
+  ): Promise<CallToolResult> {
+    const input: ExplainInput = {};
+    if (
+      args.outcome === "passed" || args.outcome === "warned" ||
+      args.outcome === "failed" || args.outcome === "skipped" ||
+      args.outcome === "unavailable"
+    ) {
+      input.outcome = args.outcome;
+    }
+    // snake_case arg → camelCase ExplainInput field for the numeric fields.
+    const intArgs: Array<[string, keyof ExplainInput]> = [
+      ["new_errors", "newErrors"],
+      ["new_warnings", "newWarnings"],
+      ["resolved_errors", "resolvedErrors"],
+      ["resolved_warnings", "resolvedWarnings"],
+      ["total_ms", "totalMs"],
+      ["checkpoint_ms", "checkpointMs"],
+      ["validation_ms", "validationMs"],
+    ];
+    for (const [argKey, field] of intArgs) {
+      if (typeof args[argKey] === "number" && Number.isFinite(args[argKey] as number)) {
+        (input as Record<string, unknown>)[field] = args[argKey];
+      }
+    }
+    const newIssueKeys = this.stringArrayArg(args, "new_issue_keys");
+    const resolvedIssueKeys = this.stringArrayArg(args, "resolved_issue_keys");
+    const agentNextSteps = this.stringArrayArg(args, "agent_next_steps");
+    const categoriesRun = this.stringArrayArg(args, "categories_run");
+    if (newIssueKeys) input.newIssueKeys = newIssueKeys;
+    if (resolvedIssueKeys) input.resolvedIssueKeys = resolvedIssueKeys;
+    if (agentNextSteps) input.agentNextSteps = agentNextSteps;
+    if (categoriesRun) input.categoriesRun = categoriesRun;
+    if (typeof args.tool_name === "string") input.toolName = args.tool_name;
+    if (typeof args.mutation_error === "string") input.mutationError = args.mutation_error;
+    const result = explainMutation(input);
     return sourceResult(result, "local", { route: "local" });
   }
 

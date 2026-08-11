@@ -38,6 +38,9 @@ import {
   RESTART_EDITOR_TOOL,
   RESOURCE_PRESSURE_TOOL,
   GENERATE_SKILL_TOOL,
+  IMPACT_PREVIEW_TOOL,
+  GATE_BUDGET_ESTIMATE_TOOL,
+  MUTATION_EXPLAIN_TOOL,
   type RoutePolicy,
 } from "./route-policy.js";
 import { ALL_TOOLS } from "../tools/index.js";
@@ -67,6 +70,9 @@ const ROUTER_NAMED_HANDLERS: ReadonlySet<string> = new Set([
   RESTART_EDITOR_TOOL,
   RESOURCE_PRESSURE_TOOL,
   GENERATE_SKILL_TOOL,
+  IMPACT_PREVIEW_TOOL,
+  GATE_BUDGET_ESTIMATE_TOOL,
+  MUTATION_EXPLAIN_TOOL,
 ]);
 
 const REGISTERED = new Set(ALL_TOOLS.map((t) => t.name));
@@ -175,6 +181,15 @@ test("representative pin: resource_pressure → local", () => {
   assert.equal(routePolicyFor("godot_open_mcp_resource_pressure"), "local");
 });
 
+test("representative pins: impact_preview / gate_budget_estimate / mutation_explain → local", () => {
+  // P17.3 — the gate-intelligence tools. Local: resolved over the rule catalog
+  // + cost-hints + caller-provided gate data — Godot has no server-side
+  // gate-run history or VerifyCacheService that a live mode would need.
+  assert.equal(routePolicyFor("godot_open_mcp_impact_preview"), "local");
+  assert.equal(routePolicyFor("godot_open_mcp_gate_budget_estimate"), "local");
+  assert.equal(routePolicyFor("godot_open_mcp_mutation_explain"), "local");
+});
+
 test("representative pins: scene_get_data / filesystem_list → live-first", () => {
   assert.equal(routePolicyFor("godot_open_mcp_scene_get_data"), "live-first");
   assert.equal(routePolicyFor("godot_open_mcp_filesystem_list"), "live-first");
@@ -254,4 +269,7 @@ test("the router named-handler constants are the expected tool names", () => {
   assert.equal(RESTART_EDITOR_TOOL, "godot_open_mcp_restart_editor");
   assert.equal(RESOURCE_PRESSURE_TOOL, "godot_open_mcp_resource_pressure");
   assert.equal(GENERATE_SKILL_TOOL, "godot_open_mcp_generate_skill");
+  assert.equal(IMPACT_PREVIEW_TOOL, "godot_open_mcp_impact_preview");
+  assert.equal(GATE_BUDGET_ESTIMATE_TOOL, "godot_open_mcp_gate_budget_estimate");
+  assert.equal(MUTATION_EXPLAIN_TOOL, "godot_open_mcp_mutation_explain");
 });

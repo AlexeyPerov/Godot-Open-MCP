@@ -111,6 +111,9 @@ import { readAsset } from "./read-asset.js";
 import { searchAssets } from "./search-assets.js";
 import { listAssets } from "./list-assets.js";
 import { reserialize } from "./reserialize.js";
+import { impactPreview } from "./impact-preview.js";
+import { gateBudgetEstimate } from "./gate-budget-estimate.js";
+import { mutationExplain } from "./mutation-explain.js";
 import { manageTools } from "./manage-tools.js";
 import { baselineCreate } from "./baseline-create.js";
 import { regressionCheck } from "./regression-check.js";
@@ -408,6 +411,16 @@ export const ALL_TOOLS: Tool[] = [
   // defaultGate "enforce"; paths_hint must contain every expanded target file. Per-path status +
   // normalization flag in the result.
   reserialize,
+  // P17.3 — gate intelligence: three local, dry-run (no-mutation) tools that
+  // project the gate's view of a planned scope, forecast validation cost, and
+  // explain a finished gate run. Group `gate-intelligence` (default-off). All
+  // three resolve locally over the rule catalog + cost-hints + caller-provided
+  // gate data — no bridge round-trip (Godot has no server-side gate-run history
+  // or VerifyCacheService that Unity's live modes rely on). impact_preview +
+  // gate_budget_estimate are pre-mutation; mutation_explain is post-mutation.
+  impactPreview,
+  gateBudgetEstimate,
+  mutationExplain,
   // P8.3 — manage_tools: per-session tool-group visibility mutator. Activates / deactivates /
   // resets / lists groups in the per-session ToolSessionState that ListTools consults to filter
   // tools. Always visible (capabilities + this tool + ping + bridge_status + pull_events +

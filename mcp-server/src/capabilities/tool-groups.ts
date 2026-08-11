@@ -181,6 +181,16 @@ export const TOOL_GROUPS: ToolGroup[] = [
       "exclude + bounded, truncated hit results. Live-only.",
     defaultEnabled: false,
   },
+  {
+    id: "gate-intelligence",
+    description:
+      "Dry-run gate planning + explanation: project the gate's view of a " +
+      "planned scope (impact_preview), forecast validation duration + cost " +
+      "(gate_budget_estimate), and explain a finished gate run as a narrative " +
+      "(mutation_explain). All three are local + read-only — they never mutate " +
+      "and never POST to the bridge. Hidden until activated via manage_tools.",
+    defaultEnabled: false,
+  },
 ];
 
 /**
@@ -483,6 +493,17 @@ assign(
   "spatial",
   ["spatial_query"].map((suffix) => `godot_open_mcp_${suffix}`),
 );
+
+// --- gate-intelligence (P17.3 — dry-run gate planning + explanation) --------
+// Three local, read-only tools: impact_preview (project a scope's rule set +
+// risk), gate_budget_estimate (forecast validation duration + cost), and
+// mutation_explain (narrative over a finished gate run). defaultEnabled: false
+// — activate via manage_tools. None mutate; none POST to the bridge.
+assign("gate-intelligence", [
+  "godot_open_mcp_impact_preview",
+  "godot_open_mcp_gate_budget_estimate",
+  "godot_open_mcp_mutation_explain",
+]);
 
 // ---------------------------------------------------------------------------
 // Read API

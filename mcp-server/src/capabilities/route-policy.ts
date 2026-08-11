@@ -61,6 +61,14 @@ export const RESOURCE_PRESSURE_TOOL = "godot_open_mcp_resource_pressure";
 // the capability catalog + a project type scan entirely in the MCP process;
 // no bridge round-trip.
 export const GENERATE_SKILL_TOOL = "godot_open_mcp_generate_skill";
+// P17.3 — gate intelligence: three dry-run (no-mutation) tools that project the
+// gate's view of a planned scope, forecast validation cost, and explain a
+// finished gate run. Local: resolved over the rule catalog + cost-hints +
+// caller-provided gate data — Godot has no server-side gate-run history or
+// VerifyCacheService that a live mode would need, so these never POST.
+export const IMPACT_PREVIEW_TOOL = "godot_open_mcp_impact_preview";
+export const GATE_BUDGET_ESTIMATE_TOOL = "godot_open_mcp_gate_budget_estimate";
+export const MUTATION_EXPLAIN_TOOL = "godot_open_mcp_mutation_explain";
 
 const LOCAL_TOOLS: ReadonlySet<string> = new Set([
   CAPABILITIES_TOOL,
@@ -70,6 +78,9 @@ const LOCAL_TOOLS: ReadonlySet<string> = new Set([
   RESTART_EDITOR_TOOL,
   RESOURCE_PRESSURE_TOOL,
   GENERATE_SKILL_TOOL,
+  IMPACT_PREVIEW_TOOL,
+  GATE_BUDGET_ESTIMATE_TOOL,
+  MUTATION_EXPLAIN_TOOL,
 ]);
 
 /**

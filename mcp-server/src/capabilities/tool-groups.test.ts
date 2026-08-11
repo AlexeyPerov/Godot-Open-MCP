@@ -60,6 +60,7 @@ test("TOOL_GROUPS id order is pinned (stable across catalog edits)", () => {
       "audio",
       "ui",
       "spatial",
+      "gate-intelligence",
     ],
   );
 });
@@ -366,6 +367,20 @@ test("groupFor(ping) === core (dual membership pin)", () => {
   assert.equal(groupFor("godot_open_mcp_ping"), "core");
 });
 
+test("the gate-intelligence group is present, opt-in, and carries the P17.3 roster", () => {
+  // P17.3 — three local, dry-run (no-mutation) tools: impact_preview +
+  // gate_budget_estimate (pre-mutation) + mutation_explain (post-mutation).
+  // Opt-in (defaultEnabled false) so a fresh session advertises only `core`.
+  const gi = getGroup("gate-intelligence");
+  assert.ok(gi, "gate-intelligence group must exist");
+  assert.equal(gi!.defaultEnabled, false, "gate-intelligence must be opt-in");
+  assert.deepEqual(toolsInGroup("gate-intelligence"), [
+    "godot_open_mcp_gate_budget_estimate",
+    "godot_open_mcp_impact_preview",
+    "godot_open_mcp_mutation_explain",
+  ]);
+});
+
 // ---------------------------------------------------------------------------
 // toolsInGroup roster integrity
 // ---------------------------------------------------------------------------
@@ -494,7 +509,7 @@ test("every registered tool is meta, core, typed-editor, asset-intelligence, or 
   // `typed-editor`, `asset-intelligence` (offline asset-graph tools), the
   // Phase 12 domain packs (tilemap / navigation / particles / animation / csg),
   // and the Phase 16 settings + materials + lighting + audio + ui + spatial packs.
-  const shippedDomainGroups = new Set(["tilemap", "navigation", "particles", "animation", "csg", "settings", "materials", "lighting", "audio", "ui", "spatial"]);
+  const shippedDomainGroups = new Set(["tilemap", "navigation", "particles", "animation", "csg", "settings", "materials", "lighting", "audio", "ui", "spatial", "gate-intelligence"]);
   for (const tool of ALL_TOOLS) {
     const g = groupFor(tool.name);
     if (g === null) continue; // meta-tool
