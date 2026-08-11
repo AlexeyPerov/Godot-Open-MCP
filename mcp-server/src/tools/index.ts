@@ -96,6 +96,11 @@ import { environmentSet } from "./environment-set.js";
 import { audioStreamPlayerCreate } from "./audio-stream-player-create.js";
 import { audioStreamPlayerSetStream } from "./audio-stream-player-set-stream.js";
 import { audioBusSetVolume } from "./audio-bus-set-volume.js";
+import { controlCreate } from "./control-create.js";
+import { controlModify } from "./control-modify.js";
+import { containerAdd } from "./container-add.js";
+import { containerSetLayout } from "./container-set-layout.js";
+import { themeApply } from "./theme-apply.js";
 import { bridgeStatus } from "./bridge-status.js";
 import { pullEvents } from "./pull-events.js";
 import { readCompileErrors } from "./read-compile-errors.js";
@@ -325,6 +330,24 @@ export const ALL_TOOLS: Tool[] = [
   audioStreamPlayerCreate,
   audioStreamPlayerSetStream,
   audioBusSetVolume,
+  // P16.5 — UI pack: five typed tools for UI controls, containers, and themes
+  // (group `ui`, hidden until activated via manage_tools). control_create makes
+  // a Button / Label / LineEdit / ... Control subclass by `type` with starter
+  // full-rect anchors so the control is visible without manual layout;
+  // control_modify bulk-patches allow-listed control scalars (text /
+  // tooltip_text / disabled / color / offsets / size_flags / value);
+  // container_add makes a VBoxContainer / HBoxContainer / GridContainer /
+  // MarginContainer / ScrollContainer; container_set_layout patches container
+  // layout properties (separation / columns / alignment / margins); theme_apply
+  // loads a Theme .tres and assigns it to a Control subtree (optionally
+  // recursive). All five mutators default to gate "enforce" and require
+  // paths_hint scoped to the edited scene path. Fifth and final Phase 16
+  // typed-editor-breadth family.
+  controlCreate,
+  controlModify,
+  containerAdd,
+  containerSetLayout,
+  themeApply,
   // P5.3 — bridge_status: operator-oriented health snapshot. Composes the instance-lock classifier
   // (instance-discovery.ts#classifyInstance) with one /ping probe and returns a coarse status token
   // (running | compiling | stopped | unreachable | dead_bridge) + classification + recoveryHint.

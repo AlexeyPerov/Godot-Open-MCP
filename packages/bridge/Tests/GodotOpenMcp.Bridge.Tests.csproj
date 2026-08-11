@@ -333,6 +333,21 @@
          coupled) is #if TOOLS and verified via the headless Godot smoke / live call
          path, not here. -->
     <Compile Include="..\Editor\Tools\Extensions\Audio\AudioBodies.cs" Link="Source\Audio\AudioBodies.cs" />
+    <!-- P16.5 — UI pack. The pure-managed body parsers (ControlCreateBody / ControlModifyBody /
+         ContainerAddBody / ContainerSetLayoutBody / ThemeApplyBody, the ControlKind +
+         ContainerKind enums, ControlKindParser / ContainerKindParser, and UiPropertyClamp) are
+         linked for unit testing. They reuse the P12.1 JsonScalar extractor (linked above). The
+         kind vocabularies (ControlKindParser / ContainerKindParser — parse / ToSchemaString /
+         ToClassName + ContainerKindParser.IsBox) and the centralized clamp table
+         (UiPropertyClamp — ClampNonNegativeFloat / ClampNonNegativeInt) are the highest-value
+         unit-test surfaces in this pack — they pin the creatable families + their Godot class
+         names without requiring the editor. The verbatim fields-map object slicer
+         (ControlModifyBody's / ContainerSetLayoutBody's ExtractObjectSlice) is also pinned here.
+         The editor-only handler (UiTools.ControlCreate / ControlModify / ContainerAdd /
+         ContainerSetLayout / ThemeApply — EditorInterface/Control/Container/Theme/
+         ResourceLoader-coupled) is #if TOOLS and verified via the headless Godot smoke / live
+         call path, not here. -->
+    <Compile Include="..\Editor\Tools\Extensions\Ui\UiBodies.cs" Link="Source\Ui\UiBodies.cs" />
     <!-- P3.5 — gate on mutators. The gate types (GateMode/GateOutcome/DeltaData/GateDispatchResult/
          GatePolicy/GateDefaultPolicy) and the VerifyGateAdapter are pure-managed for the parts the unit
          tests exercise (decision matrix, next-step hints, delta math, gate-mode parsing). GatePolicy

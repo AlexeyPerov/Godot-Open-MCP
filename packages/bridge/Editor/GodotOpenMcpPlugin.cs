@@ -234,6 +234,22 @@ namespace GodotOpenMcp.Bridge.Editor
                 // AudioServer (native dB, with optional linear→dB conversion). Idempotent
                 // re-register refreshes the handler references after a domain reload.
                 AudioTools.RegisterAudioTools();
+                // P16.5 — UI pack: five typed tools for UI controls, containers, and themes
+                // (control_create / control_modify / container_add / container_set_layout /
+                // theme_apply), group ui. The fifth and final Phase 16 typed-editor-breadth
+                // family. All five mutators register defaultGate:"enforce" and validate
+                // paths_hint themselves (scoped to the edited scene .tscn path).
+                // control_create makes a Button / Label / LineEdit / ... Control subclass by
+                // `type` with starter full-rect anchors so the control is visible without
+                // manual layout; control_modify bulk-patches allow-listed control scalars
+                // (text / tooltip_text / disabled / color / offsets / size_flags / value);
+                // container_add makes a VBoxContainer / HBoxContainer / GridContainer /
+                // MarginContainer / ScrollContainer; container_set_layout patches container
+                // layout properties (separation / columns / alignment / margins);
+                // theme_apply loads a Theme .tres and assigns it to a Control subtree
+                // (optionally recursive). Idempotent re-register refreshes the handler
+                // references after a domain reload.
+                UiTools.RegisterUiTools();
 
                 // Start the HTTP listener serving /ping and POST /tools/{name}. Stays down
                 // (and connected:false) if the bind fails — the editor remains usable, the

@@ -160,6 +160,15 @@ export const TOOL_GROUPS: ToolGroup[] = [
       "player, and set an audio bus's volume via AudioServer (native dB or linear→dB).",
     defaultEnabled: false,
   },
+  {
+    id: "ui",
+    description:
+      "UI tools (Godot 4.3+): create a Control subclass by type (Button / Label / LineEdit / TextureRect / " +
+      "ColorRect / ProgressBar / CheckBox / ...) with starter full-rect anchors, bulk-patch allow-listed control " +
+      "scalars, add a container (VBoxContainer / HBoxContainer / GridContainer / MarginContainer / " +
+      "ScrollContainer), patch container layout properties, and assign a Theme resource to a control subtree.",
+    defaultEnabled: false,
+  },
 ];
 
 /**
@@ -424,6 +433,26 @@ assign(
     "audio_stream_player_create",
     "audio_stream_player_set_stream",
     "audio_bus_set_volume",
+  ].map((suffix) => `godot_open_mcp_${suffix}`),
+);
+
+// --- ui (P16.5 — Godot 4.3+ UI controls/containers/themes pack) -------------
+// Five tools: control_create (mutating — Button/Label/LineEdit/... Control
+// subclass by `type` + starter full-rect anchors) / control_modify (mutating —
+// bulk-patch allow-listed control scalars: text/tooltip_text/disabled/color/
+// offsets/size_flags/value) / container_add (mutating — VBoxContainer/
+// HBoxContainer/GridContainer/MarginContainer/ScrollContainer) /
+// container_set_layout (mutating — separation/columns/alignment/margins) /
+// theme_apply (mutating — load a Theme .tres and assign to a Control subtree,
+// optionally recursive). Hidden until activated via manage_tools.
+assign(
+  "ui",
+  [
+    "control_create",
+    "control_modify",
+    "container_add",
+    "container_set_layout",
+    "theme_apply",
   ].map((suffix) => `godot_open_mcp_${suffix}`),
 );
 

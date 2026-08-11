@@ -48,6 +48,10 @@ The table below is the published view of `ALL_TOOLS`. The `scripts/check-tool-do
 | `godot_open_mcp_checkpoint_create` | core | live | core | no | n/a | Capture a project-health baseline over res:// paths for later `delta`. |
 | `godot_open_mcp_console_clear_logs` | editor | live | typed-editor | ephemeral | n/a | Clear the addon-owned log collector (ephemeral; never touches the native Output panel). |
 | `godot_open_mcp_console_get_logs` | editor | live | typed-editor | no | n/a | Read captured Godot Open MCP log lines, newest-first, with capture-capability metadata. |
+| `godot_open_mcp_container_add` | ui | live | ui | editor state | enforce | Add a `VBoxContainer` / `HBoxContainer` / `GridContainer` / `MarginContainer` / `ScrollContainer` node (+ starter full-rect anchors). |
+| `godot_open_mcp_container_set_layout` | ui | live | ui | editor state | enforce | Bulk-patch allow-listed container layout scalars (separation / columns / alignment / margins). |
+| `godot_open_mcp_control_create` | ui | live | ui | editor state | enforce | Create a `Button` / `Label` / `LineEdit` / ... Control subclass by `type` (+ starter full-rect anchors + optional text). |
+| `godot_open_mcp_control_modify` | ui | live | ui | editor state | enforce | Bulk-patch allow-listed control scalars (text / tooltip_text / disabled / color / offsets / size_flags / value). |
 | `godot_open_mcp_csg_box_create` | csg | live | csg | editor state | enforce | Create a `CsgBox3D` primitive node (+ optional `size` + `operation`). |
 | `godot_open_mcp_csg_combiner_create` | csg | live | csg | editor state | enforce | Create a `CsgCombiner3D` boolean-group container (groups child CSG shapes for boolean ops). |
 | `godot_open_mcp_csg_cylinder_create` | csg | live | csg | editor state | enforce | Create a `CsgCylinder3D` primitive node (+ optional `radius` / `height` / `sides` / `cone` / `smooth_faces` + `operation`). |
@@ -117,6 +121,7 @@ The table below is the published view of `ALL_TOOLS`. The `scripts/check-tool-do
 | `godot_open_mcp_settings_get_project` | settings | live | settings | no | n/a | Read one `project.godot` section (rendering / physics / input / layer_names / autoload / application / display) or a per-section summary. |
 | `godot_open_mcp_settings_set_project` | settings | live | settings | disk | enforce | Write key/value pairs within one `project.godot` section via Godot's `ProjectSettings` API (no raw text edits). |
 | `godot_open_mcp_shader_get_data` | materials | live | materials | no | n/a | Read a `.gdshader`'s uniforms (names + Variant types) via a temporary `ShaderMaterial`. |
+| `godot_open_mcp_theme_apply` | ui | live | ui | editor state | enforce | Load a `Theme` resource (`.tres`) and assign it to a `Control` subtree (optionally recursive). |
 | `godot_open_mcp_tilemap_clear` | tilemap | live | tilemap | editor state | enforce | Clear every cell on a `TileMapLayer` while keeping its TileSet. |
 | `godot_open_mcp_tilemap_create` | tilemap | live | tilemap | editor state | enforce | Create a Godot 4.3+ `TileMapLayer` node in the edited scene (returns NodeData). |
 | `godot_open_mcp_tilemap_erase_cell` | tilemap | live | tilemap | editor state | enforce | Erase one cell from a `TileMapLayer`. |
@@ -3124,6 +3129,137 @@ Set an audio bus's volume via Godot's `AudioServer` and read it back. Resolves t
 **Result:** `{ bus, busIndex, volumeDb, appliedUnit, warnings?: [...] }`. `appliedUnit` is `"db"` or `"linear"` depending on which input was applied.
 
 **Errors:** `paths_hint_required`, `missing_parameter` (`bus`, or both `volume_db` and `volume_linear` absent), `bus_not_found`.
+
+## UI tools
+
+UI tools create Godot UI controls and containers and apply themes to control subtrees. They replace hand-rolling `Button` / `Label` / `LineEdit` / `VBoxContainer` / ... via `node_create` + `node_modify` (which misses UI-specific defaults — a freshly-created Control has zero-size anchors and is invisible without manual layout) with typed create / modify / layout operations that apply starter full-rect anchors and validate the control/container type.
+
+This is a **`ui` group** family — hidden from `ListTools` until an agent activates it via `godot_open_mcp_manage_tools({ action: "activate", group: "ui" })`. As with every group, hiding is a prompt-size control, not an authorization boundary — a hidden tool name still routes when called directly.
+
+**Scope.** Fifteen common Godot 4.3+ Control leaf subclasses are creatable via `control_create`: `button` (`Button`), `label` (`Label`), `lineedit` (`LineEdit`), `textedit` (`TextEdit`), `texturerect` (`TextureRect`), `colorrect` (`ColorRect`), `progressbar` (`ProgressBar`), `checkbox` (`CheckBox`), `checkbutton` (`CheckButton`), `slider` (`HSlider`), `spinbox` (`SpinBox`), `optionbutton` (`OptionButton`), `separator` (`VSeparator`), `ninepatchrect` (`NinePatchRect`), `richtextlabel` (`RichTextLabel`). Five container families are creatable via `container_add`: `vbox` (`VBoxContainer`), `hbox` (`HBoxContainer`), `grid` (`GridContainer`), `margin` (`MarginContainer`), `scroll` (`ScrollContainer`). Unity uGUI's Canvas / CanvasScaler / GraphicRaycaster / EventSystem are intentionally NOT ported (Godot has implicit viewport-level input dispatch — the viewport is the canvas). Unity's RectTransform (anchorMin / anchorMax / sizeDelta / pivot) is mapped to Godot's anchor / offset / size_flags vocabulary.
+
+**Shared contracts.** All five tools are mutating and gated (`enforce` by default); `paths_hint` is the edited scene path (the `.tscn`) and is required even when `gate` is `off`. The control scalar allow-list is fixed: `text` (Button / Label / LineEdit / TextEdit / RichTextLabel / CheckBox / CheckButton), `tooltip_text` (every Control), `disabled` (BaseButton subclasses only), `color` (modulate, every Control), `custom_minimum_size` (every Control, clamped non-negative), `offset_left` / `offset_right` / `offset_top` / `offset_bottom` (every Control), `size_flags_horizontal` / `size_flags_vertical` (every Control — int bitmask or `fill` / `expand` / `shrink_center` / `shrink_end`), `anchors_preset` (every Control — sets anchors AND offsets together), `value` (ProgressBar / Slider / SpinBox only). The container layout allow-list is fixed: `separation` (VBox / HBox only), `columns` (GridContainer only), `alignment` (VBox / HBox only — `begin` / `center` / `end`), `margin_left` / `margin_right` / `margin_top` / `margin_bottom` (MarginContainer only), `anchors_preset` + `custom_minimum_size` (every Container, inherited from Control).
+
+### `godot_open_mcp_control_create`
+
+- Route: `live`
+- Visibility group: `ui`
+- Read-only/mutating: mutating (gated, default `enforce`)
+
+Create a UI Control subclass in the currently edited scene by `type` and return its NodeData. Resolves the parent (edited scene root by default), instantiates the concrete control class (`new Button()` / `new Label()` / ...), parents it, assigns the owner (so it persists on save), applies the starter anchors (full-rect by default — the control fills its parent, visible without manual layout), applies the optional starter text (controls with a Text property only), and marks the scene unsaved. The result carries the NodeData plus an `applied` array (the fields that landed) and a `warnings` array (any that could not be applied — e.g. a `text` field on a control with no Text property).
+
+**Input:**
+
+- `type` (required) — one of `button` / `label` / `lineedit` / `textedit` / `texturerect` / `colorrect` / `progressbar` / `checkbox` / `checkbutton` / `slider` / `spinbox` / `optionbutton` / `separator` / `ninepatchrect` / `richtextlabel`.
+- `name` (optional) — name for the new node (defaults to the type's auto-name).
+- `parent_node_path` (optional) — scene-tree path of the parent (defaults to the edited scene root). UI controls are usually parented to a Control or Container so the layout propagates.
+- `text` (optional) — starter text for controls with a Text property (Button / Label / LineEdit / TextEdit / RichTextLabel / CheckBox / CheckButton). Ignored for controls with no Text property (surfaces in `warnings`).
+- `anchors_preset` (optional) — Godot `LayoutPreset` name. Defaults to `full_rect`. See `control_modify` for the full preset vocabulary.
+- `paths_hint` (required) — the edited scene path.
+- `gate` (optional) — `enforce` | `warn` | `off` (default `enforce`).
+
+**Result:** the new node's NodeData, plus `applied: [field, ...]` and `warnings: [...]`.
+
+**Errors:** `paths_hint_required`, `invalid_parameter` (unknown `type`), `no_edited_scene`, `parent_not_found`, `create_failed`.
+
+### `godot_open_mcp_control_modify`
+
+- Route: `live`
+- Visibility group: `ui`
+- Read-only/mutating: mutating (gated, default `enforce`)
+
+Bulk-patch allow-listed control scalars on an existing Control node. Resolves the node, type-checks it against `Control`, then walks the `fields` map top-level, applying each field through the allow-listed + clamped path, accumulating per-field results (applied + errors) so a single bad entry does not abort the batch.
+
+**Input:**
+
+- `node_path` (required) — the Control node to mutate (scene-tree path). A non-Control node surfaces `wrong_node_type`.
+- `fields` (required) — a free-form `{field: value}` object. Allow-listed fields:
+  - `text` (string) — Button / Label / LineEdit / TextEdit / RichTextLabel / CheckBox / CheckButton.
+  - `tooltip_text` (string) — every Control.
+  - `disabled` (bool) — BaseButton subclasses (Button / CheckBox / CheckButton / OptionButton) only.
+  - `color` (`"r,g,b[,a]"` 0–1) — every Control (modulate).
+  - `custom_minimum_size` (`"x,y"`, clamped non-negative) — every Control.
+  - `offset_left` / `offset_right` / `offset_top` / `offset_bottom` (float) — every Control.
+  - `size_flags_horizontal` / `size_flags_vertical` (int bitmask, or `fill` / `expand` / `shrink_center` / `shrink_end` — combinable with `+` or `|`) — every Control.
+  - `anchors_preset` (preset name — sets anchors AND offsets together): `full_rect`, `top_left`, `top_right`, `bottom_right`, `bottom_left`, `center_left`, `center_top`, `center_right`, `center_bottom`, `center`, `left_wide`, `top_wide`, `right_wide`, `bottom_wide`, `vcenter_wide`, `hcenter_wide`.
+  - `value` (float) — ProgressBar / Slider / SpinBox only (the concrete Control clamps against its own min/max).
+- `paths_hint` (required) — the edited scene path.
+- `gate` (optional) — `enforce` | `warn` | `off` (default `enforce`).
+
+**Result:** `{ nodePath, applied: [field, ...], errors?: [...] }`. Unrecognized fields surface in `errors` as `unsupported_field`; per-field type failures surface as `invalid_property_value`.
+
+**Errors:** `paths_hint_required`, `missing_parameter` (`node_path` or `fields`), `no_edited_scene`, `node_not_found`, `wrong_node_type` (not a Control).
+
+### `godot_open_mcp_container_add`
+
+- Route: `live`
+- Visibility group: `ui`
+- Read-only/mutating: mutating (gated, default `enforce`)
+
+Add a Godot container node in the currently edited scene by `type` and return its NodeData. Resolves the parent (edited scene root by default), instantiates the concrete container class (`new VBoxContainer()` / ...), parents it, assigns the owner, applies the starter anchors (full-rect by default), and marks the scene unsaved. Use `container_set_layout` afterwards to configure separation / columns / alignment / margins.
+
+**Input:**
+
+- `type` (required) — one of `vbox` / `hbox` / `grid` / `margin` / `scroll`.
+  - `vbox` → `VBoxContainer` (children stack vertically).
+  - `hbox` → `HBoxContainer` (children row horizontally).
+  - `grid` → `GridContainer` (children in a column-major grid; `columns` defaults to 1 — set via `container_set_layout`).
+  - `margin` → `MarginContainer` (frames a single child with configurable margins).
+  - `scroll` → `ScrollContainer` (scrolls a single child that overflows).
+- `name` (optional) — name for the new node.
+- `parent_node_path` (optional) — scene-tree path of the parent.
+- `anchors_preset` (optional) — Godot `LayoutPreset` name. Defaults to `full_rect`.
+- `paths_hint` (required) — the edited scene path.
+- `gate` (optional) — `enforce` | `warn` | `off` (default `enforce`).
+
+**Result:** the new node's NodeData, plus `applied: [field, ...]` and `warnings: [...]`.
+
+**Errors:** `paths_hint_required`, `invalid_parameter` (unknown `type`), `no_edited_scene`, `parent_not_found`, `create_failed`.
+
+### `godot_open_mcp_container_set_layout`
+
+- Route: `live`
+- Visibility group: `ui`
+- Read-only/mutating: mutating (gated, default `enforce`)
+
+Bulk-patch allow-listed container layout properties on an existing Container node. Resolves the node, type-checks it against `Container`, then walks the `fields` map top-level, applying each field through the allow-listed + clamped path, accumulating per-field results.
+
+**Input:**
+
+- `node_path` (required) — the Container node to mutate (scene-tree path). A non-Container node surfaces `wrong_node_type`.
+- `fields` (required) — a free-form `{field: value}` object. Allow-listed fields:
+  - `separation` (int, clamped non-negative) — `VBoxContainer` / `HBoxContainer` only (the box's child spacing theme constant).
+  - `columns` (int, clamped non-negative) — `GridContainer` only.
+  - `alignment` (`begin` / `center` / `end`) — `VBoxContainer` / `HBoxContainer` only.
+  - `margin_left` / `margin_right` / `margin_top` / `margin_bottom` (int, clamped non-negative) — `MarginContainer` only.
+  - `anchors_preset` (preset name — every Container, inherited from Control; same vocabulary as `control_modify`).
+  - `custom_minimum_size` (`"x,y"`, clamped non-negative) — every Container.
+- `paths_hint` (required) — the edited scene path.
+- `gate` (optional) — `enforce` | `warn` | `off` (default `enforce`).
+
+**Result:** `{ nodePath, applied: [field, ...], errors?: [...] }`.
+
+**Errors:** `paths_hint_required`, `missing_parameter` (`node_path` or `fields`), `no_edited_scene`, `node_not_found`, `wrong_node_type` (not a Container).
+
+### `godot_open_mcp_theme_apply`
+
+- Route: `live`
+- Visibility group: `ui`
+- Read-only/mutating: mutating (gated, default `enforce`)
+
+Load a `Theme` resource (`.tres`) and assign it to a Control subtree. Resolves the target Control by `node_path`, loads the `Theme` at `theme_path` (a res:// `.tres`), assigns it to the Control's `Theme` property, and (when `recursive: true`) also assigns it to every descendant Control explicitly. By default Godot's natural theme inheritance cascades the root's `Theme` to descendants that do not override it, so `recursive` is opt-in (use it only to force every descendant to use this Theme).
+
+**Input:**
+
+- `node_path` (required) — the Control that receives the theme (scene-tree path). A non-Control node surfaces `wrong_node_type`. The Control's descendants inherit the theme (Godot's natural cascade) unless they carry their own.
+- `theme_path` (required) — res:// path to a `Theme` resource (`.tres`). A non-Theme resource surfaces `wrong_resource_type`.
+- `recursive` (optional, default `false`) — when `true`, assign the Theme to every descendant Control explicitly (overrides per-child themes).
+- `paths_hint` (required) — the edited scene path.
+- `gate` (optional) — `enforce` | `warn` | `off` (default `enforce`).
+
+**Result:** `{ nodePath, themePath, recursive, assignedCount, assigned: true }`. `assignedCount` is 1 when `recursive` is false; it counts every assigned descendant Control when `recursive` is true.
+
+**Errors:** `paths_hint_required`, `missing_parameter` (`node_path` or `theme_path`), `invalid_path`, `no_edited_scene`, `node_not_found`, `wrong_node_type` (not a Control), `resource_not_found`, `resource_load_failed`, `wrong_resource_type`.
 
 ## Offline fidelity limitations
 
