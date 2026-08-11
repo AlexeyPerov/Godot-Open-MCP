@@ -102,6 +102,7 @@ The table below is the published view of `ALL_TOOLS`. The `scripts/check-tool-do
 | `godot_open_mcp_read_asset` | asset-intelligence | offline | asset-intelligence | no | n/a | Token-budgeted structured summary of a `.tres`/`.tscn`/`.gdshader`/`.import`; offline, no editor. |
 | `godot_open_mcp_read_compile_errors` | core | offline | always visible | no | n/a | Offline diagnostic: read a bounded Godot log tail and extract structured C#/GDScript/load errors. |
 | `godot_open_mcp_regression_check` | core | offline | core | no | n/a | Compare the current offline scan against a baseline; returns exitCode 0/1/2/3 for CI. |
+| `godot_open_mcp_reserialize` | asset-intelligence | live | asset-intelligence | disk | enforce | Round-trip `.tres`/`.tscn`/`.res` through `ResourceLoader` + `ResourceSaver` to normalize on-disk format; per-path status + normalization flag. |
 | `godot_open_mcp_restart_editor` | core | local | always visible | OS process | n/a | Terminate a wedged Godot editor process after confirming a hang/crash signature; requires `confirm: true`. |
 | `godot_open_mcp_reflection_method_call` | reflection | live | typed-editor | disk | enforce | Invoke a C# method via reflection (static or instance) and return a JSON-serializable result. |
 | `godot_open_mcp_reflection_method_find` | reflection | live | typed-editor | no | n/a | Discover C# types/methods/properties across loaded Godot/.NET assemblies. |
@@ -175,7 +176,7 @@ The MCP server filters `ListTools` through a per-session `ToolSessionState` so t
 |---|---|---|
 | `core` | yes | Essential entry points + the gate/verify safety surface (`ping`, `validate_edit`, `checkpoint_create`, `delta`, `apply_fix`). The only group visible in a fresh session. |
 | `typed-editor` | no | The whole typed editor surface: nodes, scenes, resources, filesystem, editor state/selection, console, screenshots, reflection. One activate brings up the full typed surface. |
-| `asset-intelligence` | no | Offline asset-graph intelligence: reverse reference lookup (`find_references`), forward/reverse dependencies (`dependencies`), a token-budgeted asset read (`read_asset`), reason-tagged search (`search_assets`), and a compressed `res://` listing (`list_assets`). |
+| `asset-intelligence` | no | Asset-graph intelligence: reverse reference lookup (`find_references`), forward/reverse dependencies (`dependencies`), a token-budgeted asset read (`read_asset`), reason-tagged search (`search_assets`), a compressed `res://` listing (`list_assets`), and a mutating `ResourceSaver` round-trip (`reserialize` — the group's only live tool; the rest are offline). |
 | `tilemap` | no | Godot 4.3+ `TileMapLayer` tools: create a layer, assign a `TileSet`, set/erase/clear cells, list used cells. |
 | `navigation` | no | Godot 4.3+ navigation tools (2D + 3D): starter defaults, create `NavigationRegion`/`Agent`/`Link`, assign a region's navigation resource, configure agent scalars, inspect any navigation node. |
 | `particles` | no | Godot 4.3+ `GpuParticles2D`/`3D` tools (2D + 3D): starter defaults, create an emitter (+ optional initial scalars + process material), configure allow-listed + clamped scalars, start/stop emission (with optional restart), inspect any emitter. |
@@ -853,6 +854,40 @@ Compressed `res://` directory listing. Walks the project tree from disk and retu
 
 - `truncated` — number of folders whose per-kind sample list exceeded `max_per_folder`.
 - `kindSummary` — project-wide kind → count rollup (ignores the folder filter).
+
+### `godot_open_mcp_reserialize`
+
+- Route: `live`
+- Visibility group: `asset-intelligence` (activate via `manage_tools`)
+- Read-only/mutating: mutating — writes `.tres`/`.tscn`/`.res` files on disk
+- Live editor requirement: requires a running Godot editor (loads + saves through `ResourceLoader`/`ResourceSaver`)
+
+Round-trip writable Godot assets through `ResourceLoader.Load` + `ResourceSaver.Save` to normalize on-disk format. Collapses hand-edits, stale format versions, and missing fields into the canonical serialized form. Use after editing a `.tres`/`.tscn` as raw text, or after an upgrade, to surface integrity drift and let the first-party serializer rewrite the file. The group's only live/mutating tool — the rest of `asset-intelligence` is offline and read-only.
+
+**Input:**
+
+- `paths` (required) — non-empty array of `res://` file paths and/or folders. A folder is walked recursively for writable resource files. `uid://` identifiers are resolved to `res://` first. Imported resources (`.import` sidecar) and unsupported extensions are reported per-path, not aborted.
+- `paths_hint` (required) — mutation scope; must contain every expanded target file (enumerate a folder's contents via `list_assets` first). The gate validates exactly these paths after the round-trip. A missing target fails with `paths_hint_required` listing what to add.
+- `gate` (optional, default `enforce`) — `enforce` | `warn` | `off`. `enforce` runs checkpoint → reserialize → validate → delta and fails on new errors.
+
+**Result:**
+
+```json
+{
+  "results": [
+    { "path": "res://Resources/DemoData.tres", "status": "reserialized", "normalized": true },
+    { "path": "res://Scenes/Main.tscn", "status": "reserialized", "normalized": false },
+    { "path": "res://icon.png", "status": "not_writable", "error": "imported/generated resource — source of truth is external (.import sidecar)." }
+  ],
+  "summary": { "total": 3, "reserialized": 2, "failed": 1 }
+}
+```
+
+- `results[].status` — `reserialized` | `load_failed` | `save_failed` | `not_writable` | `not_found` | `unsupported`.
+- `results[].normalized` — present only for `reserialized`: `true` when the round-trip changed the on-disk bytes, `false` when the asset was already canonical.
+- `summary.failed` — count of every result that was not `reserialized`.
+
+**Errors:** `missing_parameter` (no `paths`), `paths_hint_required` (hint missing or does not cover every expanded target), `filesystem_unavailable` (import scan not finished), `too_many_targets` (expanded set exceeds the cap).
 
 ### `godot_open_mcp_baseline_create`
 

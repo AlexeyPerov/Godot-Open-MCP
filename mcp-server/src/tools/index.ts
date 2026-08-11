@@ -110,6 +110,7 @@ import { dependencies } from "./dependencies.js";
 import { readAsset } from "./read-asset.js";
 import { searchAssets } from "./search-assets.js";
 import { listAssets } from "./list-assets.js";
+import { reserialize } from "./reserialize.js";
 import { manageTools } from "./manage-tools.js";
 import { baselineCreate } from "./baseline-create.js";
 import { regressionCheck } from "./regression-check.js";
@@ -401,6 +402,12 @@ export const ALL_TOOLS: Tool[] = [
   readAsset,
   searchAssets,
   listAssets,
+  // P17.2 — reserialize: live, mutating asset-intelligence tool that round-trips writable
+  // .tres/.tscn/.res through ResourceLoader + ResourceSaver to normalize on-disk drift. The first
+  // live member of the `asset-intelligence` group (the P13/P17.1 peers are offline readers).
+  // defaultGate "enforce"; paths_hint must contain every expanded target file. Per-path status +
+  // normalization flag in the result.
+  reserialize,
   // P8.3 — manage_tools: per-session tool-group visibility mutator. Activates / deactivates /
   // resets / lists groups in the per-session ToolSessionState that ListTools consults to filter
   // tools. Always visible (capabilities + this tool + ping + bridge_status + pull_events +

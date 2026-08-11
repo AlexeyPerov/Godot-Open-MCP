@@ -355,6 +355,12 @@
          CollisionObject-coupled) is #if TOOLS and verified via the headless Godot smoke / live call
          path, not here. -->
     <Compile Include="..\Editor\Tools\Extensions\Spatial\SpatialBodies.cs" Link="Source\Spatial\SpatialBodies.cs" />
+    <!-- P17.2 — reserialize. The pure-managed request-body parser (ReserializeBody — hand-rolled
+         `paths` string-array extraction, same style as BridgeRequestBody.ExtractPathsHint) is linked
+         for unit testing. The editor-only handler (ReserializeTools.Reserialize —
+         EditorInterface/ResourceLoader/ResourceSaver/DirAccess-coupled) is #if TOOLS and verified
+         via the headless Godot smoke / live call path, not here. -->
+    <Compile Include="..\Editor\Tools\Reserialize\ReserializeBody.cs" Link="Source\Reserialize\ReserializeBody.cs" />
     <!-- P3.5 — gate on mutators. The gate types (GateMode/GateOutcome/DeltaData/GateDispatchResult/
          GatePolicy/GateDefaultPolicy) and the VerifyGateAdapter are pure-managed for the parts the unit
          tests exercise (decision matrix, next-step hints, delta math, gate-mode parsing). GatePolicy

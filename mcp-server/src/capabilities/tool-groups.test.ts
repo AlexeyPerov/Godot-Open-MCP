@@ -342,9 +342,10 @@ test("groupFor returns null for unknown tool names", () => {
   assert.equal(groupFor("godot_open_mcp_does_not_exist"), null);
 });
 
-test("the asset-intelligence group is present, opt-in, and carries the P13 + P17.1 roster", () => {
+test("the asset-intelligence group is present, opt-in, and carries the P13 + P17.1 + P17.2 roster", () => {
   // P13.1 reserved the `asset-intelligence` group; P13.2 added dependencies;
-  // P17.1 adds the read/search/list asset readers. Opt-in (defaultEnabled
+  // P17.1 adds the read/search/list asset readers (offline); P17.2 adds
+  // reserialize (the group's first live, mutating tool). Opt-in (defaultEnabled
   // false) so a fresh session advertises only `core`.
   const ai = getGroup("asset-intelligence");
   assert.ok(ai, "asset-intelligence group must exist");
@@ -354,6 +355,7 @@ test("the asset-intelligence group is present, opt-in, and carries the P13 + P17
     "godot_open_mcp_find_references",
     "godot_open_mcp_list_assets",
     "godot_open_mcp_read_asset",
+    "godot_open_mcp_reserialize",
     "godot_open_mcp_search_assets",
   ]);
 });

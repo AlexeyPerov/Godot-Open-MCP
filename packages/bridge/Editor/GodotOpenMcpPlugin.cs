@@ -260,6 +260,15 @@ namespace GodotOpenMcp.Bridge.Editor
                 // / locked physics space surfaces no_active_space. Idempotent re-register
                 // refreshes the handler reference after a domain reload.
                 SpatialTools.RegisterSpatialTools();
+                // P17.2 — reserialize: one live, mutating asset-intelligence tool that round-trips
+                // writable Godot assets (.tres/.tscn/.res) through ResourceLoader.Load +
+                // ResourceSaver.Save to normalize on-disk drift (hand-edits, stale format). The
+                // first live member of the `asset-intelligence` group (the P13/P17.1 peers are
+                // offline readers). defaultGate:"enforce" and validates paths_hint itself — every
+                // expanded target file must appear in paths_hint (the gate validates exactly what
+                // was rewritten). Idempotent re-register refreshes the handler reference after a
+                // domain reload.
+                ReserializeTools.RegisterReserializeTools();
 
                 // Start the HTTP listener serving /ping and POST /tools/{name}. Stays down
                 // (and connected:false) if the bind fails — the editor remains usable, the
