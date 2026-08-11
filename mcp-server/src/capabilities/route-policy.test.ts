@@ -32,6 +32,9 @@ import {
   DEPENDENCIES_TOOL,
   BASELINE_CREATE_TOOL,
   REGRESSION_CHECK_TOOL,
+  READ_ASSET_TOOL,
+  SEARCH_ASSETS_TOOL,
+  LIST_ASSETS_TOOL,
   RESTART_EDITOR_TOOL,
   RESOURCE_PRESSURE_TOOL,
   GENERATE_SKILL_TOOL,
@@ -58,6 +61,9 @@ const ROUTER_NAMED_HANDLERS: ReadonlySet<string> = new Set([
   DEPENDENCIES_TOOL,
   BASELINE_CREATE_TOOL,
   REGRESSION_CHECK_TOOL,
+  READ_ASSET_TOOL,
+  SEARCH_ASSETS_TOOL,
+  LIST_ASSETS_TOOL,
   RESTART_EDITOR_TOOL,
   RESOURCE_PRESSURE_TOOL,
   GENERATE_SKILL_TOOL,
@@ -152,6 +158,15 @@ test("representative pin: read_compile_errors → offline", () => {
   assert.equal(routePolicyFor("godot_open_mcp_read_compile_errors"), "offline");
 });
 
+test("representative pins: read_asset / search_assets / list_assets → offline", () => {
+  // P17.1 — the offline asset-intelligence readers. Always offline: they reuse
+  // the offline readers (project-index + P13.1 reference edges) and never probe
+  // the bridge.
+  assert.equal(routePolicyFor("godot_open_mcp_read_asset"), "offline");
+  assert.equal(routePolicyFor("godot_open_mcp_search_assets"), "offline");
+  assert.equal(routePolicyFor("godot_open_mcp_list_assets"), "offline");
+});
+
 test("representative pin: restart_editor → local", () => {
   assert.equal(routePolicyFor("godot_open_mcp_restart_editor"), "local");
 });
@@ -233,6 +248,9 @@ test("the router named-handler constants are the expected tool names", () => {
   assert.equal(READ_COMPILE_ERRORS_TOOL, "godot_open_mcp_read_compile_errors");
   assert.equal(BASELINE_CREATE_TOOL, "godot_open_mcp_baseline_create");
   assert.equal(REGRESSION_CHECK_TOOL, "godot_open_mcp_regression_check");
+  assert.equal(READ_ASSET_TOOL, "godot_open_mcp_read_asset");
+  assert.equal(SEARCH_ASSETS_TOOL, "godot_open_mcp_search_assets");
+  assert.equal(LIST_ASSETS_TOOL, "godot_open_mcp_list_assets");
   assert.equal(RESTART_EDITOR_TOOL, "godot_open_mcp_restart_editor");
   assert.equal(RESOURCE_PRESSURE_TOOL, "godot_open_mcp_resource_pressure");
   assert.equal(GENERATE_SKILL_TOOL, "godot_open_mcp_generate_skill");

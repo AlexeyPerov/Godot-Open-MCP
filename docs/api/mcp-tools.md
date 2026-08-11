@@ -78,6 +78,7 @@ The table below is the published view of `ALL_TOOLS`. The `scripts/check-tool-do
 | `godot_open_mcp_light_create` | lighting | live | lighting | editor state | enforce | Create a `DirectionalLight3D` / `OmniLight3D` / `SpotLight3D` / `DirectionalLight2D` / `PointLight2D` node (+ optional starter scalars). |
 | `godot_open_mcp_light_modify` | lighting | live | lighting | editor state | enforce | Bulk-patch multiple allow-listed + clamped light scalars on a light node. |
 | `godot_open_mcp_light_set` | lighting | live | lighting | editor state | enforce | Patch ONE allow-listed + clamped light scalar (color / energy / range / spot_angle / attenuation / shadow_enabled) on a light node. |
+| `godot_open_mcp_list_assets` | asset-intelligence | offline | asset-intelligence | no | n/a | Compressed `res://` directory listing (folder → kind → count + samples); offline, no editor. |
 | `godot_open_mcp_navigation_agent_configure` | navigation | live | navigation | editor state | enforce | Patch clamped scalar properties on a `NavigationAgent2D`/`3D`. |
 | `godot_open_mcp_navigation_agent_create` | navigation | live | navigation | editor state | enforce | Create a `NavigationAgent2D`/`3D` node (pathfinding + avoidance) in the edited scene. |
 | `godot_open_mcp_navigation_defaults` | navigation | live | navigation | no | n/a | Recommended starter scalars for a 2D/3D agent (pure helper, no scene). |
@@ -98,6 +99,7 @@ The table below is the published view of `ALL_TOOLS`. The `scripts/check-tool-do
 | `godot_open_mcp_particles_set_emitting` | particles | live | particles | editor state | enforce | Start/stop emission on a `GpuParticles2D`/`3D`; optional restart clears particles. |
 | `godot_open_mcp_ping` | core | live | core | no | n/a | Bridge health check (`GET /ping` round-trip). |
 | `godot_open_mcp_pull_events` | core | local | always visible | no | n/a | Drain incremental bridge events (console logs + editor-state transitions) since the last pull. |
+| `godot_open_mcp_read_asset` | asset-intelligence | offline | asset-intelligence | no | n/a | Token-budgeted structured summary of a `.tres`/`.tscn`/`.gdshader`/`.import`; offline, no editor. |
 | `godot_open_mcp_read_compile_errors` | core | offline | always visible | no | n/a | Offline diagnostic: read a bounded Godot log tail and extract structured C#/GDScript/load errors. |
 | `godot_open_mcp_regression_check` | core | offline | core | no | n/a | Compare the current offline scan against a baseline; returns exitCode 0/1/2/3 for CI. |
 | `godot_open_mcp_restart_editor` | core | local | always visible | OS process | n/a | Terminate a wedged Godot editor process after confirming a hang/crash signature; requires `confirm: true`. |
@@ -118,6 +120,7 @@ The table below is the published view of `ALL_TOOLS`. The `scripts/check-tool-do
 | `godot_open_mcp_screenshot_camera` | screenshot | live | typed-editor | no | n/a | Off-screen render from a `Camera2D`/`Camera3D` in the edited scene (image content block). |
 | `godot_open_mcp_screenshot_isolated` | screenshot | live | typed-editor | no | n/a | Render a `Node3D` alone in an isolated world from one of six directions (image content block). |
 | `godot_open_mcp_screenshot_viewport` | screenshot | live | typed-editor | no | n/a | Capture the active editor 2D/3D viewport (image content block). |
+| `godot_open_mcp_search_assets` | asset-intelligence | offline | asset-intelligence | no | n/a | Reason-tagged project-wide asset search (by name / kind / node type / script / uid); offline, no editor. |
 | `godot_open_mcp_settings_get_project` | settings | live | settings | no | n/a | Read one `project.godot` section (rendering / physics / input / layer_names / autoload / application / display) or a per-section summary. |
 | `godot_open_mcp_settings_set_project` | settings | live | settings | disk | enforce | Write key/value pairs within one `project.godot` section via Godot's `ProjectSettings` API (no raw text edits). |
 | `godot_open_mcp_shader_get_data` | materials | live | materials | no | n/a | Read a `.gdshader`'s uniforms (names + Variant types) via a temporary `ShaderMaterial`. |
@@ -172,7 +175,7 @@ The MCP server filters `ListTools` through a per-session `ToolSessionState` so t
 |---|---|---|
 | `core` | yes | Essential entry points + the gate/verify safety surface (`ping`, `validate_edit`, `checkpoint_create`, `delta`, `apply_fix`). The only group visible in a fresh session. |
 | `typed-editor` | no | The whole typed editor surface: nodes, scenes, resources, filesystem, editor state/selection, console, screenshots, reflection. One activate brings up the full typed surface. |
-| `asset-intelligence` | no | Offline asset-graph intelligence: reverse reference lookup (`find_references`), forward/reverse dependencies (`dependencies`), and related readers. |
+| `asset-intelligence` | no | Offline asset-graph intelligence: reverse reference lookup (`find_references`), forward/reverse dependencies (`dependencies`), a token-budgeted asset read (`read_asset`), reason-tagged search (`search_assets`), and a compressed `res://` listing (`list_assets`). |
 | `tilemap` | no | Godot 4.3+ `TileMapLayer` tools: create a layer, assign a `TileSet`, set/erase/clear cells, list used cells. |
 | `navigation` | no | Godot 4.3+ navigation tools (2D + 3D): starter defaults, create `NavigationRegion`/`Agent`/`Link`, assign a region's navigation resource, configure agent scalars, inspect any navigation node. |
 | `particles` | no | Godot 4.3+ `GpuParticles2D`/`3D` tools (2D + 3D): starter defaults, create an emitter (+ optional initial scalars + process material), configure allow-listed + clamped scalars, start/stop emission (with optional restart), inspect any emitter. |
@@ -720,6 +723,136 @@ Forward + reverse dependency lookup for Godot assets. Forward edges come from th
 - `cycles` — dependency cycle path lists through the queried asset (forward-graph DFS).
 
 **Errors:** `missing_parameter` (neither selector), `invalid_request` (both selectors).
+
+### `godot_open_mcp_read_asset`
+
+- Route: `offline`
+- Visibility group: `asset-intelligence` (activate via `manage_tools`)
+- Read-only/mutating: read-only
+- Live editor requirement: none — parses disk text; never probes the bridge
+
+Token-budgeted structured summary of a single asset. Parses `.tscn`/`.tres`/`.gdshader`/`.import` (or any small text asset) straight from disk and returns a per-kind summary: scene header + node roster, resource header + properties, shader `shader_type`/`render_mode` + uniforms, or a `.import` remap block. Integrity signals flag missing `[ext_resource]` references, orphaned `.import` sources, and parse failures. Use to understand an asset before mutating it, or to triage why a scene/resource will not load cleanly.
+
+**Input:**
+
+- `asset_path` (required) — canonical `res://` path of the asset to read.
+- `profile` (optional, default `compact`) — `compact` | `balanced` | `full`. Compact = headline only (kind/type/counts/integrity); balanced = expand the per-kind roster (ext_resources/nodes/uniforms/properties) with an inline cap; full = raise the cap (page with `page_size`).
+- `page_size` / `cursor` (optional) — page the per-kind roster (balanced/full). Response carries `pagination.next_cursor` when more remain.
+- `detail` (optional, legacy) — `summary`/`normal`/`verbose` alias for profile; ignored when `profile` is set.
+- `max_per_section` (optional) — cap on the per-kind roster before paging takes over.
+
+**Result:**
+
+```json
+{
+  "assetPath": "res://Scenes/Main.tscn",
+  "uid": "uid://scenemain00001",
+  "kind": "scene",
+  "resourceType": "PackedScene",
+  "size": 184,
+  "lineCount": 9,
+  "profile": "summary",
+  "format": 3,
+  "loadSteps": 3,
+  "headerType": "",
+  "extResourceCount": 1,
+  "subResourceCount": 0,
+  "nodeCount": 2,
+  "uniformCount": 0,
+  "propertyCount": 0,
+  "integrity": [],
+  "truncated": 0,
+  "_source": "offline"
+}
+```
+
+- `kind` — `scene` | `resource` | `shader` | `import` | `script` | `text`.
+- balanced/full adds: `extResources[]` (`.tscn`/`.tres`), `subResources[]`, `nodes[]` (scenes), `uniforms[]` (shaders), `properties[]` (resources/imports), `importRemap` (`.import`).
+- `integrity[]` — `{ code, detail }` where code ∈ { `missing_reference`, `orphaned_import`, `parse_failure` }.
+
+**Errors:** `missing_parameter` (no `asset_path`).
+
+### `godot_open_mcp_search_assets`
+
+- Route: `offline`
+- Visibility group: `asset-intelligence` (activate via `manage_tools`)
+- Read-only/mutating: read-only
+- Live editor requirement: none — scans disk text; never probes the bridge
+
+Project-wide asset search. Each criterion that matches contributes a reason tag so an agent knows WHY an asset was returned and which drill-down to run next. Use `uid` for a lightweight reverse-lookup (matches the uid token OR the path it resolves to); use `find_references` for the authoritative per-target view with field locations.
+
+**Input:**
+
+- `name` (optional) — case-insensitive substring on file basename.
+- `kind` (optional) — comma-separated kinds: `scene`/`resource`/`script`/`shader`/`import`.
+- `node_type` (optional) — case-insensitive substring on `.tscn` node `type=` (e.g. `Camera3D`). Scenes only.
+- `script` (optional) — case-insensitive substring on an attached script path.
+- `uid` (optional) — `uid://…` token; matches assets that reference it (the asset's own uid is never a self-match).
+- `profile` (optional, default `compact`) — `compact` | `balanced` | `full`. Compact = counts + `byKind` only; balanced/full = per-asset match list (full adds node-type hits + scripts).
+- `page_size` / `cursor` (optional) — page the per-asset match list (balanced/full).
+- `detail` (optional, legacy) — `summary`/`normal`/`verbose` alias for profile; ignored when `profile` is set.
+- `max_results` (optional, default 100) — single-page cap when `page_size` is omitted.
+
+**Result:**
+
+```json
+{
+  "query": { "name": "player" },
+  "matchCount": 2,
+  "matches": [
+    { "assetPath": "res://Scenes/PlayerScene.tscn", "kind": "scene", "reasons": ["by_name"] }
+  ],
+  "byKind": { "scene": 1, "script": 1 },
+  "detail": "normal",
+  "truncated": 0,
+  "_source": "offline"
+}
+```
+
+- `reasons[]` — subset of `by_name` / `by_kind` / `by_node_type` / `by_script` / `references_uid`.
+- balanced/full `matches[]` entries carry `nodes[]` (node-type hits) and `scripts[]` (attached script paths) when applicable.
+
+### `godot_open_mcp_list_assets`
+
+- Route: `offline`
+- Visibility group: `asset-intelligence` (activate via `manage_tools`)
+- Read-only/mutating: read-only
+- Live editor requirement: none — walks the disk tree; never probes the bridge
+
+Compressed `res://` directory listing. Walks the project tree from disk and returns folder → kind → count with sample file names. `.import`/`.uid` sidecars are folded into their parent file and never listed on their own. Useful for understanding project structure before drilling into specific assets with `read_asset` or `search_assets`.
+
+**Input:**
+
+- `folder` (optional, default `res://`) — `res://` folder to list under.
+- `type` (optional) — comma-separated kind filter: `scene`/`resource`/`script`/`shader`/`texture`/`audio`/`font`/`other`.
+- `max_per_folder` (optional) — max sample file names per kind per folder before the folder is marked truncated.
+- `profile` (optional, default `compact`) — `compact` | `balanced` | `full`. Compact = per-kind counts only (samples dropped); balanced = up to 6 samples per kind; full = up to 12.
+- `page_size` / `cursor` (optional) — page the folder list.
+- `detail` (optional, legacy) — `summary`/`normal`/`verbose` alias for profile; ignored when `profile` is set.
+
+**Result:**
+
+```json
+{
+  "root": "res://",
+  "folders": [
+    {
+      "folder": "res://Scenes/",
+      "kinds": { "scene": { "count": 2, "sample": ["Main", "Level"] } },
+      "fileCount": 2
+    }
+  ],
+  "totalFiles": 2,
+  "totalFolders": 1,
+  "kindSummary": { "scene": 2 },
+  "truncated": 0,
+  "detail": "normal",
+  "_source": "offline"
+}
+```
+
+- `truncated` — number of folders whose per-kind sample list exceeded `max_per_folder`.
+- `kindSummary` — project-wide kind → count rollup (ignores the folder filter).
 
 ### `godot_open_mcp_baseline_create`
 

@@ -82,8 +82,10 @@ export const TOOL_GROUPS: ToolGroup[] = [
     id: "asset-intelligence",
     description:
       "Offline asset-graph intelligence: reverse reference lookup " +
-      "(find_references) and related dependency readers. Hidden until " +
-      "activated via manage_tools.",
+      "(find_references), forward + reverse dependencies (dependencies), " +
+      "a token-budgeted asset read (read_asset), reason-tagged project-wide " +
+      "search (search_assets), and a compressed `res://` listing " +
+      "(list_assets). Hidden until activated via manage_tools.",
     defaultEnabled: false,
   },
   {
@@ -290,11 +292,15 @@ assign(
 );
 
 // --- asset-intelligence (offline asset-graph tools) ------------------------
-// find_references lands first; dependencies (forward + impact) joins later.
-// defaultEnabled: false — activate via manage_tools.
+// find_references lands first; dependencies (forward + impact) joins next;
+// P17.1 adds the generic asset read/search/list readers. defaultEnabled:
+// false — activate via manage_tools.
 assign("asset-intelligence", [
   "godot_open_mcp_find_references",
   "godot_open_mcp_dependencies",
+  "godot_open_mcp_read_asset",
+  "godot_open_mcp_search_assets",
+  "godot_open_mcp_list_assets",
 ]);
 
 // Domain pack groups (tilemap / navigation / particles / animation / csg)

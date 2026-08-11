@@ -84,6 +84,13 @@ export const DEPENDENCIES_TOOL = "godot_open_mcp_dependencies";
 // built from the offline disk scanner (Godot has no headless editor).
 export const BASELINE_CREATE_TOOL = "godot_open_mcp_baseline_create";
 export const REGRESSION_CHECK_TOOL = "godot_open_mcp_regression_check";
+// P17.1 — offline asset intelligence: token-budgeted asset read, reason-tagged
+// search, and a compressed `res://` listing. Always offline — they reuse the
+// offline readers (project-index + P13.1 reference edges) and never probe the
+// bridge.
+export const READ_ASSET_TOOL = "godot_open_mcp_read_asset";
+export const SEARCH_ASSETS_TOOL = "godot_open_mcp_search_assets";
+export const LIST_ASSETS_TOOL = "godot_open_mcp_list_assets";
 
 const OFFLINE_TOOLS: ReadonlySet<string> = new Set([
   READ_COMPILE_ERRORS_TOOL,
@@ -91,6 +98,9 @@ const OFFLINE_TOOLS: ReadonlySet<string> = new Set([
   DEPENDENCIES_TOOL,
   BASELINE_CREATE_TOOL,
   REGRESSION_CHECK_TOOL,
+  READ_ASSET_TOOL,
+  SEARCH_ASSETS_TOOL,
+  LIST_ASSETS_TOOL,
 ]);
 
 /**

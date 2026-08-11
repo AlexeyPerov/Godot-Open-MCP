@@ -52,6 +52,9 @@ import {
   DEPENDENCIES_TOOL,
   BASELINE_CREATE_TOOL,
   REGRESSION_CHECK_TOOL,
+  READ_ASSET_TOOL,
+  SEARCH_ASSETS_TOOL,
+  LIST_ASSETS_TOOL,
   RESTART_EDITOR_TOOL,
   RESOURCE_PRESSURE_TOOL,
   GENERATE_SKILL_TOOL,
@@ -66,6 +69,9 @@ import { readSceneGetDataOffline } from "./offline/scene-get-data.js";
 import { listProjectDirectoryOffline } from "./offline/project-index.js";
 import { findReferencesOffline } from "./offline/references.js";
 import { dependenciesOffline } from "./offline/dependencies.js";
+import { readAssetOffline } from "./offline/read-asset.js";
+import { searchAssetsOffline } from "./offline/search-assets.js";
+import { listAssetsOffline } from "./offline/list-assets.js";
 import { identifyGodotProject } from "./offline/project-config.js";
 import { scanProjectOffline } from "./baseline/scan.js";
 import {
@@ -359,6 +365,15 @@ export class ToolRouter implements Router {
     }
     if (toolName === DEPENDENCIES_TOOL) {
       return this.routeDependencies(args);
+    }
+    if (toolName === READ_ASSET_TOOL) {
+      return this.routeReadAsset(args);
+    }
+    if (toolName === SEARCH_ASSETS_TOOL) {
+      return this.routeSearchAssets(args);
+    }
+    if (toolName === LIST_ASSETS_TOOL) {
+      return this.routeListAssets(args);
     }
     if (toolName === BASELINE_CREATE_TOOL) {
       return this.routeBaselineCreate(args);
@@ -954,6 +969,129 @@ export class ToolRouter implements Router {
       maxResults,
       includeImpact,
       maxImpactDepth,
+      projectRoot: this.projectPath,
+    });
+
+    return sourceResult(result, "offline", routeMeta);
+  }
+
+  // ── P17.1 — always-offline `read_asset` / `search_assets` / `list_assets` ──
+
+  /**
+   * `godot_open_mcp_read_asset` — always-offline token-budgeted asset summary.
+   * NEVER probes the bridge. Parses `.tres`/`.tscn`/`.gdshader`/`.import` text
+   * on disk.
+   */
+  private async routeReadAsset(
+    args: Record<string, unknown>,
+  ): Promise<CallToolResult> {
+    const routeMeta: RouteMeta = { route: "offline" };
+
+    const assetPath =
+      typeof args.asset_path === "string" ? args.asset_path : "";
+    if (assetPath === "") {
+      return sourceResult(
+        {
+          error: {
+            code: "missing_parameter",
+            message: "read_asset requires 'asset_path'.",
+          },
+        },
+        "offline",
+        routeMeta,
+        true,
+      );
+    }
+
+    const { detail } = readProfileAndDetail(args, "summary");
+    const pageSize =
+      typeof args.page_size === "number" && args.page_size > 0
+        ? Math.floor(args.page_size)
+        : undefined;
+    const cursor = typeof args.cursor === "string" ? args.cursor : undefined;
+    const maxPerSection =
+      typeof args.max_per_section === "number" && args.max_per_section > 0
+        ? Math.floor(args.max_per_section)
+        : undefined;
+
+    const result = await readAssetOffline({
+      assetPath,
+      detail,
+      pageSize,
+      cursor,
+      maxPerSection,
+      projectRoot: this.projectPath,
+    });
+
+    return sourceResult(result, "offline", routeMeta);
+  }
+
+  /**
+   * `godot_open_mcp_search_assets` — always-offline reason-tagged project-wide
+   * search. NEVER probes the bridge.
+   */
+  private async routeSearchAssets(
+    args: Record<string, unknown>,
+  ): Promise<CallToolResult> {
+    const routeMeta: RouteMeta = { route: "offline" };
+
+    const { detail } = readProfileAndDetail(args, "summary");
+    const pageSize =
+      typeof args.page_size === "number" && args.page_size > 0
+        ? Math.floor(args.page_size)
+        : undefined;
+    const cursor = typeof args.cursor === "string" ? args.cursor : undefined;
+    const maxResults =
+      pageSize !== undefined
+        ? 0
+        : typeof args.max_results === "number"
+          ? args.max_results
+          : 100;
+
+    const result = await searchAssetsOffline({
+      name: typeof args.name === "string" ? args.name : undefined,
+      kind: typeof args.kind === "string" ? args.kind : undefined,
+      nodeType: typeof args.node_type === "string" ? args.node_type : undefined,
+      script: typeof args.script === "string" ? args.script : undefined,
+      uid: typeof args.uid === "string" ? args.uid : undefined,
+      detail,
+      maxResults,
+      pageSize,
+      cursor,
+      projectRoot: this.projectPath,
+    });
+
+    return sourceResult(result, "offline", routeMeta);
+  }
+
+  /**
+   * `godot_open_mcp_list_assets` — always-offline compressed `res://` listing.
+   * NEVER probes the bridge.
+   */
+  private async routeListAssets(
+    args: Record<string, unknown>,
+  ): Promise<CallToolResult> {
+    const routeMeta: RouteMeta = { route: "offline" };
+
+    const { detail } = readProfileAndDetail(args, "summary");
+    const pageSize =
+      typeof args.page_size === "number" && args.page_size > 0
+        ? Math.floor(args.page_size)
+        : undefined;
+    const cursor = typeof args.cursor === "string" ? args.cursor : undefined;
+    const maxPerFolder =
+      typeof args.max_per_folder === "number" && args.max_per_folder > 0
+        ? Math.floor(args.max_per_folder)
+        : undefined;
+    const folder = typeof args.folder === "string" ? args.folder : undefined;
+
+    const result = await listAssetsOffline({
+      folder,
+      type: typeof args.type === "string" ? args.type : undefined,
+      maxPerFolder,
+      detail,
+      pageSize,
+      cursor,
       projectRoot: this.projectPath,
     });
 

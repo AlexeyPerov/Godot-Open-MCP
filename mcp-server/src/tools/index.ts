@@ -107,6 +107,9 @@ import { pullEvents } from "./pull-events.js";
 import { readCompileErrors } from "./read-compile-errors.js";
 import { findReferences } from "./find-references.js";
 import { dependencies } from "./dependencies.js";
+import { readAsset } from "./read-asset.js";
+import { searchAssets } from "./search-assets.js";
+import { listAssets } from "./list-assets.js";
 import { manageTools } from "./manage-tools.js";
 import { baselineCreate } from "./baseline-create.js";
 import { regressionCheck } from "./regression-check.js";
@@ -391,6 +394,13 @@ export const ALL_TOOLS: Tool[] = [
   // P13.2 — dependencies: offline forward + reverse edges, cycles, impact.
   // Group `asset-intelligence` (default-off); always-offline route.
   dependencies,
+  // P17.1 — offline asset intelligence: token-budgeted asset read, reason-tagged
+  // project-wide search, and a compressed `res://` directory listing. All three
+  // reuse the offline readers (project-index + P13.1 reference edges) and never
+  // probe the bridge. Group `asset-intelligence` (default-off).
+  readAsset,
+  searchAssets,
+  listAssets,
   // P8.3 — manage_tools: per-session tool-group visibility mutator. Activates / deactivates /
   // resets / lists groups in the per-session ToolSessionState that ListTools consults to filter
   // tools. Always visible (capabilities + this tool + ping + bridge_status + pull_events +

@@ -342,6 +342,22 @@ test("groupFor returns null for unknown tool names", () => {
   assert.equal(groupFor("godot_open_mcp_does_not_exist"), null);
 });
 
+test("the asset-intelligence group is present, opt-in, and carries the P13 + P17.1 roster", () => {
+  // P13.1 reserved the `asset-intelligence` group; P13.2 added dependencies;
+  // P17.1 adds the read/search/list asset readers. Opt-in (defaultEnabled
+  // false) so a fresh session advertises only `core`.
+  const ai = getGroup("asset-intelligence");
+  assert.ok(ai, "asset-intelligence group must exist");
+  assert.equal(ai!.defaultEnabled, false, "asset-intelligence must be opt-in");
+  assert.deepEqual(toolsInGroup("asset-intelligence"), [
+    "godot_open_mcp_dependencies",
+    "godot_open_mcp_find_references",
+    "godot_open_mcp_list_assets",
+    "godot_open_mcp_read_asset",
+    "godot_open_mcp_search_assets",
+  ]);
+});
+
 test("groupFor(ping) === core (dual membership pin)", () => {
   // Explicit pin from the P8.1 acceptance criteria: ping is assigned to core
   // AND will be always-visible in P8.2. The catalog side is `core` only.
