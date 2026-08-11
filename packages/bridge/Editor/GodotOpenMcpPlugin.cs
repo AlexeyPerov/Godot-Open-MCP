@@ -250,6 +250,16 @@ namespace GodotOpenMcp.Bridge.Editor
                 // (optionally recursive). Idempotent re-register refreshes the handler
                 // references after a domain reload.
                 UiTools.RegisterUiTools();
+                // P16.6 — spatial-query pack: one read-only typed tool for physics world
+                // queries (spatial_query), group spatial. The sixth and final Phase 16
+                // typed-editor-breadth family. spatial_query dispatches three query kinds
+                // (ray / shape / point) across two dimensions (2d / 3d) against the edited
+                // scene's PhysicsDirectSpaceState2D/3D; collision mask + node-path exclude
+                // + max_results bounding are honored and results are bounded + truncated.
+                // Read-only (defaultGate off, isMutating false) and live-only — an inactive
+                // / locked physics space surfaces no_active_space. Idempotent re-register
+                // refreshes the handler reference after a domain reload.
+                SpatialTools.RegisterSpatialTools();
 
                 // Start the HTTP listener serving /ping and POST /tools/{name}. Stays down
                 // (and connected:false) if the bind fails — the editor remains usable, the

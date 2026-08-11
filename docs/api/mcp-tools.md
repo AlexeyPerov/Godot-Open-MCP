@@ -121,6 +121,7 @@ The table below is the published view of `ALL_TOOLS`. The `scripts/check-tool-do
 | `godot_open_mcp_settings_get_project` | settings | live | settings | no | n/a | Read one `project.godot` section (rendering / physics / input / layer_names / autoload / application / display) or a per-section summary. |
 | `godot_open_mcp_settings_set_project` | settings | live | settings | disk | enforce | Write key/value pairs within one `project.godot` section via Godot's `ProjectSettings` API (no raw text edits). |
 | `godot_open_mcp_shader_get_data` | materials | live | materials | no | n/a | Read a `.gdshader`'s uniforms (names + Variant types) via a temporary `ShaderMaterial`. |
+| `godot_open_mcp_spatial_query` | spatial | live | spatial | no | n/a | Physics ray / shape / point query (2D + 3D) against the edited scene's physics world; collision mask + node-path exclude honored; bounded + truncated. |
 | `godot_open_mcp_theme_apply` | ui | live | ui | editor state | enforce | Load a `Theme` resource (`.tres`) and assign it to a `Control` subtree (optionally recursive). |
 | `godot_open_mcp_tilemap_clear` | tilemap | live | tilemap | editor state | enforce | Clear every cell on a `TileMapLayer` while keeping its TileSet. |
 | `godot_open_mcp_tilemap_create` | tilemap | live | tilemap | editor state | enforce | Create a Godot 4.3+ `TileMapLayer` node in the edited scene (returns NodeData). |
@@ -3260,6 +3261,46 @@ Load a `Theme` resource (`.tres`) and assign it to a Control subtree. Resolves t
 **Result:** `{ nodePath, themePath, recursive, assignedCount, assigned: true }`. `assignedCount` is 1 when `recursive` is false; it counts every assigned descendant Control when `recursive` is true.
 
 **Errors:** `paths_hint_required`, `missing_parameter` (`node_path` or `theme_path`), `invalid_path`, `no_edited_scene`, `node_not_found`, `wrong_node_type` (not a Control), `resource_not_found`, `resource_load_failed`, `wrong_resource_type`.
+
+## Spatial tools
+
+Physics-world queries against the edited scene. The single tool in this family is read-only (gate-free) and live-only — it resolves the scene's active `PhysicsDirectSpaceState2D`/`3D` and runs ray / shape / point queries, returning bounded, structured hit results. Activate the `spatial` group via `manage_tools` first.
+
+### `godot_open_mcp_spatial_query`
+
+Probe the edited scene's physics world with a `ray`, `shape`, or `point` query in `2d` or `3d`. Resolves the active `PhysicsDirectSpaceState2D`/`3D` from the edited scene's viewport world and dispatches by `query_type` × `dimension`.
+
+- **ray** — casts a segment from `from` to `to`; returns the single closest collider (node path, instance id, RID, contact position, normal, shape index) or `hit: false`.
+- **shape** — overlaps a `shape` (`circle` / `sphere` / `rectangle` / `box` / `capsule`) centered at `position` (+ `radius` / `size` / `height` / `rotation`); returns up to `max_results` hits. `circle` and `rectangle` are `2d` only; `sphere` and `box` are `3d` only; `capsule` works in both.
+- **point** — reports the bodies that contain `position`; same bounded multi-hit shape as `shape`.
+
+Vectors are comma-separated strings (`x,y` for `2d`, `x,y,z` for `3d`). `size` is Godot's full extent (not half-extents) — a `box` `size` of `"2,2,2"` is a 2×2×2 box. `mask` is a collision bitmask (default: all layers). `exclude` is a list of collider **node paths** (resolved to physics RIDs inside the handler); pass a hit's returned `node_path` to filter it out. `collide_with_bodies` (default `true`) and `collide_with_areas` (default `false`) select what the query registers. Read-only — no `paths_hint`, no gate.
+
+**Input:**
+
+- `query_type` (required) — `ray` | `shape` | `point`.
+- `dimension` (required) — `2d` | `3d`.
+- `from` (ray) — segment origin (`x,y` / `x,y,z`).
+- `to` (ray) — segment end (`x,y` / `x,y,z`).
+- `shape` (shape) — `circle` | `sphere` | `rectangle` | `box` | `capsule`.
+- `position` (shape / point) — center / probe point (`x,y` / `x,y,z`).
+- `radius` — circle / sphere / capsule radius (strictly positive).
+- `size` — rectangle / box full extent (`x,y` / `x,y,z`).
+- `height` — capsule total height (strictly positive).
+- `rotation` — optional shape rotation in degrees (`x,y,z` Euler for `3d`; a single degree value for `2d`).
+- `mask` — collision bitmask (default all layers).
+- `exclude` — array of collider node paths to skip.
+- `collide_with_bodies` (default `true`) — register physics bodies.
+- `collide_with_areas` (default `false`) — register `Area2D` / `Area3D`.
+- `max_results` (default `32`) — cap on shape / point hits (ray returns one).
+
+**Result (ray, hit):** `{ query_type, dimension, hit: true, result: { node_path, collider_id, rid, position, normal, shape, face_index } }`. `node_path` is `null` for a freed/non-node collider.
+
+**Result (ray, miss):** `{ query_type, dimension, hit: false }`.
+
+**Result (shape / point):** `{ query_type, dimension, shape?, max_results, results: [ { node_path, collider_id, rid, position?, normal?, shape?, face_index? }, ... ], count, truncated }`. `truncated` is `true` when more hits existed than `max_results` returned. A `point` hit omits `position` / `normal` (Godot does not report them for point queries).
+
+**Errors:** `invalid_parameter` (bad `query_type` / `dimension`, shape↔dimension mismatch such as `sphere` in `2d`, missing `from`/`to`/`position`, non-positive or missing shape geometry), `missing_parameter`, `no_edited_scene`, `no_active_space` (no resolvable physics world — play the scene for the most reliable stepped space), `execution_error` (the space refused the query, e.g. locked mid-step).
 
 ## Offline fidelity limitations
 

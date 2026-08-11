@@ -59,6 +59,7 @@ test("TOOL_GROUPS id order is pinned (stable across catalog edits)", () => {
       "lighting",
       "audio",
       "ui",
+      "spatial",
     ],
   );
 });
@@ -256,6 +257,17 @@ test("the lighting group is present, opt-in, and carries the P16.3 four-tool ros
     "godot_open_mcp_light_create",
     "godot_open_mcp_light_modify",
     "godot_open_mcp_light_set",
+  ]);
+});
+
+test("the spatial group is present, opt-in, and carries the P16.6 one-tool roster", () => {
+  // P16.6 lands the sixth and final Phase 16 typed-editor-breadth family. The
+  // roster is the single read-only physics query tool.
+  const spatial = getGroup("spatial");
+  assert.ok(spatial, "spatial group must exist");
+  assert.equal(spatial!.defaultEnabled, false, "spatial must be opt-in");
+  assert.deepEqual(toolsInGroup("spatial"), [
+    "godot_open_mcp_spatial_query",
   ]);
 });
 
@@ -463,8 +475,8 @@ test("every registered tool is meta, core, typed-editor, asset-intelligence, or 
   // Regression guard: the only groups that carry tools are `core`,
   // `typed-editor`, `asset-intelligence` (offline asset-graph tools), the
   // Phase 12 domain packs (tilemap / navigation / particles / animation / csg),
-  // and the Phase 16 settings + materials + lighting + audio + ui packs.
-  const shippedDomainGroups = new Set(["tilemap", "navigation", "particles", "animation", "csg", "settings", "materials", "lighting", "audio", "ui"]);
+  // and the Phase 16 settings + materials + lighting + audio + ui + spatial packs.
+  const shippedDomainGroups = new Set(["tilemap", "navigation", "particles", "animation", "csg", "settings", "materials", "lighting", "audio", "ui", "spatial"]);
   for (const tool of ALL_TOOLS) {
     const g = groupFor(tool.name);
     if (g === null) continue; // meta-tool

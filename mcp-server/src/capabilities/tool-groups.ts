@@ -169,6 +169,14 @@ export const TOOL_GROUPS: ToolGroup[] = [
       "ScrollContainer), patch container layout properties, and assign a Theme resource to a control subtree.",
     defaultEnabled: false,
   },
+  {
+    id: "spatial",
+    description:
+      "Spatial query tool (Godot 4.3+, 2D + 3D): read-only physics ray / shape / point queries against " +
+      "the edited scene's physics world (PhysicsDirectSpaceState2D/3D) with collision mask + node-path " +
+      "exclude + bounded, truncated hit results. Live-only.",
+    defaultEnabled: false,
+  },
 ];
 
 /**
@@ -454,6 +462,16 @@ assign(
     "container_set_layout",
     "theme_apply",
   ].map((suffix) => `godot_open_mcp_${suffix}`),
+);
+
+// --- spatial (P16.6 — Godot 4.3+ physics spatial-query pack) ----------------
+// One tool: spatial_query (read-only — ray / shape / point query in 2D + 3D
+// against the edited scene's PhysicsDirectSpaceState2D/3D, with collision mask
+// + node-path exclude + bounded, truncated results). Hidden until activated via
+// manage_tools.
+assign(
+  "spatial",
+  ["spatial_query"].map((suffix) => `godot_open_mcp_${suffix}`),
 );
 
 // ---------------------------------------------------------------------------

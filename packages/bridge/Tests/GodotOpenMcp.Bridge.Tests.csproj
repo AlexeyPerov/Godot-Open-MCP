@@ -348,6 +348,13 @@
          ResourceLoader-coupled) is #if TOOLS and verified via the headless Godot smoke / live
          call path, not here. -->
     <Compile Include="..\Editor\Tools\Extensions\Ui\UiBodies.cs" Link="Source\Ui\UiBodies.cs" />
+    <!-- P16.6 — spatial-query pack. The request-body parser (SpatialQueryBody + the SpatialQueryType /
+         SpatialDimension / SpatialShape enums + their parsers + the SpatialShapeCompat table + the
+         mask uint / exclude string-array extractors) is pure-managed and unit-tested here. The
+         editor-only handler (SpatialTools.Query — EditorInterface / PhysicsDirectSpaceState2D/3D /
+         CollisionObject-coupled) is #if TOOLS and verified via the headless Godot smoke / live call
+         path, not here. -->
+    <Compile Include="..\Editor\Tools\Extensions\Spatial\SpatialBodies.cs" Link="Source\Spatial\SpatialBodies.cs" />
     <!-- P3.5 — gate on mutators. The gate types (GateMode/GateOutcome/DeltaData/GateDispatchResult/
          GatePolicy/GateDefaultPolicy) and the VerifyGateAdapter are pure-managed for the parts the unit
          tests exercise (decision matrix, next-step hints, delta math, gate-mode parsing). GatePolicy

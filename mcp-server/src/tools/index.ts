@@ -101,6 +101,7 @@ import { controlModify } from "./control-modify.js";
 import { containerAdd } from "./container-add.js";
 import { containerSetLayout } from "./container-set-layout.js";
 import { themeApply } from "./theme-apply.js";
+import { spatialQuery } from "./spatial-query.js";
 import { bridgeStatus } from "./bridge-status.js";
 import { pullEvents } from "./pull-events.js";
 import { readCompileErrors } from "./read-compile-errors.js";
@@ -348,6 +349,17 @@ export const ALL_TOOLS: Tool[] = [
   containerAdd,
   containerSetLayout,
   themeApply,
+  // P16.6 — spatial_query pack: one read-only typed tool for physics world
+  // queries (group `spatial`, hidden until activated via manage_tools).
+  // spatial_query dispatches three query kinds (ray / shape / point) across two
+  // dimensions (2d / 3d) against the edited scene's PhysicsDirectSpaceState2D/3D.
+  // ray returns the single closest hit along a from→to segment; shape overlaps a
+  // circle / sphere / rectangle / box / capsule at a position; point reports
+  // bodies containing a position. Collision mask + node-path exclude + max_results
+  // bounding are honored; results are bounded + truncated. Read-only (gate-free)
+  // and live-only — an inactive / locked physics space surfaces no_active_space.
+  // Sixth and final Phase 16 typed-editor-breadth family.
+  spatialQuery,
   // P5.3 — bridge_status: operator-oriented health snapshot. Composes the instance-lock classifier
   // (instance-discovery.ts#classifyInstance) with one /ping probe and returns a coarse status token
   // (running | compiling | stopped | unreachable | dead_bridge) + classification + recoveryHint.
