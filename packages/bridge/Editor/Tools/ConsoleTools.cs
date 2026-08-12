@@ -18,14 +18,15 @@ namespace GodotOpenMcp.Bridge.Editor
     /// </list>
     ///
     /// <para>
-    /// <b>NOT a full mirror of Godot's Output panel.</b> Godot's C# API exposes no global managed
-    /// log hook at the 4.3 baseline (there is no managed <c>OS.add_logger</c> / log-received signal
-    /// in 4.x). So the collector is fed by the plugin's own <c>BridgeLog</c> path and by tool-handler
-    /// error capture — giving the <c>console_get_logs</c> tool a faithful record of the Godot Open MCP
-    /// plugin's own activity, but NOT every line in the editor's Output panel. The response carries
-    /// explicit capture-capability metadata so callers do not assume complete native logs. Godot 4.5+
-    /// may add a passive engine/script error sink; that enhancement is version-gated and reported in
-    /// the capability metadata, never assumed.
+    /// <b>Capture scope is version-gated (P18.3).</b> On the Godot 4.3 baseline the collector is fed
+    /// only by the plugin's own <c>BridgeLog</c> path + tool-handler error capture — a faithful record
+    /// of the Godot Open MCP plugin's own activity, but not every line in the editor's Output panel.
+    /// On Godot 4.5+ the bridge arms the global managed <c>Logger</c> hook (<c>OS.add_logger</c>,
+    /// introduced in 4.5 via PR #91006) so the collector ALSO ingests native prints /
+    /// <c>push_warning</c> / <c>push_error</c> from the moment the plugin enables. The response
+    /// carries explicit capture-capability metadata (<c>capture.mode</c> = <c>addon_only</c> |
+    /// <c>native_output</c>) so callers know which mode is active; the arming is reflection-based and
+    /// any failure degrades gracefully back to addon-only (never assumed).
     /// </para>
     ///
     /// <para>
@@ -212,8 +213,10 @@ namespace GodotOpenMcp.Bridge.Editor
             sb.Append(",\"capacity\":").Append(capacity.ToString(CultureInfo.InvariantCulture));
             sb.Append(",\"order\":\"newest_first\"");
             sb.Append(",\"capture\":{");
-            sb.Append("\"nativeOutputComplete\":false");
-            sb.Append(",\"engineErrorSinkActive\":false");
+            // P18.3 — capture-capability metadata is now dynamic: reflects whether the global Godot
+            // 4.5+ Logger hook is armed (native_output) vs the pre-P18.3 addon-only capture. The
+            // renderer is pure-managed (LogCaptureMode) so the metadata shape is unit-tested.
+            GodotOpenMcp.Bridge.Runtime.Logging.LogCaptureMode.AppendCaptureJsonTo(sb);
             sb.Append('}');
             sb.Append('}');
             return ToolDispatchResult.Ok(sb.ToString());

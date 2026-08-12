@@ -205,6 +205,16 @@
          and verified via the headless Godot smoke. -->
     <Compile Include="..\Runtime\Logging\GodotLogEntry.cs" Link="Source\Logging\GodotLogEntry.cs" />
     <Compile Include="..\Runtime\Logging\GodotLogCollector.cs" Link="Source\Logging\GodotLogCollector.cs" />
+    <!-- P18.3 — full console-log hook. The pure-managed version gate (GodotVersionInfo — parses the
+         Engine.GetVersionInfo()["string"] form, no Godot API) and the capture-capability state +
+         JSON renderer (LogCaptureMode — AddonOnly/NativeOutput volatile state, no Godot API) compile
+         into the binary-less host for off-editor unit testing. The editor-only pieces (EngineLogSink
+         — a RefCounted the GDScript Logger subclass calls back into; GlobalLogHook — the reflection
+         installer; engine_log_sink.gd — the Godot 4.5+ Logger subclass) are #if TOOLS /
+         Godot-API-coupled / GDScript and are verified by the headless Godot smoke on 4.5+ / the
+         manual verification step in the P18.3 plan, not here. -->
+    <Compile Include="..\Runtime\Logging\GodotVersionInfo.cs" Link="Source\Logging\GodotVersionInfo.cs" />
+    <Compile Include="..\Runtime\Logging\LogCaptureMode.cs" Link="Source\Logging\LogCaptureMode.cs" />
     <!-- P4.8 — screenshot tools. The pure-managed runtime math (ScreenshotMath — clamp/framing/
          clip/color/PNG-signature, Godot-free) and the pure-managed editor pieces (ScreenshotBodies
          body parsers, ScreenshotResult image-envelope builder) compile into the binary-less host for

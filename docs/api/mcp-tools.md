@@ -288,7 +288,7 @@ Godot has no headless editor batch equivalent. There is no `batch` policy, no `b
 | scene | `scene_open`, `scene_save`, `scene_list_opened`, `scene_get_data`, `scene_create` | open/save/create | Scene lifecycle + read. |
 | resource | `resource_find`, `resource_get_data`, `resource_create`, `resource_modify`, `resource_move`, `resource_delete` | create/modify/move/delete | `.tres`/`.res` discovery + bounded property inspection (read-only) + gated create/modify + file lifecycle move/delete. |
 | filesystem | `filesystem_list`, `filesystem_reimport` | reimport | Indexed `res://` directory listing (read-only) + exact-file reimport or full scan with a bounded, truthful settle status. |
-| editor | `editor_application_get_state`, `editor_application_set_state`, `editor_selection_get`, `editor_selection_set`, `console_get_logs`, `console_clear_logs` | set_state, selection_set | Play-process state read + start/stop with a bounded observation window; node selection read + replace/clear; bounded log collector get/clear. Godot launches the game as a separate OS process — no pause/compile fields. Selection is node-only; the log collector is addon-owned (not the native Output panel). |
+| editor | `editor_application_get_state`, `editor_application_set_state`, `editor_selection_get`, `editor_selection_set`, `console_get_logs`, `console_clear_logs` | set_state, selection_set | Play-process state read + start/stop with a bounded observation window; node selection read + replace/clear; bounded log collector get/clear. Godot launches the game as a separate OS process — no pause/compile fields. Selection is node-only; the log collector is addon-owned on the 4.3 floor (capture.mode `addon_only`), and also taps native editor Output on Godot 4.5+ via the global `Logger` hook (capture.mode `native_output`). |
 | screenshot | `screenshot_viewport`, `screenshot_camera`, `screenshot_isolated` | (none — all read-only) | Editor viewport capture, off-screen `Camera2D`/`Camera3D` capture, and isolated `Node3D` capture. All three return MCP image content blocks (`image/png`); transient render nodes are freed on every path and no files are written. |
 | reflection | `reflection_method_find`, `reflection_method_call` | `reflection_method_call` | First-party C# member discovery across loaded Godot/.NET assemblies (read-only) + gated method invoke (mutating). Find returns bounded, structured member entries (returnType/parameters[]/isStatic/isGeneric/genericParameters[]) so an agent can plan an invoke without hallucinating signatures; call resolves a method by type+name with overload/generic disambiguation, targets an instance via `node_path` from the edited scene (Godot-native; replaces Unity's `object_id`-first targeting), and serializes the return value with depth/cycle guards. `Activator` is used only for pure POCOs — Godot.Object subclasses require an explicit `node_path`. |
 
@@ -2143,7 +2143,7 @@ The observed post-change selection (same shape as `editor_selection_get`) plus a
 
 Retrieve captured Godot Open MCP log lines, newest-first.
 
-**NOTE:** Godot's C# API exposes no global managed log hook at the 4.3 baseline, so this returns the addon's own captured activity (bridge lifecycle, tool-handler errors, routed game/script output when a supported hook is active) — NOT the entire Godot editor Output panel. The response carries explicit capture-capability metadata so callers do not over-trust the contents. Each entry has a monotonic `sequence` (for future event-stream cursor use), a `logType` (`log`/`warning`/`error`), the `message`, a UTC `timestamp`, an optional `stackTrace`, and a `source` (`bridge`/`script`/`engine`/`tool`).
+**Capture scope is version-gated.** Godot's C# API exposes no global managed log hook at the 4.3 baseline, so on the addon's 4.3 floor the collector holds only the addon's own activity (bridge lifecycle, tool-handler errors) — `capture.mode` is `"addon_only"`. On Godot 4.5+ the bridge also arms the global `Logger` hook (`OS.add_logger`, introduced in 4.5) via a GDScript `Logger` subclass + reflection (the addon compiles against the 4.3 `GodotSharp`, so the 4.5+ type cannot be referenced at compile time), so the collector additionally ingests native editor Output — `print`, `push_warning`, `push_error` — from the moment the plugin enabled; `capture.mode` is then `"native_output"`. The hook registers at enable time, so pre-enable boot lines are never captured, and any arm failure degrades gracefully back to `addon_only`. The response carries explicit capture-capability metadata so callers do not over-trust the contents. Each entry has a monotonic `sequence` (for event-stream cursor use), a `logType` (`log`/`warning`/`error`), the `message`, a UTC `timestamp`, an optional `stackTrace`, and a `source` (`bridge`/`script`/`engine`/`tool`); hook-captured lines are tagged `engine`.
 
 **Input:**
 
@@ -2172,12 +2172,13 @@ Retrieve captured Godot Open MCP log lines, newest-first.
   "order": "newest_first",
   "capture": {
     "nativeOutputComplete": false,
-    "engineErrorSinkActive": false
+    "engineErrorSinkActive": false,
+    "mode": "addon_only"
   }
 }
 ```
 
-An empty result is a successful response with capture metadata, not an error. `capture.nativeOutputComplete` is always `false` at the 4.3 baseline; `capture.engineErrorSinkActive` is `false` unless a version-gated engine error sink is armed.
+An empty result is a successful response with capture metadata, not an error. The `capture` object reflects the active mode: `"addon_only"` (Godot 4.3 floor, or the 4.5+ hook failed to arm) reports `nativeOutputComplete: false` and `engineErrorSinkActive: false`; `"native_output"` (Godot 4.5+ with the `Logger` hook armed) reports both as `true`. `nativeOutputComplete` is best-effort even when armed — the hook registers at plugin enable, so lines emitted during editor boot before the addon enabled are not captured.
 
 **Errors:** `invalid_max_entries` (outside [1, 1000]), `invalid_log_type` (unknown filter value), `invalid_last_minutes` (negative), `console_unavailable` (collector not initialized).
 

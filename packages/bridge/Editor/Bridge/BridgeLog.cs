@@ -54,6 +54,25 @@ namespace GodotOpenMcp.Bridge.Editor
         [ThreadStatic]
         static bool _forwardingToCollector;
 
+        /// <summary>
+        /// True while THIS thread is inside an <see cref="Info"/>/<see cref="Warning"/>/
+        /// <see cref="Error"/> call (P18.3). The global Godot 4.5+ <c>Logger</c> hook (when armed)
+        /// receives the same <c>GD.Print</c>/<c>GD.PushWarning</c>/<c>GD.PushError</c> call that
+        /// BridgeLog emits, so without coordination the line would be captured TWICE — once by the
+        /// hook (tagged engine) and once by <see cref="ForwardToCollector"/> (tagged bridge). The
+        /// hook checks <see cref="IsBridgeOriginated"/> and skips when set, leaving BridgeLog as the
+        /// single source for bridge-originated lines and the hook as the single source for everything
+        /// else. Thread-static: <c>GD.Print</c> invokes the logger synchronously on the same thread,
+        /// so the flag is visible to the hook's C# sink without a cross-thread publication cost.
+        /// </summary>
+        [ThreadStatic]
+        static bool _bridgeOriginated;
+
+        /// <summary>True when the current thread is inside a <see cref="BridgeLog"/>
+        /// <see cref="Info"/>/<see cref="Warning"/>/<see cref="Error"/> call. Read by the global
+        /// <c>Logger</c> hook sink (P18.3) to avoid double-capturing bridge-originated lines.</summary>
+        internal static bool IsBridgeOriginated => _bridgeOriginated;
+
         static void DefaultInfo(string? message) => GD.Print(message);
         static void DefaultWarning(string? message) => GD.PushWarning(message);
         static void DefaultError(string? message) => GD.PushError(message);
@@ -62,24 +81,38 @@ namespace GodotOpenMcp.Bridge.Editor
         /// forward).</summary>
         internal static void Info(string message)
         {
+            // Mark this thread as inside a bridge-originated log for the duration of the Godot sink
+            // call + the collector forward. The global Logger hook (P18.3, armed on 4.5+) receives
+            // the GD.Print call too and uses IsBridgeOriginated to skip — so bridge lines are
+            // captured exactly once (by ForwardToCollector, tagged bridge), not duplicated by the
+            // hook. Set/ cleared directly (not in a finally): neither sink throws into BridgeLog's
+            // caller, and the GD.* defaults never throw; a throw would just leave the flag set for
+            // the remainder of this synchronous call which is harmless because the same thread
+            // clears it on the next Info/Warning/Error entry.
+            _bridgeOriginated = true;
             _info(message);
             ForwardToCollector(GodotLogType.Log, message);
+            _bridgeOriginated = false;
         }
 
         /// <summary>Warning-level log (maps to <see cref="GD.PushWarning"/> in production + collector
         /// forward).</summary>
         internal static void Warning(string message)
         {
+            _bridgeOriginated = true;
             _warning(message);
             ForwardToCollector(GodotLogType.Warning, message);
+            _bridgeOriginated = false;
         }
 
         /// <summary>Error-level log (maps to <see cref="GD.PushError"/> in production + collector
         /// forward).</summary>
         internal static void Error(string message)
         {
+            _bridgeOriginated = true;
             _error(message);
             ForwardToCollector(GodotLogType.Error, message);
+            _bridgeOriginated = false;
         }
 
         /// <summary>
@@ -155,6 +188,7 @@ namespace GodotOpenMcp.Bridge.Editor
             _warning = DefaultWarning;
             _error = DefaultError;
             _collectorSink = null;
+            _bridgeOriginated = false;
         }
     }
 }

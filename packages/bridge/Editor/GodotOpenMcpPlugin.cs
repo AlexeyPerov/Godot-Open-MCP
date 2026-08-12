@@ -132,6 +132,14 @@ namespace GodotOpenMcp.Bridge.Editor
                 // the handler references after a domain reload.
                 GodotOpenMcp.Bridge.Runtime.Logging.GodotLogCollector.GetOrCreate();
                 BridgeLog.InstallCollectorSink();
+                // P18.3 — full editor Output capture on Godot 4.5+. Arms the global Logger hook
+                // (reflection + a GDScript Logger subclass) so the collector ingests native prints /
+                // push_warning / push_error too. Graceful no-op on 4.3 (the floor) and on any arm
+                // failure — the collector then behaves exactly as before P18.3, and console_get_logs
+                // reports capture.mode "addon_only". Run AFTER the collector + BridgeLog sink are
+                // installed (the hook forwards into the same collector; BridgeLog sets a dedup flag so
+                // bridge-originated lines are not double-captured). Never throws into enable.
+                GodotOpenMcp.Bridge.Editor.Logging.GlobalLogHook.TryArm(BridgeSession.GodotVersion);
                 ConsoleTools.RegisterConsoleTools();
 
                 // P5.4 — event stream. Initialize the ring buffer + collector fan-out sink AFTER the
@@ -340,6 +348,10 @@ namespace GodotOpenMcp.Bridge.Editor
                 // P4.7 — detach the BridgeLog → collector forward sink. The collector itself stays
                 // readable (see GodotLogCollector.Current remarks) so console_get_logs can still
                 // surface the most recent session's lines after a disable.
+                // P18.3 — disarm the global Logger hook first (clears the GDScript sink ref so its
+                // overrides no-op, and flips capture mode back to addon_only). Godot exposes no
+                // unregister, so the logger itself stays registered (harmless once the sink is null).
+                GodotOpenMcp.Bridge.Editor.Logging.GlobalLogHook.Disarm();
                 BridgeLog.RemoveCollectorSink();
                 BridgeSession.ResetForDisable();
 
