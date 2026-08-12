@@ -269,6 +269,15 @@ namespace GodotOpenMcp.Bridge.Editor
                 // was rewritten). Idempotent re-register refreshes the handler reference after a
                 // domain reload.
                 ReserializeTools.RegisterReserializeTools();
+                // P18.1 — input-map pack: three typed tools for the Godot InputMap
+                // (input_map_get read-only / input_map_action_add mutating /
+                // input_map_action_set_events mutating), group input. Phase 18's first
+                // sub-item. The two mutators register defaultGate:"enforce" and validate
+                // paths_hint themselves (scoped to res://project.godot); input_map_get is
+                // gate-free. Writes route through the InputMap API mirrored to
+                // ProjectSettings input/<name> + ProjectSettings.Save (never raw text edits).
+                // Idempotent re-register refreshes the handler references after a domain reload.
+                InputTools.RegisterInputTools();
 
                 // Start the HTTP listener serving /ping and POST /tools/{name}. Stays down
                 // (and connected:false) if the bind fails — the editor remains usable, the

@@ -191,6 +191,16 @@ export const TOOL_GROUPS: ToolGroup[] = [
       "and never POST to the bridge. Hidden until activated via manage_tools.",
     defaultEnabled: false,
   },
+  {
+    id: "input",
+    description:
+      "InputMap tools (Godot 4.3+): list every action + its deadzone + its events, " +
+      "add a new action, and replace an existing action's whole event list via " +
+      "Godot's InputMap API (persisted to project.godot's [input] section — no raw " +
+      "text edits). Events are Godot InputEvent subclasses addressed by a single " +
+      "`type` enum (key / mouse_button / joypad_button / joypad_motion).",
+    defaultEnabled: false,
+  },
 ];
 
 /**
@@ -504,6 +514,22 @@ assign("gate-intelligence", [
   "godot_open_mcp_gate_budget_estimate",
   "godot_open_mcp_mutation_explain",
 ]);
+
+// --- input (P18.1 — Godot 4.3+ InputMap pack) -------------------------------
+// Three tools: input_map_get (read-only — list every action + deadzone + events,
+// or read one named action) / input_map_action_add (mutating — add a new action,
+// rejecting a name that already exists) / input_map_action_set_events (mutating —
+// replace an existing action's whole event list). Writes route through the
+// InputMap API mirrored to ProjectSettings input/<name> + ProjectSettings.Save.
+// Hidden until activated via manage_tools.
+assign(
+  "input",
+  [
+    "input_map_get",
+    "input_map_action_add",
+    "input_map_action_set_events",
+  ].map((suffix) => `godot_open_mcp_${suffix}`),
+);
 
 // ---------------------------------------------------------------------------
 // Read API

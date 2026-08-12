@@ -78,6 +78,9 @@ The table below is the published view of `ALL_TOOLS`. The `scripts/check-tool-do
 | `godot_open_mcp_generate_skill` | core | local | always visible | disk (when `write:true`) | n/a | Generate a project-specific `SKILL.md` (Godot version, enabled plugins, autoloads, available rules, key types); merges with the canonical playbook. |
 | `godot_open_mcp_manage_tools` | core | local | always visible | ephemeral | n/a | Per-session tool-group visibility mutator (activate/deactivate/reset/list_groups). |
 | `godot_open_mcp_impact_preview` | gate-intelligence | local | gate-intelligence | no | n/a | Project the gate's view of a planned scope (resolved rules + per-path classification + risk band); dry-run. |
+| `godot_open_mcp_input_map_action_add` | input | live | input | disk | enforce | Add a new action to the Godot `InputMap` (+ deadzone) and persist to `project.godot`'s `[input]` section via the `InputMap` API (no raw text edits). |
+| `godot_open_mcp_input_map_action_set_events` | input | live | input | disk | enforce | Replace an existing `InputMap` action's whole event list (key / mouse_button / joypad_button / joypad_motion) via the `InputMap` API + persist. |
+| `godot_open_mcp_input_map_get` | input | live | input | no | n/a | List every `InputMap` action + its deadzone + serialized events, or read a single named action (read-only). |
 | `godot_open_mcp_light_create` | lighting | live | lighting | editor state | enforce | Create a `DirectionalLight3D` / `OmniLight3D` / `SpotLight3D` / `DirectionalLight2D` / `PointLight2D` node (+ optional starter scalars). |
 | `godot_open_mcp_light_modify` | lighting | live | lighting | editor state | enforce | Bulk-patch multiple allow-listed + clamped light scalars on a light node. |
 | `godot_open_mcp_light_set` | lighting | live | lighting | editor state | enforce | Patch ONE allow-listed + clamped light scalar (color / energy / range / spot_angle / attenuation / shadow_enabled) on a light node. |
@@ -3609,6 +3612,89 @@ Vectors are comma-separated strings (`x,y` for `2d`, `x,y,z` for `3d`). `size` i
 **Result (shape / point):** `{ query_type, dimension, shape?, max_results, results: [ { node_path, collider_id, rid, position?, normal?, shape?, face_index? }, ... ], count, truncated }`. `truncated` is `true` when more hits existed than `max_results` returned. A `point` hit omits `position` / `normal` (Godot does not report them for point queries).
 
 **Errors:** `invalid_parameter` (bad `query_type` / `dimension`, shape↔dimension mismatch such as `sphere` in `2d`, missing `from`/`to`/`position`, non-positive or missing shape geometry), `missing_parameter`, `no_edited_scene`, `no_active_space` (no resolvable physics world — play the scene for the most reliable stepped space), `execution_error` (the space refused the query, e.g. locked mid-step).
+
+## Input tools
+
+Input tools read and write the Godot `InputMap` (actions + their bound events) via Godot's own `InputMap` API. They replace ad-hoc `project.godot` `[input]` hand-edits (which are unsafe — one typo in the `Object(InputEventKey,...)` notation corrupts the file — and unverified — no gate). The read path enumerates `InputMap.GetActions()` (the runtime authority — reflects the live editor, not just the on-disk file) and serializes each event to a clean `{ type, ...kind-specific fields }` object; the write path mutates the live `InputMap` first (immediate effect), then mirrors the action to `ProjectSettings` `input/<name>` and persists once with `ProjectSettings.Save` (never raw text edits).
+
+This is an **`input` group** family — hidden from `ListTools` until an agent activates it via `godot_open_mcp_manage_tools({ action: "activate", group: "input" })`. As with every group, hiding is a prompt-size control, not an authorization boundary — a hidden tool name still routes when called directly.
+
+**Scope.** Every InputMap action is reachable — Godot's built-in defaults (`ui_accept`, `ui_cancel`, the `move_*` / `jump` group, …) plus your custom actions. Events are the four common `InputEvent` subclasses: `key` (`InputEventKey`), `mouse_button` (`InputEventMouseButton`), `joypad_button` (`InputEventJoypadButton`), `joypad_motion` (`InputEventJoypadMotion`). An event of another subclass (e.g. `InputEventScreenTouch`) surfaces as `{ type: "other", class }` in the read output and cannot be edited via `set_events` (Godot's Input Map dialog is the surface for those). Unity InputAction / Binding / composite / interactions / processors concepts are intentionally NOT ported.
+
+**Shared contracts.** `paths_hint` is `res://project.godot` (the single mutated file) — like the `settings` family, the scope is a project file, not a `.tscn`. Both mutators are gated (`enforce` by default) and require a non-empty `paths_hint` even when `gate` is `off`. `input_map_get` is read-only and gate-free. Event int fields are Godot enum ordinals (`Key` / `MouseButton` / `JoyAxis` / `JoyButton`) — read them from `input_map_get` and feed them straight back into `input_map_action_set_events` to round-trip.
+
+### `godot_open_mcp_input_map_get`
+
+- Route: `live`
+- Visibility group: `input`
+- Read-only/mutating: read-only
+- Live editor requirement: requires the bridge
+
+Read the Godot InputMap via Godot's own `InputMap` API. With no `action`, lists every action (built-in `ui_*` / `move_*` defaults plus your custom actions) sorted alphabetically, each with its deadzone + event count + serialized events. With `action` set, reads a single named action.
+
+**Input:**
+
+- `action` (optional) — a single action name to read. Omit to list every action.
+
+**Result (list):** `{ count, actions: [ { action, deadzone, eventCount, events: [ ... ] }, ... ] }`.
+**Result (single):** `{ action, deadzone, eventCount, events: [ ... ] }`.
+
+Each event is `{ type, ...kind-specific fields }`:
+- `key` → `{ type: "key", physical_keycode, keycode, unicode, device }` (Key ordinals).
+- `mouse_button` → `{ type: "mouse_button", button_index, doubleclick, device }` (MouseButton ordinal).
+- `joypad_button` → `{ type: "joypad_button", button_index, device }` (JoyButton ordinal).
+- `joypad_motion` → `{ type: "joypad_motion", axis, axis_value, device }` (JoyAxis ordinal).
+- other → `{ type: "other", class }` (an InputEvent subclass `set_events` cannot build).
+
+**Errors:** `action_not_found` (single-action read of a name not in the InputMap), `execution_error`.
+
+### `godot_open_mcp_input_map_action_add`
+
+- Route: `live`
+- Visibility group: `input`
+- Read-only/mutating: mutating (gate `enforce`, `paths_hint` required)
+- Live editor requirement: requires the bridge
+
+Add a new action to the Godot InputMap via `InputMap.AddAction` and persist it to `project.godot`'s `[input]` section (no raw text edits — the API validates the file's `Object(InputEventKey,...)` escaping). The action starts with an empty event list; follow up with `input_map_action_set_events` to bind keys / mouse / joypad events. The `deadzone` (optional, default `0.5` = Godot's own default for a new action) is clamped to `[0, 1]`. A name that already exists surfaces `action_exists`.
+
+**Input:**
+
+- `action` (required) — the action name to add. Must not already exist in the InputMap.
+- `deadzone` (optional, default `0.5`) — analog deadzone, clamped to `[0, 1]`.
+- `paths_hint` (required) — `["res://project.godot"]`.
+- `gate` (optional, default `enforce`) — `"enforce"` | `"warn"` | `"off"`.
+
+**Result:** `{ action, actionAdded: true, deadzone, eventCount: 0 }`.
+
+**Errors:** `paths_hint_required`, `missing_parameter` (absent `action`), `action_exists`, `execution_error` (including `ProjectSettings.Save` failure — the in-memory action lands but the file is not persisted).
+
+### `godot_open_mcp_input_map_action_set_events`
+
+- Route: `live`
+- Visibility group: `input`
+- Read-only/mutating: mutating (gate `enforce`, `paths_hint` required)
+- Live editor requirement: requires the bridge
+
+Replace an existing InputMap action's whole event list via the `InputMap` API (`ActionEraseEvents` + `ActionAddEvent`) and persist to `project.godot`'s `[input]` section (no raw text edits). The handler erases the action's current events, builds each `InputEvent` from its `type` + kind-specific fields, applies them, and persists once. The action must already exist (a missing name surfaces `action_not_found` — use `input_map_action_add` to create it first).
+
+Each event's `type` selects the subclass and its required fields:
+- `key` — needs `physical_keycode` and/or `keycode` (Key ordinals, e.g. `65` = A, `32` = Space). `unicode` / `device` optional.
+- `mouse_button` — needs `button_index` (MouseButton ordinal, e.g. `1` = left). `doubleclick` / `device` optional.
+- `joypad_button` — needs `button_index` (JoyButton ordinal, e.g. `0` = A/cross). `device` optional.
+- `joypad_motion` — needs `axis` (JoyAxis ordinal, e.g. `0` = left-stick X) + `axis_value` (-1 to 1). `device` optional.
+
+`device` defaults to `-1` (any device) when omitted. An unbuildable event (unknown type / missing required field) is skipped with a warning (non-aborting) so a batch's good events still land; a fully-unbuildable batch surfaces `no_applicable_events` and leaves the existing events intact (the action is NOT cleared).
+
+**Input:**
+
+- `action` (required) — the existing action name whose event list to replace.
+- `events` (required, non-empty) — replacement event list of `{ type, ...fields }`.
+- `paths_hint` (required) — `["res://project.godot"]`.
+- `gate` (optional, default `enforce`) — `"enforce"` | `"warn"` | `"off"`.
+
+**Result:** `{ action, eventCount, warnings?: [...] }`. `warnings` is omitted on a fully-successful batch.
+
+**Errors:** `paths_hint_required`, `missing_parameter` (absent `action` or empty `events`), `action_not_found`, `invalid_event_type` (every event had an unknown/absent `type`), `no_applicable_events` (no event could be built), `execution_error` (including `ProjectSettings.Save` failure — the in-memory action is updated but the file is not persisted).
 
 ## Offline fidelity limitations
 

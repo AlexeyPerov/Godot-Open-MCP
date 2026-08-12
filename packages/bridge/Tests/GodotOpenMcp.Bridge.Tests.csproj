@@ -355,6 +355,19 @@
          CollisionObject-coupled) is #if TOOLS and verified via the headless Godot smoke / live call
          path, not here. -->
     <Compile Include="..\Editor\Tools\Extensions\Spatial\SpatialBodies.cs" Link="Source\Spatial\SpatialBodies.cs" />
+    <!-- P18.1 — input-map pack. The pure-managed body parsers (InputMapGetBody /
+         InputMapActionAddBody / InputMapActionSetEventsBody, the InputEventType enum,
+         InputEventTypeParser, and the InputEventSpec pure-managed event representation)
+         are linked for unit testing. They reuse the P12.1 JsonScalar extractor (linked
+         above); the events[] array-of-objects walk (SliceObjectEntries) is local to this
+         pack (same pattern as the P16.1 settings pack's fields[] walk). The event-type
+         vocabulary (InputEventTypeParser — parse / ToSchemaString) and the nullable
+         event-field contract (absent vs explicit 0) are the highest-value unit-test
+         surfaces — they pin the four buildable InputEvent kinds without requiring the
+         editor. The editor-only handler (InputTools.GetMap / ActionAdd / ActionSetEvents
+         — InputMap / ProjectSettings-coupled) is #if TOOLS and verified via the headless
+         Godot smoke / live call path, not here. -->
+    <Compile Include="..\Editor\Tools\Extensions\Input\InputBodies.cs" Link="Source\Input\InputBodies.cs" />
     <!-- P17.2 — reserialize. The pure-managed request-body parser (ReserializeBody — hand-rolled
          `paths` string-array extraction, same style as BridgeRequestBody.ExtractPathsHint) is linked
          for unit testing. The editor-only handler (ReserializeTools.Reserialize —

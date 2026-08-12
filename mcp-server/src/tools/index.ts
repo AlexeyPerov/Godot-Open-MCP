@@ -121,6 +121,9 @@ import { restartEditor } from "./restart-editor.js";
 import { resourcePressure } from "./resource-pressure.js";
 import { generateSkill } from "./generate-skill.js";
 import { compileCheck } from "./compile-check.js";
+import { inputMapGet } from "./input-map-get.js";
+import { inputMapActionAdd } from "./input-map-action-add.js";
+import { inputMapActionSetEvents } from "./input-map-action-set-events.js";
 
 /** Ordered list of every tool exposed over stdio MCP. */
 export const ALL_TOOLS: Tool[] = [
@@ -475,4 +478,16 @@ export const ALL_TOOLS: Tool[] = [
   // read_compile_errors parser. Refuses with `project_locked` when a live editor holds the project
   // (instance lock alive). Always-visible meta-tool (no group).
   compileCheck,
+  // P18.1 — input-map pack: three typed tools for the Godot InputMap (input_map_get read-only /
+  // input_map_action_add mutating / input_map_action_set_events mutating), group input. Phase 18's
+  // first sub-item. get lists every action + its deadzone + its serialized events (or one named
+  // action); action_add adds a new action (rejecting a name that already exists); action_set_events
+  // replaces an existing action's whole event list. The two mutators default to gate "enforce" and
+  // require paths_hint scoped to res://project.godot. Writes route through the InputMap API mirrored
+  // to ProjectSettings input/<name> + ProjectSettings.Save (never raw text edits). Events are Godot
+  // InputEvent subclasses addressed by a single `type` enum (key / mouse_button / joypad_button /
+  // joypad_motion). get is read-only (gate-free).
+  inputMapGet,
+  inputMapActionAdd,
+  inputMapActionSetEvents,
 ];
