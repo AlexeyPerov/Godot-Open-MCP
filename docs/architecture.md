@@ -298,7 +298,7 @@ Phase 2 must not start until the parity smoke is green on a clean checkout. The 
 
 ## Core source files (planned)
 
-- `mcp-server/src/index.ts` — stdio MCP bootstrap; wires the SDK `Server` to a `StdioServerTransport`, registers `ListTools` / `CallTool` against the tool registry, exits cleanly on transport close.
+- `mcp-server/src/index.ts` — stdio MCP bootstrap; wires the SDK `Server` to a `StdioServerTransport`, registers `ListTools` / `CallTool` against the tool registry (and `ListResources` / `ReadResource` against the read-only resource catalog when a `ResourceRouter` is wired), exits cleanly on transport close.
 - `mcp-server/src/tools/index.ts` — tool registry; `godot_open_mcp_ping` (P1.7), `godot_open_mcp_node_find` (P2.2), `godot_open_mcp_node_create` (P2.3), `godot_open_mcp_node_modify` (P2.4), the three tree-ops `node_set_parent` / `node_duplicate` / `node_delete` (P2.5), the scene lifecycle tools `scene_open` / `scene_save` / `scene_list_opened` (P2.6), and the scene data tools `scene_get_data` / `scene_create` (P2.7) are the first entries. Subsequent phases append editor / gate / capability tools.
 - `mcp-server/src/tools/ping.ts` — `godot_open_mcp_ping` tool definition (catalog metadata only; the call path lives in `live-client.ts`).
 - `mcp-server/src/tools/node-find.ts` — `godot_open_mcp_node_find` tool definition (P2.2); the first read-only editor tool. Godot-adapted schema: `node_path` / `name` (targeted resolvers), `type` / `name_contains` (list filters), `hierarchy_depth`, `max_results`.
@@ -359,4 +359,4 @@ The repo tracks a shared version for the npm MCP server, bridge addon, and verif
 
 - [API index](api.md)
 - [Porting principles](porting-principles.md)
-- Detailed API docs (TBD): `api/mcp-tools.md`, `api/bridge-http.md`, `api/resources.md`
+- Detailed API docs (TBD): `api/mcp-tools.md` (tools + the read-only `resources/` URIs), `api/bridge-http.md`

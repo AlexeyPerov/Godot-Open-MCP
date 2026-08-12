@@ -147,6 +147,19 @@ The `Mutates` column distinguishes `no` (read-only, gate-free), `disk` (writes p
 
 The `node_*` and `scene_*` mutation tools (`scene_open`, `scene_save`, `scene_create`, `node_create`, `node_modify`, `node_set_parent`, `node_duplicate`, `node_delete`) currently default to `gate: "off"` in their input schema — they were shipped before the gate flow landed. The bridge handler still records `isMutating: true` for each, so an agent that passes `gate: "enforce"` gets the full checkpoint → mutate → validate → delta cycle. A later phase will flip the schema defaults to `enforce` to match the resource/editor/filesheet mutators.
 
+## Resources (read-only URIs)
+
+Some MCP clients prefer `resources/` URIs over tool calls for read-only state snapshots. Godot Open MCP advertises four read-only resource URIs alongside the tool surface. `resources/list` returns the catalog below; `resources/read` routes each URI through the resource router, which wraps existing tool / scanner outputs — no new business logic. All four are read-only: none mutate, none spawn Godot. Source of truth: `mcp-server/src/resources/index.ts` (catalog) + `mcp-server/src/resources/resource-router.ts` (handlers).
+
+| URI | Wraps | Route | Summary |
+|---|---|---|---|
+| `godot-open-mcp://health/summary` | `scanProjectOffline` (same scanner as `baseline_create` / `regression_check`) | local | Severity counts (error/warn/info) from a fresh offline whole-project scan, plus the rule ids that ran and the CI-excluded rule ids. Re-runs the scan on every read (no cached summary in Godot); `durationMs` reports the scan cost. |
+| `godot-open-mcp://health/baseline` | `loadBaseline` over `CI/godot-open-mcp-baseline.json` | local | Last regression baseline (schemaVersion, platformProfile, severity counts, CI-excluded rules). `status: "no_baseline"` when the file is absent (run `baseline_create`); `status: "invalid_baseline"` on a schema/shape failure. `asOf` is the baseline's in-file `generatedAt`. |
+| `godot-open-mcp://bridge/status` | `godot_open_mcp_bridge_status` | live | The exact `bridge_status` body (status token, `ready`, `classification`, instance lock, `/ping` probe, recovery hint). Performs one fresh `/ping` probe per read — there is no ping cache, so an offline bridge reports `stopped` / `unreachable` / `dead_bridge`. |
+| `godot-open-mcp://tool-groups` | `TOOL_GROUPS` catalog (same as `capabilities`) | local | Static tool-group catalog (ids, descriptions, default-enabled flags) + the default-enabled set. For the per-tool roster call `capabilities`; for session activation state call `manage_tools(action="list_groups")`. |
+
+Resources are advertised via the MCP `resources` capability only when the stdio server is fully booted (the resource router is wired in `main()`); the capability is omitted when it is not, so a client never sees a resources capability with no handlers behind it. Unknown URIs return a `{ "status": "no_data", "error": "Unknown resource URI: …" }` payload rather than raising, mirroring the tool dispatcher's never-throw contract.
+
 ## Shared contracts
 
 The per-tool sections below link back to these shared contracts and only repeat a rule when omitting it would be unsafe.

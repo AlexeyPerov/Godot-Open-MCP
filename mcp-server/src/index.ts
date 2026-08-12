@@ -28,8 +28,12 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
+  ListResourcesRequestSchema,
+  ReadResourceRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { ALL_TOOLS } from "./tools/index.js";
+import { ALL_RESOURCES } from "./resources/index.js";
+import { ResourceRouter } from "./resources/resource-router.js";
 import { readPackageVersion } from "./package-version.js";
 import {
   PORT_OVERRIDE_ENV_VAR,
@@ -139,6 +143,10 @@ export async function handleCallTool(params: {
  *   - `sessionState` — inject an existing {@link ToolSessionState} instead of
  *     constructing a fresh one. Tests use this to drive a session through a
  *     known mutation before the server reads it. Production callers omit it.
+ *   - `resourceRouter` — when supplied (P18.2), the server advertises the
+ *     `resources` capability and registers `resources/list` + `resources/read`
+ *     handlers against {@link ALL_RESOURCES} / the router. Omitted in tests
+ *     that only exercise tools; the stdio `main()` always supplies one.
  *
  * @returns `{ server, sessionState }` — the wired {@link Server} and the
  *   session store it consults. Callers that need to mutate visibility (P8.3
@@ -148,7 +156,10 @@ export async function handleCallTool(params: {
 export function createServer(
   serverName = "godot-open-mcp",
   router?: Router,
-  options?: { sessionState?: ToolSessionState },
+  options?: {
+    sessionState?: ToolSessionState;
+    resourceRouter?: ResourceRouter;
+  },
 ): { server: Server; sessionState: ToolSessionState } {
   // One session store per server process. Injected when supplied (tests);
   // freshly constructed otherwise (production main()). The store is the
@@ -162,7 +173,11 @@ export function createServer(
       // `listChanged: true` is declared now so P8.4 (manage_tools list-changed
       // notifications) can flip the visible tool set without a capability
       // renegotiation.
-      capabilities: { tools: { listChanged: true } },
+      // P18.2 — `resources: {}` is advertised only when a ResourceRouter is
+      // wired so a client never sees a resources capability with no handlers.
+      capabilities: options?.resourceRouter
+        ? { tools: { listChanged: true }, resources: {} }
+        : { tools: { listChanged: true } },
     },
   );
 
@@ -173,6 +188,20 @@ export function createServer(
   server.setRequestHandler(CallToolRequestSchema, (request) =>
     handleCallTool(request.params, router),
   );
+
+  // P18.2 — resources/list + resources/read. Registered only when a router is
+  // wired (production main()). resources/list returns the static catalog;
+  // resources/read routes the URI through the ResourceRouter, which wraps
+  // existing tool / scanner outputs (read-only, never throws).
+  if (options?.resourceRouter) {
+    const resourceRouter = options.resourceRouter;
+    server.setRequestHandler(ListResourcesRequestSchema, () => ({
+      resources: ALL_RESOURCES,
+    }));
+    server.setRequestHandler(ReadResourceRequestSchema, (request) =>
+      resourceRouter.read(request.params.uri),
+    );
+  }
 
   return { server, sessionState };
 }
@@ -295,7 +324,19 @@ async function main(): Promise<void> {
     sessionState,
     notifyToolListChanged,
   );
-  const { server } = createServer("godot-open-mcp", router, { sessionState });
+  // P18.2 — resource router for the four read-only resource URIs. Wraps
+  // existing logic (offline scanner, baseline loader, LiveClient.routeBridge
+  // Status, static tool-group catalog). Read-only; the only live hop is the
+  // bridge/status /ping probe.
+  const resourceRouter = new ResourceRouter({
+    live: liveClient,
+    projectPath: env.projectPath,
+    port: env.bridgePort,
+  });
+  const { server } = createServer("godot-open-mcp", router, {
+    sessionState,
+    resourceRouter,
+  });
   serverRef = server;
   const transport = new StdioServerTransport();
 

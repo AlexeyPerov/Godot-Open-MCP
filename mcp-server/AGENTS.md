@@ -17,6 +17,14 @@ Rules for `mcp-server/` — the stdio MCP server (`godot-open-mcp`). Inherits ro
 - Every tool definition includes: `name`, `description`, `inputSchema` (JSON Schema), and a handler.
 - When a tool's schema changes, the bridge-side C# handler (`packages/bridge/`) must stay in sync in the same task — the bridge parses args by key name, not by schema validation.
 
+## Resources
+
+- MCP `resources/` URIs are a read-only alternative to tool calls for state snapshots. The catalog is `src/resources/index.ts` (`ALL_RESOURCES`); the per-URI handlers + `ResourceRouter` live in `src/resources/resource-router.ts`.
+- URI scheme is `godot-open-mcp://`. The roster is frozen: `health/summary`, `health/baseline`, `bridge/status`, `tool-groups`. Do not add a URI without updating the table in `docs/api/mcp-tools.md` (§ Resources) in the same task.
+- Resources wrap existing logic — no new business logic. `health/summary` runs the offline scanner (`baseline/scan.ts`); `health/baseline` uses `loadBaseline`; `bridge/status` delegates to `LiveClient.routeBridgeStatus` and passes the body through verbatim; `tool-groups` reads the static `capabilities/tool-groups.ts` catalog.
+- All four are read-only: none mutate, none spawn Godot. The only live hop is the `bridge/status` `/ping` probe.
+- The `resources` capability is advertised by `createServer` ONLY when a `ResourceRouter` is wired (production `main()`); it is omitted otherwise so a client never sees a resources capability with no handlers. Unknown URIs return a `no_data` payload, never throw.
+
 ## Routing
 
 - `src/tool-router.ts` selects live / offline / local / live-first per tool call. Route policies:

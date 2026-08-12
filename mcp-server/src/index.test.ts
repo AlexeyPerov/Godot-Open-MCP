@@ -36,7 +36,9 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { createServer, handleListTools, handleCallTool } from "./index.js";
 import { ping } from "./tools/ping.js";
 import { ToolSessionState } from "./tool-session-state.js";
+import { ResourceRouter } from "./resources/resource-router.js";
 import type { Router } from "./router.js";
+import type { LiveClient } from "./live-client.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(
@@ -88,6 +90,38 @@ test("P8.4 — createServer advertises tools.listChanged:true in server capabili
     caps.tools?.listChanged,
     true,
     "tools.listChanged MUST be true (P8.4 notifications/tools/list_changed)",
+  );
+});
+
+test("P18.2 — resources capability is advertised only when a ResourceRouter is wired", () => {
+  // The resources capability + handlers are optional: tests that only exercise
+  // tools omit the router, and the server MUST NOT advertise a resources
+  // capability with no handlers behind it. When a router IS supplied (stdio
+  // main()), the server declares `resources: {}` so clients probe resources/
+  // list + resources/read. Pin both sides so a future edit that drops the
+  // guard (or forgets to declare the capability) fails loudly.
+  const capsOf = (server: unknown): { resources?: unknown } =>
+    (server as unknown as { getCapabilities(): { resources?: unknown } }).getCapabilities();
+
+  // Omitted router → no resources capability.
+  const bare = createServer("godot-open-mcp");
+  assert.equal(
+    capsOf(bare.server).resources,
+    undefined,
+    "resources capability must NOT be advertised without a ResourceRouter",
+  );
+
+  // Supplied router → resources capability present.
+  const stubLive = {} as unknown as LiveClient;
+  const resourceRouter = new ResourceRouter({
+    live: stubLive,
+    projectPath: "/fake/project",
+    port: 22028,
+  });
+  const wired = createServer("godot-open-mcp", undefined, { resourceRouter });
+  assert.ok(
+    capsOf(wired.server).resources !== undefined,
+    "resources capability MUST be advertised when a ResourceRouter is wired",
   );
 });
 
