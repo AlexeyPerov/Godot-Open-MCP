@@ -41,6 +41,7 @@ import {
   IMPACT_PREVIEW_TOOL,
   GATE_BUDGET_ESTIMATE_TOOL,
   MUTATION_EXPLAIN_TOOL,
+  COMPILE_CHECK_TOOL,
   type RoutePolicy,
 } from "./route-policy.js";
 import { ALL_TOOLS } from "../tools/index.js";
@@ -73,6 +74,7 @@ const ROUTER_NAMED_HANDLERS: ReadonlySet<string> = new Set([
   IMPACT_PREVIEW_TOOL,
   GATE_BUDGET_ESTIMATE_TOOL,
   MUTATION_EXPLAIN_TOOL,
+  COMPILE_CHECK_TOOL,
 ]);
 
 const REGISTERED = new Set(ALL_TOOLS.map((t) => t.name));
@@ -190,6 +192,14 @@ test("representative pins: impact_preview / gate_budget_estimate / mutation_expl
   assert.equal(routePolicyFor("godot_open_mcp_mutation_explain"), "local");
 });
 
+test("representative pin: compile_check → local", () => {
+  // P17.4 — the triggered build. Local (NOT batch): Godot has no headless
+  // editor, so the tool shells out to `dotnet`/`godot` directly from the MCP
+  // process, like restart_editor / resource_pressure. There is intentionally no
+  // `batch` route.
+  assert.equal(routePolicyFor("godot_open_mcp_compile_check"), "local");
+});
+
 test("representative pins: scene_get_data / filesystem_list → live-first", () => {
   assert.equal(routePolicyFor("godot_open_mcp_scene_get_data"), "live-first");
   assert.equal(routePolicyFor("godot_open_mcp_filesystem_list"), "live-first");
@@ -272,4 +282,5 @@ test("the router named-handler constants are the expected tool names", () => {
   assert.equal(IMPACT_PREVIEW_TOOL, "godot_open_mcp_impact_preview");
   assert.equal(GATE_BUDGET_ESTIMATE_TOOL, "godot_open_mcp_gate_budget_estimate");
   assert.equal(MUTATION_EXPLAIN_TOOL, "godot_open_mcp_mutation_explain");
+  assert.equal(COMPILE_CHECK_TOOL, "godot_open_mcp_compile_check");
 });

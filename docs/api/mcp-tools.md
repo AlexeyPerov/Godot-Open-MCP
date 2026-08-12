@@ -19,7 +19,7 @@ For the bridge HTTP contract (`/ping`, `/tools/*`, `/events`), see [`bridge-http
 3. bridge_status / ping  → confirm the editor bridge is reachable
 4. typed read / mutation → node_find → node_create → node_modify → scene_save
 5. gate review           → checkpoint_create → mutate → delta (or validate_edit)
-6. recovery / fix        → apply_fix (dry_run first) or read_compile_errors when the bridge is dead
+6. recovery / fix        → apply_fix (dry_run first) or read_compile_errors when the bridge is dead; compile_check to verify a fix builds
 ```
 
 For deeper agent workflow guidance (when to checkpoint, how to chain reads into mutations, how to recover from a dead bridge), see the [agent skill](../skills.md).
@@ -46,6 +46,7 @@ The table below is the published view of `ALL_TOOLS`. The `scripts/check-tool-do
 | `godot_open_mcp_bridge_status` | core | local | always visible | no | n/a | Operator-oriented health snapshot composing the instance-lock classifier with one `/ping` probe. |
 | `godot_open_mcp_capabilities` | core | local | always visible | no | n/a | Discover the full capability surface (tools + verify rules + fixes + groups + routing) in one call. |
 | `godot_open_mcp_checkpoint_create` | core | live | core | no | n/a | Capture a project-health baseline over res:// paths for later `delta`. |
+| `godot_open_mcp_compile_check` | core | local | always visible | build outputs | n/a | Trigger a fresh build (`dotnet build` for C#, `godot --headless` for GDScript) and return structured compile errors; no live bridge required. Refuses with `project_locked` under a live editor. |
 | `godot_open_mcp_console_clear_logs` | editor | live | typed-editor | ephemeral | n/a | Clear the addon-owned log collector (ephemeral; never touches the native Output panel). |
 | `godot_open_mcp_console_get_logs` | editor | live | typed-editor | no | n/a | Read captured Godot Open MCP log lines, newest-first, with capture-capability metadata. |
 | `godot_open_mcp_container_add` | ui | live | ui | editor state | enforce | Add a `VBoxContainer` / `HBoxContainer` / `GridContainer` / `MarginContainer` / `ScrollContainer` node (+ starter full-rect anchors). |
@@ -158,7 +159,7 @@ Every registered tool follows exactly one route policy. The policy is descriptiv
 | Policy | Meaning |
 |---|---|
 | **live** | The CallTool handler POSTs to the bridge; the bridge handler runs on the editor main thread. Requires the bridge; no disk substitute. The default for any tool not in an override set. |
-| **local** | The CallTool handler resolves the response in the MCP process — no `POST /tools/{name}` bridge hop. `bridge_status` and `pull_events` may touch the live transport (one bounded `/ping` probe; one SSE-driven queue drain) but the call is synthesized locally; the bridge has no dedicated handler for them. `restart_editor` acts on the OS process directly (`process.kill` / `taskkill`) — the bridge is the thing that dies on a hang, so it may not depend on it for its primary path (it consults the bridge only opportunistically for the `/ping` reachability signal and the dirty-scene warning). `resource_pressure` samples the live Godot PID's fd/handle count server-side (`lsof` / `/proc` / `Get-Process.HandleCount`) — the bridge is the thing that dies on resource exhaustion, so the probe must not depend on it. `generate_skill` reads `project.godot` + the capability catalog + a project type scan in-process and writes the client skill dirs from `skills/client-paths.json` — no bridge round-trip. |
+| **local** | The CallTool handler resolves the response in the MCP process — no `POST /tools/{name}` bridge hop. `bridge_status` and `pull_events` may touch the live transport (one bounded `/ping` probe; one SSE-driven queue drain) but the call is synthesized locally; the bridge has no dedicated handler for them. `restart_editor` acts on the OS process directly (`process.kill` / `taskkill`) — the bridge is the thing that dies on a hang, so it may not depend on it for its primary path (it consults the bridge only opportunistically for the `/ping` reachability signal and the dirty-scene warning). `resource_pressure` samples the live Godot PID's fd/handle count server-side (`lsof` / `/proc` / `Get-Process.HandleCount`) — the bridge is the thing that dies on resource exhaustion, so the probe must not depend on it. `generate_skill` reads `project.godot` + the capability catalog + a project type scan in-process and writes the client skill dirs from `skills/client-paths.json` — no bridge round-trip. `compile_check` spawns a fresh build (`dotnet build` / `godot --headless`) to verify the project compiles — no live bridge required; it refuses (`project_locked`) under a live editor. |
 | **offline** | The CallTool handler NEVER probes the bridge and NEVER POSTs to it — it reads disk/config straight. Used for diagnostics that must work in the exact state a dead bridge describes (the addon is not running its listener). |
 | **live-first** | The CallTool handler probes the bridge once; if reachable it forwards to the live handler (reflecting unsaved editor state / authoritative import metadata), otherwise it reads from disk with no editor required. A live semantic error (e.g. `scene_not_edited`, `directory_not_found`) is authoritative and does NOT trigger the fallback — only an unreachable bridge does. |
 
@@ -173,7 +174,7 @@ Every registered tool follows exactly one route policy. The policy is descriptiv
 
 ### Tool groups and session visibility
 
-The MCP server filters `ListTools` through a per-session `ToolSessionState` so the prompt surface stays small. Every registered tool maps to exactly one group via `groupFor(toolName)`; meta-tools (`capabilities`, `bridge_status`, `pull_events`, `read_compile_errors`, `manage_tools`, `restart_editor`, `resource_pressure`, `generate_skill`) map to `null` and are always visible.
+The MCP server filters `ListTools` through a per-session `ToolSessionState` so the prompt surface stays small. Every registered tool maps to exactly one group via `groupFor(toolName)`; meta-tools (`capabilities`, `bridge_status`, `pull_events`, `read_compile_errors`, `manage_tools`, `restart_editor`, `resource_pressure`, `generate_skill`, `compile_check`) map to `null` and are always visible.
 
 | Group id | Default-on | Covers |
 |---|---|---|
@@ -255,17 +256,18 @@ When the bridge is unreachable:
 - `dependencies` is always-offline — use it for forward deps, reverse deps, broken edges, cycles, and optional transitive impact before destructive ops.
 - `restart_editor` is the acting recovery tool when the editor is truly wedged (crash marker in the log, or frozen: live PID + unreachable `/ping` + stale log). It terminates the hung Godot process after explicit `confirm: true`; relaunch is manual (via the Hub/CLI). It refuses when the hang signature is absent — never restart on a fixable compile failure.
 - `resource_pressure` is the proactive prediction tool: it samples the live Godot PID's fd/handle count server-side and reports headroom + trend, catching a slow leak across recompiles/reloads BEFORE the editor wedges. The probe does not require the bridge (the bridge is the thing that dies on exhaustion).
+- `compile_check` is the ACTIVE build trigger (counterpart to `read_compile_errors`'s passive log read): it spawns a fresh `dotnet build` / `godot --headless` build to verify a fix compiles without re-opening the editor or depending on the bridge. It refuses (`project_locked`) when a live editor holds the project — close/kill the editor first, then retry. Typical recovery: `read_compile_errors` (diagnose) → fix source → `restart_editor`/close → `compile_check` (verify) → relaunch.
 - Every other live tool surfaces a structured transport error.
 
 ### No batch route
 
-Godot has no headless editor batch equivalent. There is no `batch` policy, no `batchCapable` flag, no headless spawn, and no `batch_execute` tool. Every call is live / offline / local.
+Godot has no headless editor batch equivalent. There is no `batch` policy, no `batchCapable` flag, no headless editor spawn, and no `batch_execute` tool. Every call is live / offline / local. `compile_check` is the one tool that *triggers a build*, but it is NOT a batch route — Godot has no headless editor to spawn, so it shells out to the platform's actual build model (`dotnet build` / `godot --headless`) directly from the MCP process under the `local` route, like `restart_editor` and `resource_pressure`.
 
 ## Tool families
 
 | Family | Tools | Mutating | Notes |
 |---|---|---|---|
-| core | `ping`, `validate_edit`, `checkpoint_create`, `delta`, `apply_fix`, `capabilities`, `bridge_status`, `pull_events`, `read_compile_errors`, `manage_tools`, `baseline_create`, `regression_check`, `restart_editor`, `resource_pressure`, `generate_skill` | `apply_fix` + `restart_editor` (OS process kill) + `generate_skill` (writes client skill dirs when `write:true`) | Always visible in `ListTools`. `manage_tools` is the per-session visibility mutator. `baseline_create`/`regression_check` are the CI regression gate; `restart_editor` is the wedged-editor recovery (kill-only — relaunch is manual); `resource_pressure` is the proactive fd/handle leak warning (counterpart to `restart_editor`); `generate_skill` emits a project-specific `SKILL.md` merged with the canonical playbook. |
+| core | `ping`, `validate_edit`, `checkpoint_create`, `delta`, `apply_fix`, `capabilities`, `bridge_status`, `pull_events`, `read_compile_errors`, `manage_tools`, `baseline_create`, `regression_check`, `restart_editor`, `resource_pressure`, `generate_skill`, `compile_check` | `apply_fix` + `restart_editor` (OS process kill) + `generate_skill` (writes client skill dirs when `write:true`) + `compile_check` (spawns a build) | Always visible in `ListTools`. `manage_tools` is the per-session visibility mutator. `baseline_create`/`regression_check` are the CI regression gate; `restart_editor` is the wedged-editor recovery (kill-only — relaunch is manual); `resource_pressure` is the proactive fd/handle leak warning (counterpart to `restart_editor`); `generate_skill` emits a project-specific `SKILL.md` merged with the canonical playbook; `compile_check` is the triggered build (active counterpart to `read_compile_errors`'s passive log read). |
 | node | `node_find`, `node_create`, `node_modify`, `node_set_parent`, `node_duplicate`, `node_delete` | create/modify/set-parent/duplicate/delete | Scene-tree operations. |
 | scene | `scene_open`, `scene_save`, `scene_list_opened`, `scene_get_data`, `scene_create` | open/save/create | Scene lifecycle + read. |
 | resource | `resource_find`, `resource_get_data`, `resource_create`, `resource_modify`, `resource_move`, `resource_delete` | create/modify/move/delete | `.tres`/`.res` discovery + bounded property inspection (read-only) + gated create/modify + file lifecycle move/delete. |
@@ -644,6 +646,49 @@ Read C# compiler errors AND GDScript parse errors AND script/addon load failures
 **Non-error diagnostic statuses.** `logging_disabled`, `log_not_found`, `warnings_only`, and `no_errors_found` are SUCCESSFUL results (`isError:false`) — the tool succeeded; the file/state just has nothing to report. Only `project_not_found`, `project_config_unreadable`, `invalid_log_configuration`, `editor_log_unreadable`, and `offline_error` are hard errors.
 
 **Limitations.** Godot crash backtraces may only print to the terminal and never reach the file log. A custom `--log-file` is only discoverable through `GODOT_OPEN_MCP_LOG_FILE`. File logging is OFF by default in Godot — `logging_disabled` is the expected status until `debug/file_logging/enable_file_logging = true` is set in project.godot (Project Settings > Debug > File Logging).
+
+### `godot_open_mcp_compile_check`
+
+- Route: `local` (NOT `batch` — Godot has no headless editor; the tool shells out to `dotnet`/`godot` directly from the MCP process)
+- Visibility group: always visible
+- Read-only/mutating: read-only build (writes build outputs to `obj`/`bin` like any compile, but does not mutate project assets)
+- Live editor requirement: none — but refuses (`project_locked`) when a live editor holds the project
+
+Trigger a FRESH build of the Godot project and report whether it compiles right now, with structured diagnostics. The ACTIVE counterpart to `read_compile_errors`: `read_compile_errors` reads what the live editor *already wrote* to the Godot log; `compile_check` spawns a new build (no live bridge, no live editor required) so an agent can verify a fix compiled without re-opening the editor or relying on the bridge-fed collector (which is dead precisely when the bridge addon itself failed to compile). Use it after editing source to confirm the project compiles, or to reproduce a build failure on demand.
+
+There is no `batch` route. Godot has no headless editor, so the tool detects the project type and shells out to the platform's actual build model directly: `dotnet build <target>` for C# projects (when a `.csproj`/`.sln` is present) or `godot --headless …` for GDScript/tool-script projects.
+
+**Project-type detection** (recursive, bounded scan that skips `.godot`/`.git`/`node_modules`/`obj`/`bin`):
+
+- A `.sln` (preferred) or `.csproj` anywhere under the root → C# → `dotnet build`.
+- Otherwise → GDScript → `godot --headless`.
+
+**GDScript build modes:**
+
+- With `script_path` → `godot --headless --check-only --script <path>` (parses exactly one script).
+- Without `script_path` → `godot --headless --quit` (loads the project — parses `project.godot`, autoloads, and the main scene — then quits after the first main-loop iteration). This surfaces STARTUP-TIME parse errors only; scripts that are never loaded at startup are NOT checked. Pass `script_path` to verify a specific file.
+
+**Godot binary resolution:** the bare `godot` on PATH by default; override with the `GODOT_OPEN_MCP_GODOT_PATH` env var. `dotnet` is resolved through PATH (no override). When the binary is missing the result is `builder_not_found`.
+
+**`project_locked` guard:** if a live Godot editor holds the project (the instance lock's PID is alive), the build is not started — a concurrent build can conflict with the editor's own .NET/GDScript pipeline. Close the editor first (or kill a wedged one via `restart_editor`), then retry. To read compile state WITHOUT building (offline, under a live editor), call `read_compile_errors`. Recovery flow when the bridge is `dead_bridge`: `read_compile_errors` (diagnose) → fix source → `restart_editor` (kill the wedged editor) or close it → `compile_check` (verify the fix builds) → relaunch.
+
+**Input:**
+
+- `timeout_ms` (optional, default `300000`, bounds `30000`–`600000`) — build timeout in ms. On timeout the build is killed (SIGTERM → SIGKILL) and the result carries `timedOut: true` with the partial output captured so far.
+- `script_path` (optional, GDScript only) — a `res://` or native path to parse exactly one script. Ignored for C# projects.
+
+**Result envelope:** `{ projectType, builder, success, exitCode, timedOut, durationMs, command, args, errorCount, warningCount, errors, outputTail, status, message? }`.
+
+- `projectType` — `csharp | gdscript`.
+- `builder` — `dotnet | godot`.
+- `success` — `true` only when the build exited 0 AND produced no error-severity diagnostics (and did not time out).
+- `status` — `compile_clean` (success) | `compile_failed` (errors present) | `build_failed_no_diagnostics` (non-zero exit, no parseable diagnostics — inspect `outputTail`).
+- `errors[]` — `{ kind, severity, file, line, code, message, raw }`, reusing the `read_compile_errors` parser. Errors are listed before warnings. `kind` is `csharp | gdscript | script_load | addon_load | other`; `severity` is `error | warning`.
+- `outputTail` — bounded tail of the combined build stdout+stderr, for context when diagnostics are sparse.
+
+**Errors (isError: true):** `project_not_found` / `project_config_unreadable` (bad project root), `project_locked` (live editor holds the project), `builder_not_found` (`dotnet`/`godot` not on PATH), `compile_check_timeout` (build killed at the cap), `offline_error` (unexpected). A build that ran to completion is NOT a hard error even when it produced compile errors — those are the tool's successful diagnostic output (mirrors `read_compile_errors`).
+
+**Limitations.** Project-wide GDScript checking only catches scripts loaded at startup (autoload + main scene). C# is checked across the whole solution/project via `dotnet build`. The build runs against the on-disk source; unsaved editor changes are not included (close the editor first). A read-only build still writes `obj`/`bin` outputs like any compile.
 
 ## Gate / verify tools
 

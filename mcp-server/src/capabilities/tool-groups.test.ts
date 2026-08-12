@@ -292,6 +292,10 @@ test("groupFor returns null for always-visible meta-tools", () => {
     "godot_open_mcp_pull_events",
     "godot_open_mcp_read_compile_errors",
     "godot_open_mcp_manage_tools",
+    "godot_open_mcp_restart_editor",
+    "godot_open_mcp_resource_pressure",
+    "godot_open_mcp_generate_skill",
+    "godot_open_mcp_compile_check",
   ]) {
     assert.equal(
       groupFor(name),
@@ -441,6 +445,7 @@ const ALWAYS_VISIBLE_TOOLS: ReadonlySet<string> = new Set([
   "godot_open_mcp_restart_editor",
   "godot_open_mcp_resource_pressure",
   "godot_open_mcp_generate_skill",
+  "godot_open_mcp_compile_check",
 ]);
 
 test("every registered non-meta tool maps to a known group id", () => {

@@ -91,6 +91,10 @@ const ALWAYS_VISIBLE_TOOLS: ReadonlySet<string> = new Set([
   // so an operator can regenerate the skill after plugin/script changes
   // regardless of which groups are active.
   "godot_open_mcp_generate_skill",
+  // P17.4 — compile_check is the triggered build (active counterpart to
+  // read_compile_errors). Always-visible so an agent can verify a fix compiles
+  // without depending on any group being active.
+  "godot_open_mcp_compile_check",
 ]);
 
 /**

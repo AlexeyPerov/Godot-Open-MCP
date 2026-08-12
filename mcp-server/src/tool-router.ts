@@ -61,6 +61,7 @@ import {
   IMPACT_PREVIEW_TOOL,
   GATE_BUDGET_ESTIMATE_TOOL,
   MUTATION_EXPLAIN_TOOL,
+  COMPILE_CHECK_TOOL,
 } from "./capabilities/route-policy.js";
 import {
   previewImpact,
@@ -140,6 +141,13 @@ import {
   knownClientKeys,
   type GenerateSkillOptions,
 } from "./skill/generate-skill.js";
+import {
+  runCompileCheck,
+  resolveGodotPath,
+  clampCompileTimeout,
+  GODOT_PATH_ENV_OVERRIDE,
+  type CompileCheckResult,
+} from "./compile-check.js";
 
 /**
  * Tool name for the live `scene_list_opened` handler, used by
@@ -413,6 +421,9 @@ export class ToolRouter implements Router {
     if (toolName === MANAGE_TOOLS_TOOL) {
       return this.routeManageTools(args);
     }
+    if (toolName === COMPILE_CHECK_TOOL) {
+      return this.routeCompileCheck(args);
+    }
     return this.routeLive(toolName, args);
   }
 
@@ -580,6 +591,220 @@ export class ToolRouter implements Router {
     if (typeof args.mutation_error === "string") input.mutationError = args.mutation_error;
     const result = explainMutation(input);
     return sourceResult(result, "local", { route: "local" });
+  }
+
+  // ── P17.4 — local `compile_check` (triggered build) ──────────────────────
+
+  /**
+   * `godot_open_mcp_compile_check` — spawn a FRESH build (`dotnet build` for
+   * C#, `godot --headless` for GDScript) and report whether the project
+   * compiles, with structured diagnostics. The ACTIVE counterpart to
+   * `read_compile_errors` (the PASSIVE log reader): use it to verify a fix
+   * compiled without re-opening the editor or relying on the bridge-fed
+   * collector (which is dead precisely when the bridge addon failed to compile).
+   *
+   * Route: `local` (NOT `batch` — Godot has no headless editor, so there is
+   * intentionally no `batch` route). The tool shells out to the platform's
+   * actual build model directly from the MCP process, like `restart_editor` /
+   * `resource_pressure`. No bridge round-trip; no live editor required.
+   *
+   * Pipeline:
+   *   1. Clamp `timeout_ms` to [30s, 600s].
+   *   2. Identify the project (`identifyGodotProject`). A missing/unreadable
+   *      `project.godot` → `project_not_found` / `project_config_unreadable`.
+   *   3. `project_locked` guard: if a live editor holds the project (instance
+   *      lock PID alive), refuse — a concurrent build can conflict with the
+   *      editor's own .NET/GDScript pipeline. Close the editor first (or kill a
+   *      wedged one via restart_editor).
+   *   4. Resolve the Godot binary (`GODOT_OPEN_MCP_GODOT_PATH` → PATH `godot`).
+   *   5. Run the build via `runCompileCheck` (detect project type → spawn →
+   *      parse diagnostics via the shared `extractCompileDiagnostics`).
+   *   6. Map the outcome: `builder_not_found` (spawn refused — binary missing)
+   *      and `compile_check_timeout` (build killed at the cap) → `isError`
+   *      envelopes; a completed build (success OR failure-with-errors) is a
+   *      successful result — the body carries `success`/`errorCount`/`errors`.
+   *
+   * `isError` matrix: `project_not_found` / `project_config_unreadable` /
+   * `project_locked` / `builder_not_found` / `compile_check_timeout` /
+   * `offline_error` are hard errors. A build that ran to completion is NOT a
+   * hard error even when it produced compile errors — those are the tool's
+   * successful diagnostic output (mirrors read_compile_errors).
+   */
+  private async routeCompileCheck(
+    args: Record<string, unknown>,
+  ): Promise<CallToolResult> {
+    const routeMeta: RouteMeta = { route: "local" };
+
+    const timeoutMs = clampCompileTimeout(args.timeout_ms);
+    const scriptPath =
+      typeof args.script_path === "string" && args.script_path.trim() !== ""
+        ? args.script_path.trim()
+        : null;
+    const godotPath = resolveGodotPath(
+      process.env[GODOT_PATH_ENV_OVERRIDE],
+    );
+
+    // 1. Identify the project (same bounded marker read as the offline tools).
+    const project = await identifyGodotProject(this.projectPath);
+    if (!project.ok) {
+      return sourceResult({ error: project.error }, "local", routeMeta, true);
+    }
+    const projectRoot = project.info.projectRoot;
+
+    // 2. project_locked guard. The instance lock is the same file bridge_status
+    //    + restart_editor trust; its PID is alive exactly when a Godot editor
+    //    process is running this project (healthy / reloading / dead_bridge all
+    //    have an alive PID). Building under a live editor can conflict with its
+    //    own .NET/GDScript pipeline, so refuse and point at the workaround.
+    const lock = readInstanceLock(this.projectPath);
+    if (
+      lock &&
+      typeof lock.pid === "number" &&
+      lock.pid > 0 &&
+      isPidAlive(lock.pid)
+    ) {
+      return sourceResult(
+        {
+          error: {
+            code: "project_locked",
+            message:
+              "A live Godot editor holds this project (instance lock pid " +
+              lock.pid + " is alive), so the build was not started — a " +
+              "concurrent build can conflict with the editor's own " +
+              ".NET/GDScript pipeline. Close the editor first, or kill a " +
+              "wedged one via godot_open_mcp_restart_editor, then retry. To " +
+              "read compile state WITHOUT building (offline, under a live " +
+              "editor), call godot_open_mcp_read_compile_errors.",
+            projectPath: this.projectPath,
+            pid: lock.pid,
+          },
+        },
+        "local",
+        routeMeta,
+        true,
+      );
+    }
+
+    // 3. Run the build. runCompileCheck never throws — every failure maps to a
+    //    structured CompileCheckResult outcome.
+    let result: CompileCheckResult;
+    try {
+      result = await runCompileCheck({
+        projectRoot,
+        scriptPath,
+        timeoutMs,
+        godotPath,
+      });
+    } catch (err) {
+      // Defensive: the orchestrator is non-throwing by contract, but a surprise
+      // I/O failure must surface as a structured error rather than a crash.
+      const message = err instanceof Error ? err.message : String(err);
+      return sourceResult(
+        {
+          error: {
+            code: "offline_error",
+            message: `compile_check failed unexpectedly: ${message}`,
+            projectPath: this.projectPath,
+          },
+        },
+        "local",
+        routeMeta,
+        true,
+      );
+    }
+
+    // 4. Map the outcome.
+    if (result.outcome === "builder_not_found") {
+      const isGodot = result.builder === "godot";
+      return sourceResult(
+        {
+          error: {
+            code: "builder_not_found",
+            message:
+              `The build tool '${result.command}' could not be executed ` +
+              "(spawn refused — it is not on PATH or not executable)." +
+              (result.refusedMessage ? ` Detail: ${result.refusedMessage}` : "") +
+              (isGodot
+                ? " Set GODOT_OPEN_MCP_GODOT_PATH to the Godot executable to " +
+                  "override, or install Godot / ensure it is on PATH."
+                : " Install the .NET SDK (`dotnet`) and ensure it is on PATH."),
+            builder: result.builder,
+            command: result.command,
+            args: result.args,
+            projectPath: this.projectPath,
+          },
+        },
+        "local",
+        routeMeta,
+        true,
+      );
+    }
+
+    // outcome === "checked".
+    if (result.timedOut) {
+      return sourceResult(
+        {
+          error: {
+            code: "compile_check_timeout",
+            message:
+              `The build was killed after ${timeoutMs / 1000}s without ` +
+              "finishing. Partial diagnostics (if any) are included; raise " +
+              "timeout_ms (up to 600000) or investigate a stuck build. " +
+              "stdout/stderr tail in `outputTail`.",
+            projectType: result.projectType,
+            builder: result.builder,
+            command: result.command,
+            args: result.args,
+            durationMs: result.durationMs,
+            timeoutMs,
+            errorCount: result.errorCount ?? 0,
+            warningCount: result.warningCount ?? 0,
+            errors: result.errors ?? [],
+            outputTail: result.outputTail ?? "",
+            projectPath: this.projectPath,
+          },
+        },
+        "local",
+        routeMeta,
+        true,
+      );
+    }
+
+    // Completed build (success OR failure-with-errors) — a successful tool run.
+    const success = result.success === true;
+    const errorCount = result.errorCount ?? 0;
+    return sourceResult(
+      {
+        projectType: result.projectType,
+        builder: result.builder,
+        success,
+        exitCode: result.exitCode ?? null,
+        timedOut: false,
+        durationMs: result.durationMs,
+        command: result.command,
+        args: result.args,
+        errorCount,
+        warningCount: result.warningCount ?? 0,
+        errors: result.errors ?? [],
+        outputTail: result.outputTail ?? "",
+        status: success
+          ? "compile_clean"
+          : errorCount > 0
+            ? "compile_failed"
+            : "build_failed_no_diagnostics",
+        ...(success
+          ? {}
+          : {
+              message: success
+                ? undefined
+                : errorCount > 0
+                  ? `Build completed with ${errorCount} error(s). Scan \`errors\` (errors are listed before warnings).`
+                  : `Build exited with code ${result.exitCode ?? "?"} and no parseable diagnostics — inspect \`outputTail\` for the raw build output.`,
+            }),
+      },
+      "local",
+      routeMeta,
+    );
   }
 
   /**

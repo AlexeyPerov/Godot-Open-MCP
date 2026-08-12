@@ -69,6 +69,12 @@ export const GENERATE_SKILL_TOOL = "godot_open_mcp_generate_skill";
 export const IMPACT_PREVIEW_TOOL = "godot_open_mcp_impact_preview";
 export const GATE_BUDGET_ESTIMATE_TOOL = "godot_open_mcp_gate_budget_estimate";
 export const MUTATION_EXPLAIN_TOOL = "godot_open_mcp_mutation_explain";
+// P17.4 — compile_check: the ACTIVE build trigger (complement to read_compile_errors,
+// the PASSIVE log reader). Spawns a fresh `dotnet build` / `godot --headless` build from
+// the MCP process. Local: the route is `local` (NOT `batch` — Godot has no headless editor,
+// so there is intentionally no `batch` route); like restart_editor / resource_pressure, the
+// tool does its own bounded OS work without a bridge round-trip.
+export const COMPILE_CHECK_TOOL = "godot_open_mcp_compile_check";
 
 const LOCAL_TOOLS: ReadonlySet<string> = new Set([
   CAPABILITIES_TOOL,
@@ -81,6 +87,7 @@ const LOCAL_TOOLS: ReadonlySet<string> = new Set([
   IMPACT_PREVIEW_TOOL,
   GATE_BUDGET_ESTIMATE_TOOL,
   MUTATION_EXPLAIN_TOOL,
+  COMPILE_CHECK_TOOL,
 ]);
 
 /**

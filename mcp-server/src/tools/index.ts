@@ -120,6 +120,7 @@ import { regressionCheck } from "./regression-check.js";
 import { restartEditor } from "./restart-editor.js";
 import { resourcePressure } from "./resource-pressure.js";
 import { generateSkill } from "./generate-skill.js";
+import { compileCheck } from "./compile-check.js";
 
 /** Ordered list of every tool exposed over stdio MCP. */
 export const ALL_TOOLS: Tool[] = [
@@ -465,4 +466,13 @@ export const ALL_TOOLS: Tool[] = [
   // (no group); local route — no bridge round-trip (reads project.godot + the catalog + the
   // project type scan entirely in the MCP process).
   generateSkill,
+  // P17.4 — compile_check: the ACTIVE build trigger (complement to read_compile_errors, the
+  // PASSIVE log reader). Spawns a FRESH build from the MCP process — `dotnet build` for C#
+  // projects (`.csproj`/`.sln` present) or `godot --headless` for GDScript/tool-script projects.
+  // Godot has no headless editor, so the route is `local` (NOT `batch` — there is intentionally no
+  // batch route): the tool does its own bounded OS work without a bridge round-trip, like
+  // restart_editor / resource_pressure. Returns structured diagnostics reusing the
+  // read_compile_errors parser. Refuses with `project_locked` when a live editor holds the project
+  // (instance lock alive). Always-visible meta-tool (no group).
+  compileCheck,
 ];
