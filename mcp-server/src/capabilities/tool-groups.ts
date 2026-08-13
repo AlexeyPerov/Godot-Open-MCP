@@ -201,6 +201,24 @@ export const TOOL_GROUPS: ToolGroup[] = [
       "`type` enum (key / mouse_button / joypad_button / joypad_motion).",
     defaultEnabled: false,
   },
+  {
+    id: "gridmap",
+    description:
+      "GridMap tools (Godot 4.3+, 3D only): create a GridMap node, assign a MeshLibrary, " +
+      "set/erase cells by the 3D grid coordinate (x, y, z) + item + orientation, list used " +
+      "cells, and clear all cells while keeping the MeshLibrary.",
+    defaultEnabled: false,
+  },
+  {
+    id: "phantom_camera",
+    description:
+      "PhantomCamera tools for the third-party phantom-camera addon (Cinemachine-style virtual " +
+      "cameras): create a PhantomCamera3D (default) / PhantomCamera2D node, set the follow " +
+      "target node, set the priority (higher wins), set the follow mode, set the look-at target " +
+      "(+ optional mode), and inspect any virtual camera. Runtime addon-gated — surfaces " +
+      "addon_not_found when the addon is not enabled.",
+    defaultEnabled: false,
+  },
 ];
 
 /**
@@ -528,6 +546,40 @@ assign(
     "input_map_get",
     "input_map_action_add",
     "input_map_action_set_events",
+  ].map((suffix) => `godot_open_mcp_${suffix}`),
+);
+
+// --- gridmap (GridMap domain pack — Godot 4.3+ 3D grid-based maps) ----------
+// Six tools: create / set_mesh_library / set_cell / erase_cell / get_used_cells
+// (read-only) / clear. GridMap is an engine API — no compile gate. Hidden until
+// activated via manage_tools.
+assign(
+  "gridmap",
+  [
+    "gridmap_create",
+    "gridmap_set_mesh_library",
+    "gridmap_set_cell",
+    "gridmap_erase_cell",
+    "gridmap_get_used_cells",
+    "gridmap_clear",
+  ].map((suffix) => `godot_open_mcp_${suffix}`),
+);
+
+// --- phantom_camera (PhantomCamera domain pack — third-party phantom-camera
+// addon). Six tools: create / set_target / set_priority / set_follow /
+// set_look_at / get (read-only). Runtime addon-gated: the addon classes are
+// GDScript, so every handler detects them via ClassDB and surfaces
+// addon_not_found when the addon is absent (the architecture-faithful equivalent
+// of a compile gate). Hidden until activated via manage_tools.
+assign(
+  "phantom_camera",
+  [
+    "phantom_camera_create",
+    "phantom_camera_set_target",
+    "phantom_camera_set_priority",
+    "phantom_camera_set_follow",
+    "phantom_camera_set_look_at",
+    "phantom_camera_get",
   ].map((suffix) => `godot_open_mcp_${suffix}`),
 );
 

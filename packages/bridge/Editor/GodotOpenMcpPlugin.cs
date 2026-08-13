@@ -286,6 +286,24 @@ namespace GodotOpenMcp.Bridge.Editor
                 // ProjectSettings input/<name> + ProjectSettings.Save (never raw text edits).
                 // Idempotent re-register refreshes the handler references after a domain reload.
                 InputTools.RegisterInputTools();
+                // GridMap domain pack: six typed tools for Godot 4.3+ GridMap (3D grid-based
+                // level construction): create / set_mesh_library / set_cell / erase_cell /
+                // get_used_cells (read-only) / clear. Group gridmap (hidden until activated).
+                // The five mutators register defaultGate:"enforce" and validate paths_hint
+                // themselves (scoped to the edited scene path); get_used_cells is gate-free.
+                // GridMap is an engine API — no compile gate. Idempotent re-register refreshes
+                // the handler references after a domain reload.
+                GridMapTools.RegisterGridMapTools();
+                // PhantomCamera domain pack: six typed tools for the third-party phantom-camera
+                // GDScript addon: create / set_target / set_priority / set_follow / set_look_at
+                // / get (read-only). Group phantom_camera (hidden until activated). The five
+                // mutators register defaultGate:"enforce" and validate paths_hint themselves
+                // (scoped to the edited scene path); get is gate-free. Runtime addon gate: the
+                // addon classes are GDScript, so every handler detects them via ClassDB and
+                // surfaces addon_not_found when the addon is absent (the architecture-faithful
+                // equivalent of a compile gate). Idempotent re-register refreshes the handler
+                // references after a domain reload.
+                PhantomCameraTools.RegisterPhantomCameraTools();
 
                 // Start the HTTP listener serving /ping and POST /tools/{name}. Stays down
                 // (and connected:false) if the bind fails — the editor remains usable, the

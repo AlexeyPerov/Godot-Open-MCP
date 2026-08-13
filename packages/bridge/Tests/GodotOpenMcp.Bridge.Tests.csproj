@@ -378,6 +378,23 @@
          — InputMap / ProjectSettings-coupled) is #if TOOLS and verified via the headless
          Godot smoke / live call path, not here. -->
     <Compile Include="..\Editor\Tools\Extensions\Input\InputBodies.cs" Link="Source\Input\InputBodies.cs" />
+    <!-- GridMap domain pack. The pure-managed body parsers (GridMapCreateBody /
+         GridMapSetMeshLibraryBody / GridMapSetCellBody / GridMapEraseCellBody /
+         GridMapGetUsedCellsBody / GridMapClearBody, reusing the shared JsonScalar extractor)
+         and the GridMapCellData DTO are linked for unit testing. The editor-only handler
+         (GridMapTools.Create / SetMeshLibrary / SetCell / EraseCell / GetUsedCells / Clear —
+         EditorInterface / GridMap-coupled) is #if TOOLS and verified via the headless Godot
+         smoke / live call path, not here. -->
+    <Compile Include="..\Editor\Tools\Extensions\GridMap\GridMapCellData.cs" Link="Source\GridMap\GridMapCellData.cs" />
+    <Compile Include="..\Editor\Tools\Extensions\GridMap\GridMapBodies.cs" Link="Source\GridMap\GridMapBodies.cs" />
+    <!-- PhantomCamera domain pack (third-party phantom-camera addon). The pure-managed body
+         parsers (PhantomCameraCreateBody / PhantomCameraSetTargetBody / PhantomCameraSetPriorityBody
+         / PhantomCameraSetFollowBody / PhantomCameraSetLookAtBody / PhantomCameraGetBody, reusing the
+         shared JsonScalar extractor) are linked for unit testing. The editor-only handler
+         (PhantomCameraTools.Create / SetTarget / SetPriority / SetFollow / SetLookAt / Get —
+         EditorInterface / ClassDB / live-addon-node-coupled) is #if TOOLS and verified via the
+         headless Godot smoke / live call path WITH the addon enabled, not here. -->
+    <Compile Include="..\Editor\Tools\Extensions\PhantomCamera\PhantomCameraBodies.cs" Link="Source\PhantomCamera\PhantomCameraBodies.cs" />
     <!-- P17.2 — reserialize. The pure-managed request-body parser (ReserializeBody — hand-rolled
          `paths` string-array extraction, same style as BridgeRequestBody.ExtractPathsHint) is linked
          for unit testing. The editor-only handler (ReserializeTools.Reserialize —

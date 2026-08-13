@@ -77,6 +77,12 @@ The table below is the published view of `ALL_TOOLS`. The `scripts/check-tool-do
 | `godot_open_mcp_find_references` | asset-intelligence | offline | asset-intelligence | no | n/a | Offline reverse dependency lookup — assets that reference a given `res://` path or `uid://`. |
 | `godot_open_mcp_gate_budget_estimate` | gate-intelligence | local | gate-intelligence | no | n/a | Forecast validation duration + issue budget + token band for a planned scope (heuristic; dry-run). |
 | `godot_open_mcp_generate_skill` | core | local | always visible | disk (when `write:true`) | n/a | Generate a project-specific `SKILL.md` (Godot version, enabled plugins, autoloads, available rules, key types); merges with the canonical playbook. |
+| `godot_open_mcp_gridmap_clear` | gridmap | live | gridmap | editor state | enforce | Clear every cell on a `GridMap` while keeping its `MeshLibrary`. |
+| `godot_open_mcp_gridmap_create` | gridmap | live | gridmap | editor state | enforce | Create a Godot 4.3+ `GridMap` node (3D grid-based maps) in the edited scene (returns NodeData). |
+| `godot_open_mcp_gridmap_erase_cell` | gridmap | live | gridmap | editor state | enforce | Erase one cell from a `GridMap` (sets item to `INVALID_CELL_ITEM`). |
+| `godot_open_mcp_gridmap_get_used_cells` | gridmap | live | gridmap | no | n/a | List used cells on a `GridMap` (bounded by `max_results`). |
+| `godot_open_mcp_gridmap_set_cell` | gridmap | live | gridmap | editor state | enforce | Paint one cell via the 3D grid coordinate (x, y, z) + item + orientation. |
+| `godot_open_mcp_gridmap_set_mesh_library` | gridmap | live | gridmap | editor state | enforce | Assign an existing `MeshLibrary` resource (`res://`) to a `GridMap`. |
 | `godot_open_mcp_manage_tools` | core | local | always visible | ephemeral | n/a | Per-session tool-group visibility mutator (activate/deactivate/reset/list_groups). |
 | `godot_open_mcp_impact_preview` | gate-intelligence | local | gate-intelligence | no | n/a | Project the gate's view of a planned scope (resolved rules + per-path classification + risk band); dry-run. |
 | `godot_open_mcp_input_map_action_add` | input | live | input | disk | enforce | Add a new action to the Godot `InputMap` (+ deadzone) and persist to `project.godot`'s `[input]` section via the `InputMap` API (no raw text edits). |
@@ -105,6 +111,12 @@ The table below is the published view of `ALL_TOOLS`. The `scripts/check-tool-do
 | `godot_open_mcp_particles_defaults` | particles | live | particles | no | n/a | Recommended starter scalars for a 2D/3D emitter (pure helper, no scene). |
 | `godot_open_mcp_particles_get` | particles | live | particles | no | n/a | Read an emitter's scalar config + type/dimension + process material path. |
 | `godot_open_mcp_particles_set_emitting` | particles | live | particles | editor state | enforce | Start/stop emission on a `GpuParticles2D`/`3D`; optional restart clears particles. |
+| `godot_open_mcp_phantom_camera_create` | phantom_camera | live | phantom_camera | editor state | enforce | Create a phantom-camera addon virtual camera node (`PhantomCamera3D` default / `PhantomCamera2D` when `dimension:"2d"`); requires the addon. |
+| `godot_open_mcp_phantom_camera_get` | phantom_camera | live | phantom_camera | no | n/a | Read a phantom-camera virtual camera's scalar config (priority + follow/look-at mode + target paths). |
+| `godot_open_mcp_phantom_camera_set_follow` | phantom_camera | live | phantom_camera | editor state | enforce | Set a phantom-camera virtual camera's follow mode ordinal (+ optional follow target). |
+| `godot_open_mcp_phantom_camera_set_look_at` | phantom_camera | live | phantom_camera | editor state | enforce | Set a phantom-camera virtual camera's look-at target node (+ optional look-at mode). |
+| `godot_open_mcp_phantom_camera_set_priority` | phantom_camera | live | phantom_camera | editor state | enforce | Set a phantom-camera virtual camera's priority int (higher wins — raises active camera). |
+| `godot_open_mcp_phantom_camera_set_target` | phantom_camera | live | phantom_camera | editor state | enforce | Set a phantom-camera virtual camera's follow target node. |
 | `godot_open_mcp_ping` | core | live | core | no | n/a | Bridge health check (`GET /ping` round-trip). |
 | `godot_open_mcp_pull_events` | core | local | always visible | no | n/a | Drain incremental bridge events (console logs + editor-state transitions) since the last pull. |
 | `godot_open_mcp_read_asset` | asset-intelligence | offline | asset-intelligence | no | n/a | Token-budgeted structured summary of a `.tres`/`.tscn`/`.gdshader`/`.import`; offline, no editor. |
@@ -207,6 +219,8 @@ The MCP server filters `ListTools` through a per-session `ToolSessionState` so t
 | `materials` | no | Godot 4.3+ materials + shaders tools: create a `StandardMaterial3D` / `ORMMaterial3D` / `ShaderMaterial` `.tres`, list a material's properties + values, set one property, assign a `.gdshader` to a `ShaderMaterial`, and read a `.gdshader`'s uniforms + types. |
 | `lighting` | no | Godot 4.3+ lighting tools (2D + 3D): create a `DirectionalLight3D` / `OmniLight3D` / `SpotLight3D` / `DirectionalLight2D` / `PointLight2D` node (+ optional starter scalars), patch one or many allow-listed + clamped light scalars (color / energy / range / spot_angle / attenuation / shadow_enabled), and create or replace the `WorldEnvironment` node's `Environment` resource. |
 | `gate-intelligence` | no | Dry-run gate planning + explanation: project the gate's view of a planned scope (`impact_preview`), forecast validation duration + cost (`gate_budget_estimate`), and explain a finished gate run as a narrative (`mutation_explain`). All three are local + read-only — they never mutate and never POST to the bridge. |
+| `gridmap` | no | Godot 4.3+ `GridMap` tools (3D only): create a grid, assign a `MeshLibrary`, set/erase cells by the 3D grid coordinate (x, y, z) + item + orientation, list used cells, and clear all cells while keeping the `MeshLibrary`. |
+| `phantom_camera` | no | phantom-camera addon tools (Cinemachine-style virtual cameras): create a `PhantomCamera3D` (default) / `PhantomCamera2D` node, set the follow target, set the priority (higher wins), set the follow mode, set the look-at target (+ optional mode), and inspect any virtual camera. Runtime addon-gated — surfaces `addon_not_found` when the addon is not enabled. |
 
 The catalog source of truth is `mcp-server/src/capabilities/tool-groups.ts`. Activate or deactivate groups with `godot_open_mcp_manage_tools`; on a successful change the server emits the MCP `notifications/tools/list_changed` notification so clients that support `listChanged` refresh `ListTools` automatically. Hiding a tool is a prompt-size control, not an authorization boundary — a hidden tool name still routes when called directly.
 
@@ -3756,6 +3770,267 @@ Each event's `type` selects the subclass and its required fields:
 **Result:** `{ action, eventCount, warnings?: [...] }`. `warnings` is omitted on a fully-successful batch.
 
 **Errors:** `paths_hint_required`, `missing_parameter` (absent `action` or empty `events`), `action_not_found`, `invalid_event_type` (every event had an unknown/absent `type`), `no_applicable_events` (no event could be built), `execution_error` (including `ProjectSettings.Save` failure — the in-memory action is updated but the file is not persisted).
+
+## GridMap tools
+
+GridMap tools author Godot 4.3+ `GridMap` nodes — 3D grid-based level construction where each cell holds a `MeshLibrary` item with an orientation. They are the 3D twin of the `tilemap` family (which targets the 2D `TileMapLayer`). A `GridMap` is a `Node3D`; cells are addressed by a 3D integer coordinate (`x`, `y`, `z`) plus a `MeshLibrary` item id and an orientation (0–23 Godot orthonormal rotations).
+
+This is a **`gridmap` group** family — hidden from `ListTools` until an agent activates it via `godot_open_mcp_manage_tools({ action: "activate", group: "gridmap" })`. As with every group, hiding is a prompt-size control, not an authorization boundary — a hidden tool name still routes when called directly.
+
+**Shared contracts.** `paths_hint` is the edited scene `res://` path (the `.tscn` being mutated). The five mutators are gated (`enforce` by default) and require a non-empty `paths_hint` even when `gate` is `off`. `gridmap_get_used_cells` is read-only and gate-free. `GridMap` is an engine API present in every 4.3+ build — no addon is required.
+
+### `godot_open_mcp_gridmap_create`
+
+- Route: `live`
+- Visibility group: `gridmap`
+- Read-only/mutating: mutating (gate `enforce`, `paths_hint` required)
+- Live editor requirement: requires the bridge
+
+Create a `GridMap` node (a `Node3D`) in the edited scene and return its NodeData. The new node's owner is the edited scene root; the scene is marked unsaved. Chain `node_path` straight into `gridmap_set_mesh_library` / `gridmap_set_cell`. `parent_node_path` defaults to the edited scene root; `position` (`"x,y,z"`) applies because `GridMap` derives from `Node3D`.
+
+**Input:**
+
+- `name` (optional) — name for the new `GridMap`.
+- `parent_node_path` (optional) — parent path relative to the edited scene root (`Main`, `Main/Level`, `/root/Main/Level`, `.`). Defaults to the root.
+- `position` (optional) — `"x,y,z"` applied to the `Node3D`.
+- `paths_hint` (required) — `["res://…tscn"]` (the edited scene).
+- `gate` (optional, default `enforce`) — `"enforce"` | `"warn"` | `"off"`.
+
+**Result:** NodeData (same shape as `node_create`).
+
+**Errors:** `paths_hint_required`, `no_edited_scene`, `parent_not_found`, `create_failed`.
+
+### `godot_open_mcp_gridmap_set_mesh_library`
+
+- Route: `live`
+- Visibility group: `gridmap`
+- Read-only/mutating: mutating (gate `enforce`, `paths_hint` required)
+- Live editor requirement: requires the bridge
+
+Assign an existing `MeshLibrary` resource (`res://` `.tres`/`.res`) to a `GridMap`. No `MeshLibrary` authoring — point this at an existing library (use `resource_create` to build one first if needed). After assignment the grid can be painted with `gridmap_set_cell`.
+
+**Input:**
+
+- `node_path` (required) — the `GridMap` to assign.
+- `mesh_library_path` (required) — `res://` (or `uid://`) path to an existing `MeshLibrary`. A non-`MeshLibrary` resource returns `resource_load_failed`.
+- `paths_hint` (required) — `["res://…tscn"]`.
+- `gate` (optional, default `enforce`) — `"enforce"` | `"warn"` | `"off"`.
+
+**Result:** `{ nodePath, meshLibraryPath }`.
+
+**Errors:** `paths_hint_required`, `missing_parameter`, `no_edited_scene`, `node_not_found`, `wrong_node_type`, `resource_not_found`, `resource_load_failed`.
+
+### `godot_open_mcp_gridmap_set_cell`
+
+- Route: `live`
+- Visibility group: `gridmap`
+- Read-only/mutating: mutating (gate `enforce`, `paths_hint` required)
+- Live editor requirement: requires the bridge
+
+Paint one cell on a `GridMap` at the 3D grid coordinate (`x`, `y`, `z`) with a `MeshLibrary` item id and an orientation. The grid must already have a `MeshLibrary` assigned (call `gridmap_set_mesh_library` first) — painting without one returns `mesh_library_required`, and an `item` id not present in the `MeshLibrary` returns `invalid_parameter`. `orientation` (0–23) defaults to `0`.
+
+**Input:**
+
+- `node_path` (required) — the `GridMap` to paint on.
+- `x`, `y`, `z` (required) — 3D map cell coordinates.
+- `item` (required) — `MeshLibrary` item id (must exist in the grid's library).
+- `orientation` (optional, default `0`) — Godot orthonormal-rotation ordinal (0–23).
+- `paths_hint` (required) — `["res://…tscn"]`.
+- `gate` (optional, default `enforce`) — `"enforce"` | `"warn"` | `"off"`.
+
+**Result:** `{ nodePath, x, y, z, item, orientation }` echoing the cell written.
+
+**Errors:** `paths_hint_required`, `missing_parameter`, `no_edited_scene`, `node_not_found`, `wrong_node_type`, `mesh_library_required`, `invalid_parameter` (item not in library).
+
+### `godot_open_mcp_gridmap_erase_cell`
+
+- Route: `live`
+- Visibility group: `gridmap`
+- Read-only/mutating: mutating (gate `enforce`, `paths_hint` required)
+- Live editor requirement: requires the bridge
+
+Erase one cell from a `GridMap` at the 3D grid coordinate (`x`, `y`, `z`). Erasing an already-empty cell is a no-op success (`erased:true`). Godot's `GridMap` has no dedicated erase method — erasing sets the item to the `INVALID_CELL_ITEM` sentinel (`-1`), the value `GetCellItem` returns for an empty cell.
+
+**Input:**
+
+- `node_path` (required) — the `GridMap` to erase from.
+- `x`, `y`, `z` (required) — 3D map cell coordinates.
+- `paths_hint` (required) — `["res://…tscn"]`.
+- `gate` (optional, default `enforce`) — `"enforce"` | `"warn"` | `"off"`.
+
+**Result:** `{ nodePath, x, y, z, erased:true }`.
+
+**Errors:** `paths_hint_required`, `missing_parameter`, `no_edited_scene`, `node_not_found`, `wrong_node_type`.
+
+### `godot_open_mcp_gridmap_get_used_cells`
+
+- Route: `live`
+- Visibility group: `gridmap`
+- Read-only/mutating: read-only
+- Live editor requirement: requires the bridge
+
+List the used cells on a `GridMap`, bounded by `max_results`. Each cell carries the 3D coordinate plus its item id and orientation so an agent can echo it back into `gridmap_set_cell`. Read-only (gate-free).
+
+**Input:**
+
+- `node_path` (required) — the `GridMap` to read.
+- `max_results` (optional, default `256`, hard cap `2000`) — remainder reported in `truncated`.
+
+**Result:** `{ cells: [ { x, y, z, item, orientation }, ... ], count, truncated }`.
+
+**Errors:** `missing_parameter`, `no_edited_scene`, `node_not_found`, `wrong_node_type`.
+
+### `godot_open_mcp_gridmap_clear`
+
+- Route: `live`
+- Visibility group: `gridmap`
+- Read-only/mutating: mutating (gate `enforce`, `paths_hint` required)
+- Live editor requirement: requires the bridge
+
+Clear every cell on a `GridMap` while keeping its `MeshLibrary` assignment. Idempotent on an empty grid. The result echoes the retained `mesh_library_path` so an agent can confirm the library was preserved. Use `gridmap_erase_cell` to remove a single cell.
+
+**Input:**
+
+- `node_path` (required) — the `GridMap` to clear.
+- `paths_hint` (required) — `["res://…tscn"]`.
+- `gate` (optional, default `enforce`) — `"enforce"` | `"warn"` | `"off"`.
+
+**Result:** `{ nodePath, meshLibraryPath, cleared:true }`.
+
+**Errors:** `paths_hint_required`, `missing_parameter`, `no_edited_scene`, `node_not_found`, `wrong_node_type`.
+
+## PhantomCamera tools
+
+PhantomCamera tools drive the third-party **phantom-camera** GDScript addon (Cinemachine-style virtual cameras by ramokz): `PhantomCamera3D` (default) / `PhantomCamera2D` nodes plus a `PhantomCameraHost` under a `Camera3D`/`Camera2D`. This is a **greenfield** pack — there is no in-repo Unity twin, and the addon classes are GDScript (not statically available to the C# bridge).
+
+This is a **`phantom_camera` group** family — hidden from `ListTools` until an agent activates it via `godot_open_mcp_manage_tools({ action: "activate", group: "phantom_camera" })`. As with every group, hiding is a prompt-size control, not an authorization boundary.
+
+**Runtime addon gate.** The addon classes register into ClassDB only when the addon is enabled. Every handler detects them via `ClassDB.ClassExists`; if the addon is absent, every tool surfaces `addon_not_found` — the architecture-faithful equivalent of a compile gate (Godot Open MCP has no per-pack compile inventory). Properties (priority / follow_mode / follow_target / look_at_mode / look_at_target) are read + written via duck-typed property access, so an addon version that renamed a property surfaces `execution_error` with the addon's own message rather than crashing.
+
+**Shared contracts.** `paths_hint` is the edited scene `res://` path. The five mutators are gated (`enforce` by default) and require a non-empty `paths_hint` even when `gate` is `off`. `phantom_camera_get` is read-only and gate-free. `follow_mode` is the addon's `FollowMode` enum ordinal (0 none / 1 glued / 2 simple_follow / 3 group_follow / 4 path_follow / 5 framed / 6 third_person); `look_at_mode` is the addon's `LookAtMode` ordinal (0 none / 1 mimic / 2 simple / 3 group). Both are passed straight through to the addon.
+
+**Addon setup reminder.** A PhantomCamera is inert until a `PhantomCameraHost` exists under a `Camera3D`/`Camera2D` in the scene and the camera has a priority. This pack does not auto-create a host — ensure one exists, then call `set_priority`.
+
+### `godot_open_mcp_phantom_camera_create`
+
+- Route: `live`
+- Visibility group: `phantom_camera`
+- Read-only/mutating: mutating (gate `enforce`, `paths_hint` required)
+- Live editor requirement: requires the bridge + the phantom-camera addon
+
+Create a phantom-camera virtual camera node (`PhantomCamera3D` by default, or `PhantomCamera2D` when `dimension` is `2d`) in the edited scene via `ClassDB.Instantiate` and return its NodeData. The new node's owner is the edited scene root; the scene is marked unsaved. Chain `node_path` straight into `set_priority` / `set_target` / `set_follow` / `set_look_at`.
+
+**Input:**
+
+- `name` (optional) — name for the new camera.
+- `parent_node_path` (optional) — parent path relative to the edited scene root. Defaults to the root.
+- `dimension` (optional, default `3d`) — `"2d"` | `"3d"` selects `PhantomCamera2D` vs `PhantomCamera3D`.
+- `position` (optional) — `"x,y,z"` (3D) or `"x,y"` (2D).
+- `paths_hint` (required) — `["res://…tscn"]`.
+- `gate` (optional, default `enforce`) — `"enforce"` | `"warn"` | `"off"`.
+
+**Result:** NodeData (same shape as `node_create`).
+
+**Errors:** `paths_hint_required`, `addon_not_found`, `no_edited_scene`, `parent_not_found`, `create_failed`.
+
+### `godot_open_mcp_phantom_camera_set_target`
+
+- Route: `live`
+- Visibility group: `phantom_camera`
+- Read-only/mutating: mutating (gate `enforce`, `paths_hint` required)
+- Live editor requirement: requires the bridge + the phantom-camera addon
+
+Set the addon's `follow_target` property to a resolved scene node — the "which node should this camera track" knob. Use `set_follow` for the follow MODE and `set_look_at` for the look-at target.
+
+**Input:**
+
+- `node_path` (required) — the `PhantomCamera2D` / `PhantomCamera3D` to mutate.
+- `target_node_path` (required) — the node the camera should follow.
+- `paths_hint` (required) — `["res://…tscn"]`.
+- `gate` (optional, default `enforce`) — `"enforce"` | `"warn"` | `"off"`.
+
+**Result:** `{ nodePath, targetSet:true }`.
+
+**Errors:** `paths_hint_required`, `addon_not_found`, `missing_parameter`, `no_edited_scene`, `node_not_found`, `wrong_node_type`, `execution_error`.
+
+### `godot_open_mcp_phantom_camera_set_priority`
+
+- Route: `live`
+- Visibility group: `phantom_camera`
+- Read-only/mutating: mutating (gate `enforce`, `paths_hint` required)
+- Live editor requirement: requires the bridge + the phantom-camera addon
+
+Set the addon's `priority` integer. Higher wins, so raising it above the currently-active `PhantomCamera` switches the active camera.
+
+**Input:**
+
+- `node_path` (required) — the camera to mutate.
+- `priority` (required) — priority integer (higher wins).
+- `paths_hint` (required) — `["res://…tscn"]`.
+- `gate` (optional, default `enforce`) — `"enforce"` | `"warn"` | `"off"`.
+
+**Result:** `{ nodePath, priority }`.
+
+**Errors:** `paths_hint_required`, `addon_not_found`, `missing_parameter`, `no_edited_scene`, `node_not_found`, `wrong_node_type`, `execution_error`.
+
+### `godot_open_mcp_phantom_camera_set_follow`
+
+- Route: `live`
+- Visibility group: `phantom_camera`
+- Read-only/mutating: mutating (gate `enforce`, `paths_hint` required)
+- Live editor requirement: requires the bridge + the phantom-camera addon
+
+Set the addon's `follow_mode` ordinal (required) and, when supplied, the follow target. `follow_mode` is the addon's `FollowMode` ordinal: `0` none / `1` glued / `2` simple_follow / `3` group_follow / `4` path_follow / `5` framed / `6` third_person.
+
+**Input:**
+
+- `node_path` (required) — the camera to mutate.
+- `follow_mode` (required) — `FollowMode` ordinal (0–6, see above).
+- `target_node_path` (optional) — follow target; set BEFORE the mode. Omit to change only the mode.
+- `paths_hint` (required) — `["res://…tscn"]`.
+- `gate` (optional, default `enforce`) — `"enforce"` | `"warn"` | `"off"`.
+
+**Result:** `{ nodePath, followMode, targetNodePath? }`.
+
+**Errors:** `paths_hint_required`, `addon_not_found`, `missing_parameter`, `no_edited_scene`, `node_not_found`, `wrong_node_type`, `execution_error`.
+
+### `godot_open_mcp_phantom_camera_set_look_at`
+
+- Route: `live`
+- Visibility group: `phantom_camera`
+- Read-only/mutating: mutating (gate `enforce`, `paths_hint` required)
+- Live editor requirement: requires the bridge + the phantom-camera addon
+
+Set the addon's `look_at_target` to a resolved scene node (required) and, when supplied, the `look_at_mode` ordinal. `look_at_mode` is the addon's `LookAtMode` ordinal: `0` none / `1` mimic / `2` simple / `3` group. When omitted the mode is left unchanged (only the target is set); an explicit `0` sets the mode to none.
+
+**Input:**
+
+- `node_path` (required) — the camera to mutate.
+- `target_node_path` (required) — the node the camera should look at.
+- `look_at_mode` (optional) — `LookAtMode` ordinal (0–3, see above). Omit to leave the mode unchanged.
+- `paths_hint` (required) — `["res://…tscn"]`.
+- `gate` (optional, default `enforce`) — `"enforce"` | `"warn"` | `"off"`.
+
+**Result:** `{ nodePath, targetNodePath, lookAtMode? }`.
+
+**Errors:** `paths_hint_required`, `addon_not_found`, `missing_parameter`, `no_edited_scene`, `node_not_found`, `wrong_node_type`, `execution_error`.
+
+### `godot_open_mcp_phantom_camera_get`
+
+- Route: `live`
+- Visibility group: `phantom_camera`
+- Read-only/mutating: read-only
+- Live editor requirement: requires the bridge + the phantom-camera addon
+
+Read the scalar configuration of a phantom-camera virtual camera — `priority`, `followMode`, `followTargetPath`, `lookAtMode`, `lookAtTargetPath`, plus the resolved `type`. Read-only (gate-free). A missing property on an older addon version degrades to `0` / `null` rather than crashing the read.
+
+**Input:**
+
+- `node_path` (required) — the camera to read.
+
+**Result:** `{ nodePath, type, priority, followMode, followTargetPath, lookAtMode, lookAtTargetPath }`. Target paths are `null` when unassigned.
+
+**Errors:** `addon_not_found`, `missing_parameter`, `no_edited_scene`, `node_not_found`, `wrong_node_type`.
 
 ## Offline fidelity limitations
 

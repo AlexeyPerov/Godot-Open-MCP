@@ -27,14 +27,14 @@ import {
 // Catalog invariants
 // ---------------------------------------------------------------------------
 
-test("TOOL_GROUPS has stable, unique, lowercase kebab-case ids", () => {
+test("TOOL_GROUPS has stable, unique, lowercase kebab/snake-case ids", () => {
   const ids = TOOL_GROUPS.map((g) => g.id);
   assert.equal(new Set(ids).size, ids.length, "group ids must be unique");
   for (const id of ids) {
     assert.equal(id, id.toLowerCase(), `${id} must be lowercase`);
     assert.ok(
-      /^[a-z][a-z0-9-]*$/.test(id),
-      `${id} must be lowercase kebab-case`,
+      /^[a-z][a-z0-9_-]*$/.test(id),
+      `${id} must be lowercase kebab-case or snake_case`,
     );
   }
 });
@@ -62,6 +62,8 @@ test("TOOL_GROUPS id order is pinned (stable across catalog edits)", () => {
       "spatial",
       "gate-intelligence",
       "input",
+      "gridmap",
+      "phantom_camera",
     ],
   );
 });
@@ -270,6 +272,41 @@ test("the spatial group is present, opt-in, and carries the P16.6 one-tool roste
   assert.equal(spatial!.defaultEnabled, false, "spatial must be opt-in");
   assert.deepEqual(toolsInGroup("spatial"), [
     "godot_open_mcp_spatial_query",
+  ]);
+});
+
+test("the gridmap group is present, opt-in, and carries the six-tool roster", () => {
+  // GridMap domain pack — six Godot 4.3+ GridMap tools (3D grid-based maps). The
+  // roster is create / set_mesh_library / set_cell / erase_cell / get_used_cells
+  // (read-only) / clear. GridMap is an engine API — no compile gate.
+  const gridmap = getGroup("gridmap");
+  assert.ok(gridmap, "gridmap group must exist");
+  assert.equal(gridmap!.defaultEnabled, false, "gridmap must be opt-in");
+  assert.deepEqual(toolsInGroup("gridmap"), [
+    "godot_open_mcp_gridmap_clear",
+    "godot_open_mcp_gridmap_create",
+    "godot_open_mcp_gridmap_erase_cell",
+    "godot_open_mcp_gridmap_get_used_cells",
+    "godot_open_mcp_gridmap_set_cell",
+    "godot_open_mcp_gridmap_set_mesh_library",
+  ]);
+});
+
+test("the phantom_camera group is present, opt-in, and carries the six-tool roster", () => {
+  // PhantomCamera domain pack — six tools for the third-party phantom-camera
+  // GDScript addon. The roster is create / set_target / set_priority / set_follow
+  // / set_look_at / get (read-only). Runtime addon-gated — surfaces
+  // addon_not_found when the addon is not enabled.
+  const phantomCamera = getGroup("phantom_camera");
+  assert.ok(phantomCamera, "phantom_camera group must exist");
+  assert.equal(phantomCamera!.defaultEnabled, false, "phantom_camera must be opt-in");
+  assert.deepEqual(toolsInGroup("phantom_camera"), [
+    "godot_open_mcp_phantom_camera_create",
+    "godot_open_mcp_phantom_camera_get",
+    "godot_open_mcp_phantom_camera_set_follow",
+    "godot_open_mcp_phantom_camera_set_look_at",
+    "godot_open_mcp_phantom_camera_set_priority",
+    "godot_open_mcp_phantom_camera_set_target",
   ]);
 });
 
@@ -518,7 +555,7 @@ test("every registered tool is meta, core, typed-editor, asset-intelligence, or 
   // Phase 12 domain packs (tilemap / navigation / particles / animation / csg),
   // the Phase 16 settings + materials + lighting + audio + ui + spatial packs,
   // and the Phase 18 input pack.
-  const shippedDomainGroups = new Set(["tilemap", "navigation", "particles", "animation", "csg", "settings", "materials", "lighting", "audio", "ui", "spatial", "gate-intelligence", "input"]);
+  const shippedDomainGroups = new Set(["tilemap", "navigation", "particles", "animation", "csg", "settings", "materials", "lighting", "audio", "ui", "spatial", "gate-intelligence", "input", "gridmap", "phantom_camera"]);
   for (const tool of ALL_TOOLS) {
     const g = groupFor(tool.name);
     if (g === null) continue; // meta-tool

@@ -125,6 +125,18 @@ import { inputMapGet } from "./input-map-get.js";
 import { inputMapActionAdd } from "./input-map-action-add.js";
 import { inputMapActionSetEvents } from "./input-map-action-set-events.js";
 import { dialogPolicySet } from "./dialog-policy-set.js";
+import { gridmapCreate } from "./gridmap-create.js";
+import { gridmapSetMeshLibrary } from "./gridmap-set-mesh-library.js";
+import { gridmapSetCell } from "./gridmap-set-cell.js";
+import { gridmapEraseCell } from "./gridmap-erase-cell.js";
+import { gridmapGetUsedCells } from "./gridmap-get-used-cells.js";
+import { gridmapClear } from "./gridmap-clear.js";
+import { phantomCameraCreate } from "./phantom-camera-create.js";
+import { phantomCameraSetTarget } from "./phantom-camera-set-target.js";
+import { phantomCameraSetPriority } from "./phantom-camera-set-priority.js";
+import { phantomCameraSetFollow } from "./phantom-camera-set-follow.js";
+import { phantomCameraSetLookAt } from "./phantom-camera-set-look-at.js";
+import { phantomCameraGet } from "./phantom-camera-get.js";
 
 /** Ordered list of every tool exposed over stdio MCP. */
 export const ALL_TOOLS: Tool[] = [
@@ -500,4 +512,33 @@ export const ALL_TOOLS: Tool[] = [
   // Always-visible meta-tool (no group) — an agent must reach it to clear a modal jamming the
   // tools it needs. Phase 18's lowest-priority sub-item (high effort, low value, opt-in).
   dialogPolicySet,
+  // GridMap domain pack: six typed tools for Godot 4.3+ GridMap (3D grid-based level
+  // construction), group `gridmap` (hidden until activated via manage_tools). create makes a
+  // GridMap node; set_mesh_library assigns an existing MeshLibrary resource; set_cell /
+  // erase_cell paint/remove single cells via the 3D grid coordinate (x, y, z) + item +
+  // orientation; get_used_cells lists used cells (read-only, bounded); clear empties every cell
+  // while keeping the MeshLibrary. The five mutators default to gate "enforce" and require
+  // paths_hint scoped to the edited scene. get_used_cells is read-only (gate-free). GridMap is
+  // an engine API — no compile gate.
+  gridmapCreate,
+  gridmapSetMeshLibrary,
+  gridmapSetCell,
+  gridmapEraseCell,
+  gridmapGetUsedCells,
+  gridmapClear,
+  // PhantomCamera domain pack: six typed tools for the third-party phantom-camera GDScript
+  // addon (Cinemachine-style virtual cameras), group `phantom_camera` (hidden until activated
+  // via manage_tools). create makes a PhantomCamera3D (default) / PhantomCamera2D node;
+  // set_target sets the follow target node; set_priority sets the priority int (higher wins);
+  // set_follow sets the follow mode ordinal (+ optional target); set_look_at sets the look-at
+  // target node (+ optional mode); get reads the camera's scalar config (read-only). The five
+  // mutators default to gate "enforce" and require paths_hint scoped to the edited scene. get
+  // is read-only (gate-free). Runtime addon gate: the addon classes are GDScript, so every
+  // handler detects them via ClassDB and surfaces addon_not_found when the addon is absent.
+  phantomCameraCreate,
+  phantomCameraSetTarget,
+  phantomCameraSetPriority,
+  phantomCameraSetFollow,
+  phantomCameraSetLookAt,
+  phantomCameraGet,
 ];
