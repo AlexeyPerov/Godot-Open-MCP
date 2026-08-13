@@ -75,6 +75,11 @@ export const MUTATION_EXPLAIN_TOOL = "godot_open_mcp_mutation_explain";
 // so there is intentionally no `batch` route); like restart_editor / resource_pressure, the
 // tool does its own bounded OS work without a bridge round-trip.
 export const COMPILE_CHECK_TOOL = "godot_open_mcp_compile_check";
+// P18.4 — dialog_policy_set: detect (and under an opted-in policy, dismiss) a blocking Godot
+// editor modal via desktop automation (osascript / xdotool / PowerShell BM_CLICK). Local: a
+// blocking modal stalls the bridge's main thread too, so the tool may not depend on the bridge
+// for its probe path. Always-visible meta-tool.
+export const DIALOG_POLICY_SET_TOOL = "godot_open_mcp_dialog_policy_set";
 
 const LOCAL_TOOLS: ReadonlySet<string> = new Set([
   CAPABILITIES_TOOL,
@@ -88,6 +93,7 @@ const LOCAL_TOOLS: ReadonlySet<string> = new Set([
   GATE_BUDGET_ESTIMATE_TOOL,
   MUTATION_EXPLAIN_TOOL,
   COMPILE_CHECK_TOOL,
+  DIALOG_POLICY_SET_TOOL,
 ]);
 
 /**

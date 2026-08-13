@@ -62,6 +62,7 @@ import {
   GATE_BUDGET_ESTIMATE_TOOL,
   MUTATION_EXPLAIN_TOOL,
   COMPILE_CHECK_TOOL,
+  DIALOG_POLICY_SET_TOOL,
 } from "./capabilities/route-policy.js";
 import {
   previewImpact,
@@ -148,6 +149,13 @@ import {
   GODOT_PATH_ENV_OVERRIDE,
   type CompileCheckResult,
 } from "./compile-check.js";
+import { probeGodotDialog, setActiveDialogPolicyOverride } from "./dialog-dismiss.js";
+import {
+  DIALOG_POLICY_VALUES,
+  DEFAULT_DIALOG_POLICY,
+  parseDialogPolicy,
+  type DialogPolicy,
+} from "./dialog-policy.js";
 
 /**
  * Tool name for the live `scene_list_opened` handler, used by
@@ -423,6 +431,9 @@ export class ToolRouter implements Router {
     }
     if (toolName === COMPILE_CHECK_TOOL) {
       return this.routeCompileCheck(args);
+    }
+    if (toolName === DIALOG_POLICY_SET_TOOL) {
+      return this.routeDialogPolicySet(args);
     }
     return this.routeLive(toolName, args);
   }
@@ -804,6 +815,115 @@ export class ToolRouter implements Router {
       },
       "local",
       routeMeta,
+    );
+  }
+
+  // ── P18.4 — local `dialog_policy_set` (modal detect/dismiss) ─────────────
+
+  /**
+   * `godot_open_mcp_dialog_policy_set` — set the per-session dialog-dismiss
+   * policy and (when `probe: true`) run a one-shot desktop probe that detects a
+   * blocking Godot modal and, under a clicking policy (auto/recover/cancel),
+   * dismisses it. Platform-specific (macOS osascript + Accessibility; Linux
+   * xdotool X11-only; Windows Win32 BM_CLICK). Local route — a blocking modal
+   * stalls the bridge's main thread too, so the probe may not depend on it.
+   *
+   * Default policy `ignore` is detect-only (reports the modal without clicking).
+   * `unsaved_changes` is blocked unless the GODOT_OPEN_MCP_ALLOW_UNSAVED_DISMISS=1
+   * opt-in is set. `detect_only: true` forces read-only detection regardless of
+   * policy. A `probe: false` call only sets the policy (if `policy` is given)
+   * and returns the resolved policy — no desktop action.
+   *
+   * `isError` matrix: an `error` outcome (osascript/PowerShell/xdotool failure)
+   * is a hard error so the operator sees the platform/tooling problem. All other
+   * outcomes (dismissed / detected / not_found / blocked / unsupported) are
+   * successful results — `unsupported` is a graceful no-op, not a failure.
+   */
+  private async routeDialogPolicySet(
+    args: Record<string, unknown>,
+  ): Promise<CallToolResult> {
+    const routeMeta: RouteMeta = { route: "local" };
+
+    // 1. Resolve the policy argument (if any) and persist it as the per-session
+    //    override. An invalid value is rejected up front.
+    let requestedPolicy: DialogPolicy | undefined;
+    if (args.policy !== undefined) {
+      if (typeof args.policy !== "string") {
+        return sourceResult(
+          {
+            error: {
+              code: "invalid_policy",
+              message: "`policy` must be a string.",
+            },
+          },
+          "local",
+          routeMeta,
+          true,
+        );
+      }
+      const norm = args.policy.trim().toLowerCase();
+      if (!(DIALOG_POLICY_VALUES as readonly string[]).includes(norm)) {
+        return sourceResult(
+          {
+            error: {
+              code: "invalid_policy",
+              message:
+                `Unknown dialog policy '${args.policy}'. Expected one of ` +
+                `${DIALOG_POLICY_VALUES.join(", ")}.`,
+              accepted: [...DIALOG_POLICY_VALUES],
+            },
+          },
+          "local",
+          routeMeta,
+          true,
+        );
+      }
+      requestedPolicy = norm as DialogPolicy;
+      setActiveDialogPolicyOverride(requestedPolicy);
+    }
+
+    const probe = args.probe === true;
+    const detectOnly = args.detect_only === true;
+
+    // 2. No probe → report the resolved policy only. Mirrors the tool name's
+    //    "set policy" intent and gives the agent a cheap confirmation call.
+    if (!probe) {
+      const policy =
+        requestedPolicy ?? parseDialogPolicy(process.env) ?? DEFAULT_DIALOG_POLICY;
+      return sourceResult(
+        {
+          action: "policy_set",
+          policy,
+          policyOverridden: requestedPolicy !== undefined,
+          allowUnsavedDismiss:
+            process.env.GODOT_OPEN_MCP_ALLOW_UNSAVED_DISMISS === "1",
+          clickPolicy:
+            policy === "auto" || policy === "recover" || policy === "cancel",
+          message:
+            requestedPolicy === undefined
+              ? "Policy unchanged (no `policy` argument). Pass `probe: true` to run a detection/dismissal."
+              : `Per-session policy set to '${policy}'. Pass \`probe: true\` to run a detection/dismissal.`,
+        },
+        "local",
+        routeMeta,
+      );
+    }
+
+    // 3. Probe. probeGodotDialog never throws — every failure maps to an outcome.
+    const result = await probeGodotDialog({ detectOnly });
+
+    // outcome `error` is a hard error (platform/tooling failure the operator
+    // must act on). Everything else (incl. `unsupported`) is a successful
+    // result carrying the outcome detail.
+    const isError = result.outcome === "error";
+    return sourceResult(
+      {
+        action: "probe",
+        ...result,
+      },
+      "local",
+      routeMeta,
+      isError,
     );
   }
 

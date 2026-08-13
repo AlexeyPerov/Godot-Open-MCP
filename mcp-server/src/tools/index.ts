@@ -124,6 +124,7 @@ import { compileCheck } from "./compile-check.js";
 import { inputMapGet } from "./input-map-get.js";
 import { inputMapActionAdd } from "./input-map-action-add.js";
 import { inputMapActionSetEvents } from "./input-map-action-set-events.js";
+import { dialogPolicySet } from "./dialog-policy-set.js";
 
 /** Ordered list of every tool exposed over stdio MCP. */
 export const ALL_TOOLS: Tool[] = [
@@ -490,4 +491,13 @@ export const ALL_TOOLS: Tool[] = [
   inputMapGet,
   inputMapActionAdd,
   inputMapActionSetEvents,
+  // P18.4 — dialog_policy_set: detect (and under an opted-in policy, dismiss) a Godot
+  // editor modal that blocks a run (unsaved-changes save prompt / reimport / script-reload).
+  // Platform-specific desktop automation (macOS AppleScript + Accessibility; Linux xdotool
+  // X11-only; Windows Win32 BM_CLICK). Local route — a blocking modal stalls the bridge too,
+  // so the tool may not depend on it. Default policy `ignore` is detect-only (no click);
+  // `unsaved_changes` is blocked unless the GODOT_OPEN_MCP_ALLOW_UNSAVED_DISMISS=1 opt-in is set.
+  // Always-visible meta-tool (no group) — an agent must reach it to clear a modal jamming the
+  // tools it needs. Phase 18's lowest-priority sub-item (high effort, low value, opt-in).
+  dialogPolicySet,
 ];

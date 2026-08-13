@@ -95,6 +95,10 @@ const ALWAYS_VISIBLE_TOOLS: ReadonlySet<string> = new Set([
   // read_compile_errors). Always-visible so an agent can verify a fix compiles
   // without depending on any group being active.
   "godot_open_mcp_compile_check",
+  // P18.4 — dialog_policy_set detects (and under an opted-in policy, dismisses)
+  // a Godot modal blocking a run. Always-visible so an agent can clear a modal
+  // that is jamming the very tools it needs, regardless of which groups are on.
+  "godot_open_mcp_dialog_policy_set",
 ]);
 
 /**

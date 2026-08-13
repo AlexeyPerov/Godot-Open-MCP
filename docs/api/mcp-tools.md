@@ -19,7 +19,7 @@ For the bridge HTTP contract (`/ping`, `/tools/*`, `/events`), see [`bridge-http
 3. bridge_status / ping  → confirm the editor bridge is reachable
 4. typed read / mutation → node_find → node_create → node_modify → scene_save
 5. gate review           → checkpoint_create → mutate → delta (or validate_edit)
-6. recovery / fix        → apply_fix (dry_run first) or read_compile_errors when the bridge is dead; compile_check to verify a fix builds
+6. recovery / fix        → apply_fix (dry_run first) or read_compile_errors when the bridge is dead; compile_check to verify a fix builds; dialog_policy_set (probe:true) to detect/clear a blocking Godot modal
 ```
 
 For deeper agent workflow guidance (when to checkpoint, how to chain reads into mutations, how to recover from a dead bridge), see the [agent skill](../skills.md).
@@ -61,6 +61,7 @@ The table below is the published view of `ALL_TOOLS`. The `scripts/check-tool-do
 | `godot_open_mcp_csg_set_operation` | csg | live | csg | editor state | enforce | Set the boolean operation (union / intersection / subtraction) on any CSG shape. |
 | `godot_open_mcp_csg_sphere_create` | csg | live | csg | editor state | enforce | Create a `CsgSphere3D` primitive node (+ optional `radius` / `radial_segments` / `rings` / `smooth_faces` + `operation`). |
 | `godot_open_mcp_delta` | core | live | core | no | n/a | Compare current state against a prior checkpoint and return the new/resolved issue delta. |
+| `godot_open_mcp_dialog_policy_set` | core | local | always visible | OS desktop (when `probe:true` + clicking policy) | n/a | Detect (and under an opted-in policy, dismiss) a blocking Godot editor modal — unsaved-changes save prompt, reimport prompt, script-reload prompt — via platform-specific desktop automation (macOS AppleScript, Linux xdotool, Windows BM_CLICK). Default policy `ignore` is detect-only. |
 | `godot_open_mcp_editor_application_get_state` | editor | live | typed-editor | no | n/a | Truthful play-process snapshot (`isPlaying`, `playingScene`, `editorVersion`, `observedAt`). |
 | `godot_open_mcp_editor_application_set_state` | editor | live | typed-editor | editor state | enforce | Start (main/current/custom scene) or stop the play process with a bounded observation window. |
 | `godot_open_mcp_editor_selection_get` | editor | live | typed-editor | no | n/a | Read the editor's node selection as shallow NodeData + the active node. |
@@ -175,7 +176,7 @@ Every registered tool follows exactly one route policy. The policy is descriptiv
 | Policy | Meaning |
 |---|---|
 | **live** | The CallTool handler POSTs to the bridge; the bridge handler runs on the editor main thread. Requires the bridge; no disk substitute. The default for any tool not in an override set. |
-| **local** | The CallTool handler resolves the response in the MCP process — no `POST /tools/{name}` bridge hop. `bridge_status` and `pull_events` may touch the live transport (one bounded `/ping` probe; one SSE-driven queue drain) but the call is synthesized locally; the bridge has no dedicated handler for them. `restart_editor` acts on the OS process directly (`process.kill` / `taskkill`) — the bridge is the thing that dies on a hang, so it may not depend on it for its primary path (it consults the bridge only opportunistically for the `/ping` reachability signal and the dirty-scene warning). `resource_pressure` samples the live Godot PID's fd/handle count server-side (`lsof` / `/proc` / `Get-Process.HandleCount`) — the bridge is the thing that dies on resource exhaustion, so the probe must not depend on it. `generate_skill` reads `project.godot` + the capability catalog + a project type scan in-process and writes the client skill dirs from `skills/client-paths.json` — no bridge round-trip. `compile_check` spawns a fresh build (`dotnet build` / `godot --headless`) to verify the project compiles — no live bridge required; it refuses (`project_locked`) under a live editor. |
+| **local** | The CallTool handler resolves the response in the MCP process — no `POST /tools/{name}` bridge hop. `bridge_status` and `pull_events` may touch the live transport (one bounded `/ping` probe; one SSE-driven queue drain) but the call is synthesized locally; the bridge has no dedicated handler for them. `restart_editor` acts on the OS process directly (`process.kill` / `taskkill`) — the bridge is the thing that dies on a hang, so it may not depend on it for its primary path (it consults the bridge only opportunistically for the `/ping` reachability signal and the dirty-scene warning). `resource_pressure` samples the live Godot PID's fd/handle count server-side (`lsof` / `/proc` / `Get-Process.HandleCount`) — the bridge is the thing that dies on resource exhaustion, so the probe must not depend on it. `generate_skill` reads `project.godot` + the capability catalog + a project type scan in-process and writes the client skill dirs from `skills/client-paths.json` — no bridge round-trip. `compile_check` spawns a fresh build (`dotnet build` / `godot --headless`) to verify the project compiles — no live bridge required; it refuses (`project_locked`) under a live editor. `dialog_policy_set` probes the OS desktop for a blocking Godot modal (macOS `osascript`, Linux `xdotool`, Windows Win32 `BM_CLICK`) — a blocking modal stalls the bridge's main thread too, so the probe may not depend on the bridge for its primary path. |
 | **offline** | The CallTool handler NEVER probes the bridge and NEVER POSTs to it — it reads disk/config straight. Used for diagnostics that must work in the exact state a dead bridge describes (the addon is not running its listener). |
 | **live-first** | The CallTool handler probes the bridge once; if reachable it forwards to the live handler (reflecting unsaved editor state / authoritative import metadata), otherwise it reads from disk with no editor required. A live semantic error (e.g. `scene_not_edited`, `directory_not_found`) is authoritative and does NOT trigger the fallback — only an unreachable bridge does. |
 
@@ -190,7 +191,7 @@ Every registered tool follows exactly one route policy. The policy is descriptiv
 
 ### Tool groups and session visibility
 
-The MCP server filters `ListTools` through a per-session `ToolSessionState` so the prompt surface stays small. Every registered tool maps to exactly one group via `groupFor(toolName)`; meta-tools (`capabilities`, `bridge_status`, `pull_events`, `read_compile_errors`, `manage_tools`, `restart_editor`, `resource_pressure`, `generate_skill`, `compile_check`) map to `null` and are always visible.
+The MCP server filters `ListTools` through a per-session `ToolSessionState` so the prompt surface stays small. Every registered tool maps to exactly one group via `groupFor(toolName)`; meta-tools (`capabilities`, `bridge_status`, `pull_events`, `read_compile_errors`, `manage_tools`, `restart_editor`, `resource_pressure`, `generate_skill`, `compile_check`, `dialog_policy_set`) map to `null` and are always visible.
 
 | Group id | Default-on | Covers |
 |---|---|---|
@@ -273,6 +274,7 @@ When the bridge is unreachable:
 - `restart_editor` is the acting recovery tool when the editor is truly wedged (crash marker in the log, or frozen: live PID + unreachable `/ping` + stale log). It terminates the hung Godot process after explicit `confirm: true`; relaunch is manual (via the Hub/CLI). It refuses when the hang signature is absent — never restart on a fixable compile failure.
 - `resource_pressure` is the proactive prediction tool: it samples the live Godot PID's fd/handle count server-side and reports headroom + trend, catching a slow leak across recompiles/reloads BEFORE the editor wedges. The probe does not require the bridge (the bridge is the thing that dies on exhaustion).
 - `compile_check` is the ACTIVE build trigger (counterpart to `read_compile_errors`'s passive log read): it spawns a fresh `dotnet build` / `godot --headless` build to verify a fix compiles without re-opening the editor or depending on the bridge. It refuses (`project_locked`) when a live editor holds the project — close/kill the editor first, then retry. Typical recovery: `read_compile_errors` (diagnose) → fix source → `restart_editor`/close → `compile_check` (verify) → relaunch.
+- `dialog_policy_set` is the modal-block recovery tool: when a run appears stuck because Godot surfaced a native modal (unsaved-changes save prompt, reimport prompt, script-reload prompt), it probes the OS desktop for a Godot-owned modal and — under an opted-in policy (`auto`/`recover`/`cancel`) — clicks the policy-selected button. Default policy `ignore` is DETECT-ONLY (reports the modal without clicking); the destructive unsaved-changes prompt is blocked unless the `GODOT_OPEN_MCP_ALLOW_UNSAVED_DISMISS=1` opt-in is set. The probe runs `local` because a blocking modal stalls the bridge's main thread too. macOS needs an Accessibility grant; Linux needs `xdotool` (X11-only); Windows needs no extra setup.
 - Every other live tool surfaces a structured transport error.
 
 ### No batch route
@@ -283,7 +285,7 @@ Godot has no headless editor batch equivalent. There is no `batch` policy, no `b
 
 | Family | Tools | Mutating | Notes |
 |---|---|---|---|
-| core | `ping`, `validate_edit`, `checkpoint_create`, `delta`, `apply_fix`, `capabilities`, `bridge_status`, `pull_events`, `read_compile_errors`, `manage_tools`, `baseline_create`, `regression_check`, `restart_editor`, `resource_pressure`, `generate_skill`, `compile_check` | `apply_fix` + `restart_editor` (OS process kill) + `generate_skill` (writes client skill dirs when `write:true`) + `compile_check` (spawns a build) | Always visible in `ListTools`. `manage_tools` is the per-session visibility mutator. `baseline_create`/`regression_check` are the CI regression gate; `restart_editor` is the wedged-editor recovery (kill-only — relaunch is manual); `resource_pressure` is the proactive fd/handle leak warning (counterpart to `restart_editor`); `generate_skill` emits a project-specific `SKILL.md` merged with the canonical playbook; `compile_check` is the triggered build (active counterpart to `read_compile_errors`'s passive log read). |
+| core | `ping`, `validate_edit`, `checkpoint_create`, `delta`, `apply_fix`, `capabilities`, `bridge_status`, `pull_events`, `read_compile_errors`, `manage_tools`, `baseline_create`, `regression_check`, `restart_editor`, `resource_pressure`, `generate_skill`, `compile_check`, `dialog_policy_set` | `apply_fix` + `restart_editor` (OS process kill) + `generate_skill` (writes client skill dirs when `write:true`) + `compile_check` (spawns a build) + `dialog_policy_set` (OS desktop click when `probe:true` + clicking policy) | Always visible in `ListTools`. `manage_tools` is the per-session visibility mutator. `baseline_create`/`regression_check` are the CI regression gate; `restart_editor` is the wedged-editor recovery (kill-only — relaunch is manual); `resource_pressure` is the proactive fd/handle leak warning (counterpart to `restart_editor`); `generate_skill` emits a project-specific `SKILL.md` merged with the canonical playbook; `compile_check` is the triggered build (active counterpart to `read_compile_errors`'s passive log read); `dialog_policy_set` detects (and under an opted-in policy dismisses) a blocking Godot modal. |
 | node | `node_find`, `node_create`, `node_modify`, `node_set_parent`, `node_duplicate`, `node_delete` | create/modify/set-parent/duplicate/delete | Scene-tree operations. |
 | scene | `scene_open`, `scene_save`, `scene_list_opened`, `scene_get_data`, `scene_create` | open/save/create | Scene lifecycle + read. |
 | resource | `resource_find`, `resource_get_data`, `resource_create`, `resource_modify`, `resource_move`, `resource_delete` | create/modify/move/delete | `.tres`/`.res` discovery + bounded property inspection (read-only) + gated create/modify + file lifecycle move/delete. |
@@ -705,6 +707,51 @@ There is no `batch` route. Godot has no headless editor, so the tool detects the
 **Errors (isError: true):** `project_not_found` / `project_config_unreadable` (bad project root), `project_locked` (live editor holds the project), `builder_not_found` (`dotnet`/`godot` not on PATH), `compile_check_timeout` (build killed at the cap), `offline_error` (unexpected). A build that ran to completion is NOT a hard error even when it produced compile errors — those are the tool's successful diagnostic output (mirrors `read_compile_errors`).
 
 **Limitations.** Project-wide GDScript checking only catches scripts loaded at startup (autoload + main scene). C# is checked across the whole solution/project via `dotnet build`. The build runs against the on-disk source; unsaved editor changes are not included (close the editor first). A read-only build still writes `obj`/`bin` outputs like any compile.
+
+### `godot_open_mcp_dialog_policy_set`
+
+- Route: `local` (probes the OS desktop directly — a blocking modal stalls the bridge's main thread too, so the probe may not depend on the bridge for its primary path)
+- Visibility group: always visible (meta-tool — an agent must reach it to clear a modal jamming the tools it needs)
+- Read-only/mutating: read-only detect by default; performs an OS desktop click only under an opted-in clicking policy with `probe: true`
+- Live editor requirement: none (the editor is the thing showing the modal)
+
+Detect (and under an opted-in policy, dismiss) a Godot editor modal that is blocking a run — the unsaved-changes save prompt, a reimport prompt, or a script-reload prompt. Use when a tool call appears stuck and you suspect a native Godot dialog is up (a mutating tool left a scene dirty and Godot surfaced its save prompt, or an external process rewrote a `.tscn`/`.import` and Godot is asking how to reconcile).
+
+Platform-specific desktop automation, dispatched per OS:
+
+- **macOS** — AppleScript via `osascript`. Enumerates the Godot process's windows, classifies the title, and clicks a named button per the policy token table. **Requires an Accessibility grant** for the process running the MCP server (System Settings → Privacy & Security → Accessibility) — grant it once; without it the probe returns `error` with a not-permitted message.
+- **Linux/X11** — `xdotool`. Searches for Godot-owned windows by title fragment, activates the window, and sends Return (clicks the focused/default button). **Wayland is unsupported** (xdotool is X11-only) → `unsupported`.
+- **Windows** — Win32 `SendMessageW(BM_CLICK)` via PowerShell. Enumerates Godot-owned windows, classifies the title, and clicks the first policy-token-matching Button child. No extra setup.
+
+**Policies** (`ignore` default — DETECT-ONLY; the operator opts in to clicking):
+
+| Policy | Behavior |
+|---|---|
+| `ignore` (default) | Detect-only — report the blocking modal and its buttons WITHOUT clicking. |
+| `auto` / `recover` | Click the safest forward-progress button (Reimport on a reimport prompt; Reload on a script-reload prompt; Save on an unsaved prompt only with the destructive opt-in). |
+| `cancel` | Click Cancel / Don't Save / Close / No. |
+| `manual` | Fully opted out — no detect, no click. |
+
+**Safety:** `unsaved_changes` is destructive under every policy ("Don't Save" loses work, "Save" persists potentially-unwanted state), so it is **blocked** unless the `GODOT_OPEN_MCP_ALLOW_UNSAVED_DISMISS=1` env opt-in is set, regardless of policy. The env var `GODOT_OPEN_MCP_DIALOG_POLICY=auto|recover|cancel|manual|ignore` sets the default policy for the session; a `policy` argument to this tool sets a per-session override (override > env > default). `detect_only: true` forces read-only detection regardless of policy.
+
+**Input:**
+
+- `policy` (optional, one of `ignore` / `auto` / `recover` / `cancel` / `manual`) — set the per-session policy. When omitted, the active session policy is unchanged.
+- `probe` (optional, default `false`) — when `true`, run a one-shot desktop probe NOW: detect any blocking Godot modal and, under a clicking policy, dismiss it. When `false`, the call only sets the policy (if `policy` is given) and returns the resolved policy — no desktop action.
+- `detect_only` (optional, default `false`, with `probe: true`) — force read-only detection (report the modal + buttons without clicking) regardless of policy.
+
+**Result envelope:** `{ action, policy, policyOverridden, allowUnsavedDismiss, platform, clickPolicy, detectOnly, outcome, dialog?, button?, detectedButtons?, message?, platformNote }`.
+
+- `action` — `policy_set` (no probe) | `probe`.
+- `policy` — the effective policy for this call (override > env > default).
+- `outcome` — `dismissed` | `detected` | `not-found` | `blocked` | `unsupported` | `error`.
+- `dialog` — matched kind (`unsaved_changes` | `reimport` | `script_reload`), when one was found.
+- `button` — the label clicked (`dismissed`); `detectedButtons` — visible button labels (`detected`, macOS/Windows only — Linux cannot enumerate).
+- `platformNote` — the per-OS permission/tooling note (macOS Accessibility grant; Linux xdotool; Windows none).
+
+**Errors (isError: true):** `invalid_policy` (unknown `policy` value); an `error` outcome (osascript/PowerShell/xdotool failure — typically the macOS Accessibility grant missing). All other outcomes — including `unsupported` (graceful no-op) and `blocked` (destructive kind declined) — are successful results carrying the detail.
+
+**Limitations.** Godot dialog titles vary by version and localization; the title-fragment classifier is heuristic (the per-OS probe scopes the match to Godot-owned windows to keep false positives low). The macOS/Linux/Windows desktop action cannot be exercised in CI; only the pure policy tables and the script shapes are unit-tested. The probe is one-shot — re-invoke it if a modal re-appears. See ADR-008 for the design rationale.
 
 ## Gate / verify tools
 
